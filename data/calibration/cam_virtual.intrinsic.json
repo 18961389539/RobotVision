@@ -1,0 +1,9 @@
+{
+  "CameraId": "cam_virtual",
+  "Width": 1280,
+  "Height": 960,
+  "CameraMatrix": [1000, 0, 640, 0, 1000, 480, 0, 0, 1],
+  "DistCoeffs": [0, 0, 0, 0, 0],
+  "Rms": 0.0,
+  "CalibratedAt": "2026-08-22T00:00:00"
+}

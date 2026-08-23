@@ -1,0 +1,26 @@
+# 统一换行符策略：文本文件以 LF 入库（GitHub Actions/Linux 构建与 Windows 开发行为一致）
+* text=auto
+
+*.cs text eol=lf
+*.csproj text eol=lf
+*.sln text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.xaml text eol=lf
+*.props text eol=lf
+*.targets text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.editorconfig text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+
+# PowerShell 脚本保留 CRLF（Windows 原生）
+*.ps1 text eol=crlf
+
+# 二进制文件
+*.png binary
+*.jpg binary
+*.onnx binary
+*.dll binary
+*.exe binary

@@ -1,0 +1,167 @@
+using System.Net;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using RobotVision.Infrastructure.Communication;
+
+namespace RobotVision.Hosting;
+
+/// <summary>
+/// 服务参数的写回与同步：把超时/队列/并发/连接上限/白名单/失败留存/网络端点
+/// 写入 appsettings.json（保留其他节点），并同步内存 AppConfig 单例。
+/// 分两层语义：热参数（超时/队列/并发/连接上限/白名单/留存）由调用方同时应用到
+/// 运行中的管理器立即生效；网络端点（IP/端口）改动经 Restart 热重启监听，
+/// 失败时由调用方回滚提示（本类只负责落盘与内存同步）。
+/// 校验集中在本层（Save 抛 InvalidDataException），非 UI 调用方同样受保护。
+/// </summary>
+public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
+{
+    private readonly string _settingsPath =
+        settingsPath ?? Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
+
+    public string SettingsPath => _settingsPath;
+
+    /// <summary>
+    /// 落盘并同步内存配置后触发的运行时同步回调（组装层注入）：
+    /// 把可热应用的参数同步到运行中的管理器（TcpServerManager/VisionService 等），
+    /// 使任何调用方（不限于 UI）保存后运行时即生效，无需调用方逐个手动应用。
+    /// 不可热应用的参数（MaxConcurrent/TcpBacklog 首次固化）由回调内显式跳过并记录。
+    /// </summary>
+    public Action<AppConfig>? RuntimeSync { get; set; }
+
+    /// <summary>
+    /// 保存全部可管理参数：校验 → 落盘（其他节点原样保留）→ 同步内存配置。
+    /// 返回需要重启才能生效的参数名列表（当前为空：端点可热重启；保留返回值以兼容扩展）。
+    /// </summary>
+    public IReadOnlyList<string> Save(ServiceSettingsValues values)
+    {
+        Validate(values);
+
+        // 反向联动校验：总超时必须大于所有 Basler 相机的取图超时，
+        // 否则相机取图超时将表现为 1008（处理超时）而非 1003（取图失败），排障困难
+        var conflicts = cfg.Cameras
+            .Where(c => string.Equals(c.Type, "Basler", StringComparison.OrdinalIgnoreCase))
+            .Where(c => c.GrabTimeoutMs >= values.TimeoutMs)
+            .Select(c => $"{c.Id}(GrabTimeoutMs={c.GrabTimeoutMs})")
+            .ToList();
+        if (conflicts.Count > 0)
+            throw new InvalidDataException(
+                $"相机 {string.Join("、", conflicts)} 的取图超时不小于新的总超时 {values.TimeoutMs}ms，" +
+                "取图超时将表现为 1008 而非 1003，请先调大总超时或调小 GrabTimeoutMs");
+
+        // 原子读-改-写：整段"读取→变更→落盘"在 JsonAtomicWrite 同一把进程内静态锁下执行，
+        // 与其他写方（CameraConfigStore/LightingConfigStore）串行化，杜绝并发保存互相覆盖
+        JsonAtomicWrite.Update(_settingsPath, Indented, obj =>
+        {
+            obj["TimeoutMs"] = values.TimeoutMs;
+            obj["MaxQueueDepth"] = values.MaxQueueDepth;
+            obj["MaxConcurrent"] = values.MaxConcurrent;
+            obj["TcpBacklog"] = values.TcpBacklog;
+            obj["MaxConnections"] = values.MaxConnections;
+            obj["IpAddress"] = values.IpAddress;
+            obj["TcpPort"] = values.TcpPort;
+            obj["IpWhitelist"] = JsonSerializer.SerializeToNode(values.IpWhitelist, Indented);
+
+            var failure = obj["FailureImage"] as JsonObject ?? [];
+            failure["Enabled"] = values.FailureEnabled;
+            failure["RetainedCount"] = values.FailureRetainedCount;
+            obj["FailureImage"] = failure;
+        });
+
+        cfg.TimeoutMs = values.TimeoutMs;
+        cfg.MaxQueueDepth = values.MaxQueueDepth;
+        cfg.MaxConcurrent = values.MaxConcurrent;
+        cfg.TcpBacklog = values.TcpBacklog;
+        cfg.MaxConnections = values.MaxConnections;
+        cfg.IpAddress = values.IpAddress;
+        cfg.TcpPort = values.TcpPort;
+        cfg.IpWhitelist = [.. values.IpWhitelist];
+        cfg.FailureImage.Enabled = values.FailureEnabled;
+        cfg.FailureImage.RetainedCount = values.FailureRetainedCount;
+
+        // 落盘 + 内存同步完成后，把可热应用的参数同步到运行中的管理器（见 RuntimeSync 注释）
+        RuntimeSync?.Invoke(cfg);
+
+        return [];
+    }
+
+    /// <summary>
+    /// 参数值域校验（集中于此，任何保存入口共用）：
+    /// 超时 ≥500ms、队列 ≥1、并发 ∈ [1, 队列深度]、backlog ∈ [1,1024]、连接 ≥0、
+    /// 留存 ≥0、端口 1~65535、IP 可解析、白名单条目与匹配器语义一致。
+    /// </summary>
+    public static void Validate(ServiceSettingsValues values)
+    {
+        if (values.TimeoutMs < 500)
+            throw new InvalidDataException("请求超时不能低于 500ms");
+        if (values.MaxQueueDepth < 1)
+            throw new InvalidDataException("队列深度至少为 1");
+        if (values.MaxConcurrent < 1 || values.MaxConcurrent > values.MaxQueueDepth)
+            throw new InvalidDataException($"并发执行上限必须在 1~队列深度({values.MaxQueueDepth}) 之间（含执行中的任务）");
+        if (values.TcpBacklog is < 1 or > 1024)
+            throw new InvalidDataException("监听 backlog 必须在 1~1024");
+        if (values.MaxConnections < 0)
+            throw new InvalidDataException("连接上限不能为负（0 = 不限）");
+        if (values.FailureRetainedCount < 0)
+            throw new InvalidDataException("失败留存数量不能为负（0 = 不自动清理）");
+        if (values.TcpPort is < 1 or > 65535)
+            throw new InvalidDataException("端口必须在 1~65535");
+        if (!IPAddress.TryParse(values.IpAddress, out _))
+            throw new InvalidDataException($"IP 地址无效: {values.IpAddress}");
+        foreach (var entry in values.IpWhitelist)
+        {
+            if (!TcpServerManager.TryParseWhitelistEntry(entry))
+                throw new InvalidDataException($"白名单条目无效: {entry}（支持精确 IP 或前缀通配如 192.168.*）");
+        }
+    }
+
+    /// <summary>
+    /// 启动时校验 appsettings.json 解析出的运行时配置值域（与 <see cref="Validate"/> 保存校验保持同一套规则）。
+    /// 非法值（如 TimeoutMs=100）直接启动失败并抛出清晰异常，避免静默生效带病运行。
+    /// 逐相机联动校验：Basler 取图超时须小于总超时，否则取图超时表现为 1008 而非 1003，排障困难。
+    /// </summary>
+    public static void ValidateConfig(AppConfig cfg)
+    {
+        if (cfg.TimeoutMs < 500)
+            throw new InvalidDataException($"appsettings.json 的 TimeoutMs={cfg.TimeoutMs} 低于 500ms，无法保证相机取图与推理的合理裕量");
+        if (cfg.MaxQueueDepth < 1)
+            throw new InvalidDataException($"appsettings.json 的 MaxQueueDepth={cfg.MaxQueueDepth} 至少为 1");
+        if (cfg.MaxConcurrent < 1 || cfg.MaxConcurrent > cfg.MaxQueueDepth)
+            throw new InvalidDataException($"appsettings.json 的 MaxConcurrent={cfg.MaxConcurrent} 必须在 1~MaxQueueDepth({cfg.MaxQueueDepth}) 之间（含执行中的任务）");
+        if (cfg.TcpBacklog is < 1 or > 1024)
+            throw new InvalidDataException($"appsettings.json 的 TcpBacklog={cfg.TcpBacklog} 必须在 1~1024");
+        if (cfg.MaxConnections < 0)
+            throw new InvalidDataException($"appsettings.json 的 MaxConnections={cfg.MaxConnections} 不能为负（0 = 不限）");
+        if (cfg.TcpPort is < 1 or > 65535)
+            throw new InvalidDataException($"appsettings.json 的 TcpPort={cfg.TcpPort} 必须在 1~65535");
+        if (!IPAddress.TryParse(cfg.IpAddress, out _))
+            throw new InvalidDataException($"appsettings.json 的 IpAddress 无效: {cfg.IpAddress}");
+        foreach (var entry in cfg.IpWhitelist)
+        {
+            if (!TcpServerManager.TryParseWhitelistEntry(entry))
+                throw new InvalidDataException($"appsettings.json 白名单条目无效: {entry}（支持精确 IP 或前缀通配如 192.168.*）");
+        }
+        foreach (var camera in cfg.Cameras)
+        {
+            if (string.Equals(camera.Type, "Basler", StringComparison.OrdinalIgnoreCase) &&
+                camera.GrabTimeoutMs >= cfg.TimeoutMs)
+                throw new InvalidDataException(
+                    $"相机 {camera.Id} 的 GrabTimeoutMs={camera.GrabTimeoutMs} 不小于总超时 TimeoutMs={cfg.TimeoutMs}，" +
+                    "取图超时将表现为 1008 而非 1003，请先调大总超时或调小 GrabTimeoutMs");
+        }
+    }
+}
+
+/// <summary>一次保存携带的完整参数集合（与 AppConfig 字段一一对应）。</summary>
+public sealed record ServiceSettingsValues(
+    int TimeoutMs,
+    int MaxQueueDepth,
+    int MaxConcurrent,
+    int TcpBacklog,
+    int MaxConnections,
+    bool FailureEnabled,
+    int FailureRetainedCount,
+    string IpAddress,
+    int TcpPort,
+    IReadOnlyList<string> IpWhitelist);

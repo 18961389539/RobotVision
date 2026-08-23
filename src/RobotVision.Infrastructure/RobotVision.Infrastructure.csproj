@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LDVisionCamera.Net" Version="1.0.0-rc.37" />
+    <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240615" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240615" />
+    <PackageReference Include="YoloDotNet" Version="4.2.0" />
+    <PackageReference Include="YoloDotNet.ExecutionProvider.Cpu" Version="1.1.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.0" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
+    <!-- Basler pylon .NET API（官方包，仅托管包装）。目标框架为 net40+native，
+         经 .NET Framework 兼容模式供 net8.0 引用（NU1701）。运行时需安装同版本
+         pylon Camera Software Suite（pylon 10.x）提供原生 pylon.dll。 -->
+    <PackageReference Include="Basler.Pylon.NET.x64" Version="10.3.2.636" NoWarn="NU1701" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <!-- 包内 build/*.targets 仅在 Platform=x64 时添加引用；本项目为 AnyCPU，手动引用。
+       Basler.Pylon.dll 为纯托管程序集（net40），net8.0 运行时可直接加载。 -->
+  <ItemGroup>
+    <Reference Include="Basler.Pylon">
+      <HintPath>$(PkgBasler_Pylon_NET_x64)\lib\native\Basler.Pylon.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RobotVision.Core\RobotVision.Core.csproj" />
+  </ItemGroup>
+
+  <!-- 本机 System32 存在同名旧版 onnxruntime.dll 会抢先加载（OrtGetApiBase 入口点缺失），
+       将 win-x64 原生库放到输出根目录：应用目录优先于 System32。随项目引用传递到 App/CalibTool/Tests。
+       另外 onnxruntime.dll 依赖 VC++ 2015-2022 运行库，本机未安装系统级 Redistributable，
+       故将三个 x64 运行库 DLL 一并应用本地部署（取自 Edge 应用目录，许可允许）。 -->
+  <ItemGroup>
+    <None Include="$(PkgMicrosoft_ML_OnnxRuntime)\runtimes\win-x64\native\onnxruntime.dll" CopyToOutputDirectory="PreserveNewest" Link="onnxruntime.dll" Visible="false" />
+    <None Include="$(PkgMicrosoft_ML_OnnxRuntime)\runtimes\win-x64\native\onnxruntime_providers_shared.dll" CopyToOutputDirectory="PreserveNewest" Link="onnxruntime_providers_shared.dll" Visible="false" />
+    <None Update="native\*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
+  </ItemGroup>
+
+</Project>

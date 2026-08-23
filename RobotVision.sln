@@ -1,0 +1,63 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34330.188
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RobotVision.Core", "src\RobotVision.Core\RobotVision.Core.csproj", "{1A2B3C4D-0001-4000-8000-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RobotVision.Infrastructure", "src\RobotVision.Infrastructure\RobotVision.Infrastructure.csproj", "{1A2B3C4D-0002-4000-8000-000000000002}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RobotVision.App", "src\RobotVision.App\RobotVision.App.csproj", "{1A2B3C4D-0003-4000-8000-000000000003}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RobotVision.CalibTool", "tools\RobotVision.CalibTool\RobotVision.CalibTool.csproj", "{1A2B3C4D-0004-4000-8000-000000000004}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RobotVision.Tests", "tests\RobotVision.Tests\RobotVision.Tests.csproj", "{1A2B3C4D-0005-4000-8000-000000000005}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RobotVision.Hosting", "src\RobotVision.Hosting\RobotVision.Hosting.csproj", "{1A2B3C4D-0006-4000-8000-000000000006}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RobotVision.UI", "src\RobotVision.UI\RobotVision.UI.csproj", "{1A2B3C4D-0007-4000-8000-000000000007}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImageViewerControl", "src\ImageViewerControl\ImageViewerControl.csproj", "{1A2B3C4D-0008-4000-8000-000000000008}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1A2B3C4D-0001-4000-8000-000000000001}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A2B3C4D-0001-4000-8000-000000000001}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A2B3C4D-0001-4000-8000-000000000001}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A2B3C4D-0001-4000-8000-000000000001}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A2B3C4D-0002-4000-8000-000000000002}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A2B3C4D-0002-4000-8000-000000000002}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A2B3C4D-0002-4000-8000-000000000002}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A2B3C4D-0002-4000-8000-000000000002}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A2B3C4D-0003-4000-8000-000000000003}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A2B3C4D-0003-4000-8000-000000000003}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A2B3C4D-0003-4000-8000-000000000003}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A2B3C4D-0003-4000-8000-000000000003}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A2B3C4D-0004-4000-8000-000000000004}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A2B3C4D-0004-4000-8000-000000000004}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A2B3C4D-0004-4000-8000-000000000004}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A2B3C4D-0004-4000-8000-000000000004}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A2B3C4D-0005-4000-8000-000000000005}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A2B3C4D-0005-4000-8000-000000000005}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A2B3C4D-0005-4000-8000-000000000005}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A2B3C4D-0005-4000-8000-000000000005}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A2B3C4D-0006-4000-8000-000000000006}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A2B3C4D-0006-4000-8000-000000000006}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A2B3C4D-0006-4000-8000-000000000006}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A2B3C4D-0006-4000-8000-000000000006}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A2B3C4D-0007-4000-8000-000000000007}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A2B3C4D-0007-4000-8000-000000000007}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A2B3C4D-0007-4000-8000-000000000007}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A2B3C4D-0007-4000-8000-000000000007}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A2B3C4D-0008-4000-8000-000000000008}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A2B3C4D-0008-4000-8000-000000000008}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A2B3C4D-0008-4000-8000-000000000008}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A2B3C4D-0008-4000-8000-000000000008}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,16 @@
+{
+  // 虚拟相机配方：cam_virtual 程序化生成棋盘格图像（无需 pylon/回放图片）。
+  // 用途：无任何硬件环境下的全链路演练（取图→去畸变→推理）；
+  // 棋盘格上无检测目标，预期返回 ERR,1007 并留存失败现场图。
+  // 虚拟相机棋盘格同时可用于 UI 标定向导的内参采集。
+  "cameraId": "cam_virtual",
+  "stationId": "",
+  "debugPassthrough": true,
+  "angleMode": "KeyPointLine",
+  "models": [ "a01_kpt.onnx" ],
+  "confidence": 0.5,
+  "iou": 0.7,
+  "keypointIndexA": 0,
+  "keypointIndexB": 1,
+  "keypointMinConfidence": 0.3
+}

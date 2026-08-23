@@ -1,0 +1,9 @@
+{
+  "CameraId": "cam_file",
+  "Width": 1280,
+  "Height": 853,
+  "CameraMatrix": [1200, 0, 640, 0, 1200, 426.5, 0, 0, 1],
+  "DistCoeffs": [0, 0, 0, 0, 0],
+  "Rms": 0.0,
+  "CalibratedAt": "2026-08-22T00:00:00"
+}

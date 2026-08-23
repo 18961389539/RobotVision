@@ -1,0 +1,80 @@
+using OpenCvSharp;
+using RobotVision.Core;
+using RobotVision.Core.Abstractions;
+using RobotVision.Core.Models;
+
+namespace RobotVision.Infrastructure.Cameras;
+
+/// <summary>
+/// 文件夹回放相机：按文件名顺序循环读取图片。
+/// 用途：1) 无相机时联调 TCP/流程；2) 算法回归测试（同一批图对比结果）。
+/// IntervalMs &gt; 0 时按固定间隔回放（帧率受控，联调更接近真实采集节拍）。
+/// </summary>
+public sealed class FileCamera : ICamera
+{
+    private static readonly string[] Extensions = [".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"];
+
+    private readonly string[] _files;
+    private readonly bool _loop;
+    private readonly int _intervalMs;
+    private readonly object _lock = new();
+    private int _index;
+
+    public string Id { get; }
+
+    public CameraKind Kind => CameraKind.File;
+
+    public FileCamera(string id, string folder, bool loop = true, int intervalMs = 0)
+    {
+        if (!Directory.Exists(folder))
+            throw new VisionException(VisionErrorCode.CameraInitFailed, $"回放目录不存在: {folder}");
+        if (intervalMs < 0)
+            throw new VisionException(VisionErrorCode.CameraInitFailed, $"回放间隔不能为负: {intervalMs}");
+
+        var files = Directory.EnumerateFiles(folder)
+            .Where(f => Extensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (files.Length == 0)
+            throw new VisionException(VisionErrorCode.CameraInitFailed, $"回放目录中没有图片: {folder}");
+
+        Id = id;
+        _files = files;
+        _loop = loop;
+        _intervalMs = intervalMs;
+    }
+
+    public CameraFrame Grab(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (_intervalMs > 0)
+        {
+            // 可取消的等待（模拟采集曝光耗时），被取消则按取消语义处理
+            ct.WaitHandle.WaitOne(_intervalMs);
+            ct.ThrowIfCancellationRequested();
+        }
+
+        string file;
+        lock (_lock)
+        {
+            if (_index >= _files.Length)
+            {
+                if (!_loop)
+                    throw new VisionException(VisionErrorCode.CameraGrabFailed, "回放图片已用尽");
+                _index = 0;
+            }
+            file = _files[_index++];
+        }
+
+        var mat = Cv2.ImRead(file, ImreadModes.Color);
+        if (mat.Empty())
+            throw new VisionException(VisionErrorCode.CameraGrabFailed, $"无法读取图像: {file}");
+        return new CameraFrame(mat, DateTime.UtcNow);
+    }
+
+    public void Dispose()
+    {
+    }
+}

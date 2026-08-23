@@ -1,0 +1,67 @@
+<ui:FluentWindow x:Class="RobotVision.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:pages="clr-namespace:RobotVision.UI.Pages"
+        Title="RobotVision 视觉调试台"
+        Width="1280" Height="820"
+        MinWidth="960" MinHeight="600"
+        WindowStartupLocation="CenterScreen">
+    <DockPanel>
+        <ui:TitleBar DockPanel.Dock="Top" Title="RobotVision 视觉调试台" />
+
+        <!-- 全局状态栏：所有页面可见 -->
+        <Border DockPanel.Dock="Bottom"
+                Background="{DynamicResource ApplicationBackgroundBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="12,6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding TcpStatus}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="TCP: TRIGGER,配方名 / PING" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            </Grid>
+        </Border>
+
+        <ui:NavigationView x:Name="Nav"
+                           Margin="4,0,0,0"
+                           IsBackButtonVisible="Auto"
+                           PaneDisplayMode="Left">
+            <ui:NavigationView.MenuItems>
+                <ui:NavigationViewItem Content="运行监控" TargetPageType="{x:Type pages:MonitorPage}"
+                                       Icon="{ui:SymbolIcon Home24}" />
+                <ui:NavigationViewItem Content="相机管理" TargetPageType="{x:Type pages:CamerasPage}"
+                                       Icon="{ui:SymbolIcon Camera24}" />
+                <ui:NavigationViewItem Content="光源管理" TargetPageType="{x:Type pages:LightingsPage}"
+                                       Icon="{ui:SymbolIcon Lightbulb24}" />
+                <ui:NavigationViewItem Content="配方管理" TargetPageType="{x:Type pages:RecipePage}"
+                                       Icon="{ui:SymbolIcon DocumentEdit24}" />
+                <ui:NavigationViewItem Content="模型管理" TargetPageType="{x:Type pages:ModelsPage}"
+                                       Icon="{ui:SymbolIcon Cube24}" />
+                <ui:NavigationViewItem Content="标定档案" TargetPageType="{x:Type pages:CalibrationPage}"
+                                       Icon="{ui:SymbolIcon Wrench24}" />
+                <ui:NavigationViewItem Content="标定向导" TargetPageType="{x:Type pages:CalibrationWizardPage}"
+                                       Icon="{ui:SymbolIcon BookCompass24}" />
+                <ui:NavigationViewItem Content="失败现场" TargetPageType="{x:Type pages:FailuresPage}"
+                                       Icon="{ui:SymbolIcon ImageMultiple24}" />
+                <ui:NavigationViewItem Content="通信监控" TargetPageType="{x:Type pages:CommunicationPage}"
+                                       Icon="{ui:SymbolIcon PlugConnected24}" />
+                <ui:NavigationViewItem Content="日志浏览" TargetPageType="{x:Type pages:LogsPage}"
+                                       Icon="{ui:SymbolIcon DocumentSearch24}" />
+                <ui:NavigationViewItem Content="服务设置" TargetPageType="{x:Type pages:SettingsPage}"
+                                       Icon="{ui:SymbolIcon Options24}" />
+                <ui:NavigationViewItem Content="系统信息" TargetPageType="{x:Type pages:SystemPage}"
+                                       Icon="{ui:SymbolIcon Settings24}" />
+            </ui:NavigationView.MenuItems>
+            <ui:NavigationView.FooterMenuItems>
+                <ui:NavigationViewItem Content="关于" TargetPageType="{x:Type pages:AboutPage}"
+                                       Icon="{ui:SymbolIcon Info24}" />
+            </ui:NavigationView.FooterMenuItems>
+        </ui:NavigationView>
+    </DockPanel>
+</ui:FluentWindow>
