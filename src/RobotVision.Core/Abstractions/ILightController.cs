@@ -14,6 +14,9 @@ public enum LightControllerKind
     /// <summary>Modbus 光源控制器。</summary>
     Modbus,
 
+    /// <summary>UDP 网络光源控制器（频闪控制器，参照 VPDLFramework ECLightControl 传输层）。</summary>
+    Udp,
+
     /// <summary>TCP 光源控制器。</summary>
     Tcp,
 
@@ -39,4 +42,10 @@ public interface ILightController : IDisposable
 
     /// <summary>熄灭全部通道。</summary>
     void TurnOff();
+
+    /// <summary>
+    /// 发送原始指令（协议调试用：UI 手动输入指令文本，便于联调控制器协议）。
+    /// 不支持的控制器静默无操作（如 Noop）；Network 实现支持 \r \n \t 转义解析。
+    /// </summary>
+    void SendRaw(string command);
 }

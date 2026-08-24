@@ -22,6 +22,11 @@ public sealed class NoopLightController(string id) : ILightController
     {
     }
 
+    public void SendRaw(string command)
+    {
+        // 无操作：无硬件可发送
+    }
+
     public void Dispose()
     {
     }

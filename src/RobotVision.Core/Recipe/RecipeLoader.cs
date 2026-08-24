@@ -21,8 +21,10 @@ public sealed class RecipeLoader(string folder)
         Converters = { new JsonStringEnumConverter() },
     };
 
-    /// <summary>缓存条目：配方 + 文件最后修改时间。文件被外部改动后按时间戳自动失效重读。</summary>
-    private sealed record CachedRecipe(RecipeConfig Recipe, DateTime LastWriteUtc);
+    /// <summary>缓存条目：配方 + 文件最后修改时间与长度。
+    /// 长度参与比对：文件系统时间戳精度有限（FAT 2s），同秒内"改两次"或"改回原时间戳"的
+    /// 场景单靠时间戳会误判未变化，长度不同必然失效。</summary>
+    private sealed record CachedRecipe(RecipeConfig Recipe, DateTime LastWriteUtc, long Length);
 
     private readonly ConcurrentDictionary<string, CachedRecipe> _cache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -78,9 +80,10 @@ public sealed class RecipeLoader(string folder)
         if (!File.Exists(path))
             throw new RecipeNotFoundException(name);
 
-        // 文件未变化时走缓存；文件被外部工具改动后按 LastWriteTime 自动失效重读
-        var lastWriteUtc = File.GetLastWriteTimeUtc(path);
-        if (!forceReload && _cache.TryGetValue(name, out var cached) && cached.LastWriteUtc == lastWriteUtc)
+        // 文件未变化时走缓存；文件被外部工具改动后按 LastWriteTime+Length 自动失效重读
+        var info = new FileInfo(path);
+        if (!forceReload && _cache.TryGetValue(name, out var cached) &&
+            cached.LastWriteUtc == info.LastWriteTimeUtc && cached.Length == info.Length)
             return cached.Recipe.Clone(); // 缓存存本体、返回克隆：调用方改动不污染共享缓存
 
         var recipe = JsonSerializer.Deserialize<RecipeConfig>(File.ReadAllText(path), JsonOptions)
@@ -89,7 +92,7 @@ public sealed class RecipeLoader(string folder)
         Validate(recipe);
         ValidateReferences(recipe);
 
-        _cache[name] = new CachedRecipe(recipe, lastWriteUtc);
+        _cache[name] = new CachedRecipe(recipe, info.LastWriteTimeUtc, info.Length);
         return recipe.Clone(); // 首次加载同样返回克隆，与缓存命中路径行为一致
     }
 
@@ -115,12 +118,25 @@ public sealed class RecipeLoader(string folder)
         if (recipe.Models.Count == 0)
             throw new InvalidRecipeException(name, "models 列表为空");
 
-        // 单模型模式（MaskMinAreaRect/KeyPointLine）只使用 Models[0]，多配会静默忽略多余模型，
+        // 单模型模式（MaskMinAreaRect/KeyPointLine/MaskTemplate）只使用 Models[0]，多配会静默忽略多余模型，
         // 收紧为恰好 1 个：多余模型既浪费内存又掩盖配方错误
-        if ((recipe.AngleMode is AngleMode.MaskMinAreaRect or AngleMode.KeyPointLine) &&
+        if ((recipe.AngleMode is AngleMode.MaskMinAreaRect or AngleMode.KeyPointLine or AngleMode.MaskTemplate) &&
             recipe.Models.Count != 1)
             throw new InvalidRecipeException(name,
                 $"单模型模式（{recipe.AngleMode}）需要恰好 1 个模型（当前 {recipe.Models.Count}）");
+
+        if (recipe.AngleMode == AngleMode.MaskTemplate &&
+            recipe.Template.RefineMethod == SegmentRefineMethod.Template &&
+            string.IsNullOrEmpty(recipe.Template.TemplateImageBase64))
+            throw new InvalidRecipeException(name, "分割+精修（模板匹配方法）未示教模板（配方页「示教模板」自动生成，或改用直线拟合方法）");
+
+        if (recipe.AngleMode == AngleMode.MaskTemplate)
+        {
+            if (recipe.Template.MatchThreshold is < 0 or > 1)
+                throw new InvalidRecipeException(name, "template.matchThreshold 必须在 [0,1]");
+            if (recipe.Template.RefineRangeDeg is <= 0 or > 45)
+                throw new InvalidRecipeException(name, "template.refineRangeDeg 必须在 (0,45]");
+        }
 
         if (recipe.AngleMode == AngleMode.DualCenterLine && recipe.Models.Count < 2)
             throw new InvalidRecipeException(name, "双模型模式（DualCenterLine）需要 2 个模型");
@@ -137,10 +153,10 @@ public sealed class RecipeLoader(string folder)
         if (recipe.Iou is < 0 or > 1)
             throw new InvalidRecipeException(name, "iou 必须在 [0,1]");
 
-        if (recipe.AngleMode == AngleMode.KeyPointLine && recipe.KeypointIndexA == recipe.KeypointIndexB)
-            throw new InvalidRecipeException(name, "keypointIndexA 与 keypointIndexB 不能相同");
+        if (recipe.AngleMode == AngleMode.KeyPointLine && recipe.Keypoint.IndexA == recipe.Keypoint.IndexB)
+            throw new InvalidRecipeException(name, "keypoint.indexA 与 keypoint.indexB 不能相同");
 
-        if (recipe.KeypointIndexA < 0 || recipe.KeypointIndexB < 0)
+        if (recipe.Keypoint.IndexA < 0 || recipe.Keypoint.IndexB < 0)
             throw new InvalidRecipeException(name, "keypoint 索引不能为负");
 
         if (recipe.Roi is { } roi)
@@ -184,14 +200,15 @@ public sealed class RecipeLoader(string folder)
         }
     }
 
-    /// <summary>启动时预加载全部配方，加载失败抛异常并列出所有问题。</summary>
+    /// <summary>启动时预加载全部配方，加载失败抛异常并列出所有问题（按文件名排序，日志顺序确定）。</summary>
     public IReadOnlyList<(string Name, string Error)> LoadAll()
     {
         var errors = new List<(string, string)>();
         if (!Directory.Exists(folder))
             return errors;
 
-        foreach (var file in Directory.EnumerateFiles(folder, "*.json"))
+        foreach (var file in Directory.EnumerateFiles(folder, "*.json")
+                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
         {
             var name = Path.GetFileNameWithoutExtension(file);
             try
@@ -227,6 +244,8 @@ public sealed class RecipeLoader(string folder)
     /// <summary>
     /// 校验并写回配方文件，同时更新缓存（缓存存副本，编辑器后续修改不污染缓存）。
     /// 供管理界面保存使用；文件由程序规范化生成（注释丢失属预期）。
+    /// 原子落盘（临时文件 + File.Replace）：写一半崩溃不留截断 JSON，
+    /// 且 TCP 线程并发 Get 不会读到半写文件（替换对读者近似原子）。
     /// </summary>
     public void Save(RecipeConfig recipe)
     {
@@ -238,9 +257,33 @@ public sealed class RecipeLoader(string folder)
 
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, recipe.Name + ".json");
-        File.WriteAllText(path, JsonSerializer.Serialize(recipe, WriteOptions));
+        AtomicWriteAllText(path, JsonSerializer.Serialize(recipe, WriteOptions));
 
-        _cache[recipe.Name] = new CachedRecipe(recipe.Clone(), File.GetLastWriteTimeUtc(path));
+        var info = new FileInfo(path);
+        _cache[recipe.Name] = new CachedRecipe(recipe.Clone(), info.LastWriteTimeUtc, info.Length);
+    }
+
+    /// <summary>原子写（临时文件 + 替换）：配方是产线关键资产，与标定档案同策略。
+    /// Core 层不依赖 Infrastructure 的实现，此处独立实现同语义。</summary>
+    private static void AtomicWriteAllText(string path, string content)
+    {
+        var full = Path.GetFullPath(path);
+        var dir = Path.GetDirectoryName(full)!;
+        Directory.CreateDirectory(dir);
+        var tmp = Path.Combine(dir, $".{Path.GetFileName(full)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(tmp, content);
+            if (File.Exists(full))
+                File.Replace(tmp, full, null);
+            else
+                File.Move(tmp, full);
+        }
+        finally
+        {
+            try { File.Delete(tmp); }
+            catch (IOException) { }
+        }
     }
 
     /// <summary>删除配方文件并移除缓存。文件不存在时仍清理缓存并返回 false。</summary>

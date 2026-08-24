@@ -12,12 +12,13 @@ namespace RobotVision.Infrastructure.Communication;
 /// <summary>
 /// TCP 服务管理类：监听、连接注册表、行协议解析、应答与超时。
 /// 协议（UTF-8 编码的 ASCII 子集，\n 结尾）：
-///   请求: TRIGGER,配方名     应答: OK,配方名,目标数,x,y,角度[,x2,y2,角度2...],耗时ms
+///   请求: TRIGGER,配方名              应答: OK,配方名,目标数,x,y,角度[,x2,y2,角度2...],耗时ms
+///   请求: TRIGGER,配方名,X,Y,RZ       应答: 同上（带拍照位姿，OnArm 工位校验一致性，不一致 1012）
 ///   请求: PING               应答: PONG
 ///   请求: STATUS             应答: OK,ready|busy,队列深度,队列上限,最近耗时ms（状态查询）
 ///   出错: ERR,错误码,消息
 /// 错误消息契约：业务错误保留 Sanitize 后的可读消息；InternalError 固定为
-/// INTERNAL_ERROR（详情只进日志）；未知命令/缺参数用固定 ASCII 模板。
+/// INTERNAL_ERROR（详情只进日志）；未知命令/缺参数/参数格式错误用固定 ASCII 模板。
 /// 目标数字段让 PLC 无需先数尾部字段即可解析位姿三元组，
 /// 也为将来"0 目标返回空 OK（count=0）"预留了非破坏性扩展（当前 0 目标仍返回 ERR 1007）。
 /// StreamReader 按行读取天然解决粘包/半包问题。
@@ -29,7 +30,7 @@ public sealed class TcpServerManager : IDisposable
 
     private IPAddress _address;
     private int _port;
-    private readonly Func<string, CancellationToken, Task<VisionResult>> _handler;
+    private readonly Func<string, TcpClientPose?, CancellationToken, Task<VisionResult>> _handler;
     private readonly ILogger<TcpServerManager> _log;
     private readonly ConcurrentDictionary<long, TcpClient> _clients = new();
     private readonly ConcurrentDictionary<long, TcpSession> _sessions = new();
@@ -51,7 +52,7 @@ public sealed class TcpServerManager : IDisposable
         string ipAddress,
         int port,
         int timeoutMs,
-        Func<string, CancellationToken, Task<VisionResult>> handler,
+        Func<string, TcpClientPose?, CancellationToken, Task<VisionResult>> handler,
         ILogger<TcpServerManager> log)
     {
         _address = IPAddress.Parse(ipAddress);
@@ -309,11 +310,23 @@ public sealed class TcpServerManager : IDisposable
             _log.LogCritical(ex, "TCP 监听循环异常退出，尝试重启监听");
             try { listener.Stop(); }
             catch { /* 关闭阶段忽略 */ }
-            if (!ct.IsCancellationRequested && _listener == listener)
+            if (ct.IsCancellationRequested)
+                return;
+
+            // 必须清空 _listener 再 StartCore：否则 StartCore 见非空直接返回，重启是空操作。
+            // 持 _lifecycleLock 与 Stop/Restart 互斥，避免把已停止的服务又拉起来。
+            lock (_lifecycleLock)
             {
+                if (_listener != listener)
+                    return;
+                _listener = null;
+                var oldCts = _cts;
+                _cts = null;
+                try { oldCts?.Dispose(); }
+                catch { /* 尽力而为 */ }
                 try
                 {
-                    Start();
+                    StartCore();
                 }
                 catch (Exception restartEx)
                 {
@@ -527,6 +540,10 @@ public sealed class TcpServerManager : IDisposable
         if (argument.Length == 0)
             return $"ERR,{(int)VisionErrorCode.UnknownRecipe},MISSING_RECIPE";
 
+        var (recipeName, pose, formatError) = ParseTriggerArgument(argument);
+        if (formatError is not null)
+            return $"ERR,{(int)VisionErrorCode.InvalidTriggerArgument},{formatError}";
+
         // 超时只保证尽快回复错误；正在执行的推理不会中断（串行管线由信号量保护）
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeoutMs);
@@ -535,7 +552,7 @@ public sealed class TcpServerManager : IDisposable
         Task<VisionResult>? work = null;
         try
         {
-            work = _handler(argument, timeoutCts.Token);
+            work = _handler(recipeName, pose, timeoutCts.Token);
             var result = await work.WaitAsync(timeoutCts.Token);
 
             // 内部错误详情（异常原文/路径等）只进日志，不上协议线
@@ -552,14 +569,52 @@ public sealed class TcpServerManager : IDisposable
             if (work is { IsCompletedSuccessfully: true })
                 return FormatReply(await work);
             return FormatReply(VisionResult.Fail(
-                argument, VisionErrorCode.Timeout, $"处理超时 >{TimeoutMs}ms", stopwatch.Elapsed.TotalMilliseconds));
+                recipeName, VisionErrorCode.Timeout, $"处理超时 >{TimeoutMs}ms", stopwatch.Elapsed.TotalMilliseconds));
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "处理请求异常: {Line}", line);
             return FormatReply(VisionResult.Fail(
-                argument, VisionErrorCode.InternalError, ex.Message, stopwatch.Elapsed.TotalMilliseconds));
+                recipeName, VisionErrorCode.InternalError, ex.Message, stopwatch.Elapsed.TotalMilliseconds));
         }
+    }
+
+    /// <summary>
+    /// TRIGGER 参数解析（纯函数，可单测）：
+    /// - 1 段（配方名）→ 旧格式，pose = null（OnArm 校验跳过，向后兼容）；
+    /// - 4 段（配方名,X,Y,RZ）→ 带拍照位姿（OnArm 工位一致性校验用）；
+    /// - 其他段数 / 数值非有限 → formatError（ERR,1013 模板）。
+    /// 数值按 InvariantCulture 解析——协议规定 ASCII，PLC 侧不得输出本地化小数逗号。
+    /// </summary>
+    public static (string RecipeName, TcpClientPose? Pose, string? FormatError) ParseTriggerArgument(string argument)
+    {
+        var parts = argument.Split(',');
+        if (parts.Length == 1)
+            return (parts[0].Trim(), null, null);
+
+        if (parts.Length != 4)
+            return ("", null, "TRIGGER_ARGUMENT_COUNT");
+
+        var name = parts[0].Trim();
+        if (name.Length == 0)
+            return ("", null, "MISSING_RECIPE");
+
+        if (!TryParseFinite(parts[1], out var x) ||
+            !TryParseFinite(parts[2], out var y) ||
+            !TryParseFinite(parts[3], out var rz))
+            return ("", null, "INVALID_POSE_NUMBER");
+
+        return (name, new TcpClientPose(x, y, rz), null);
+    }
+
+    /// <summary>有限数字解析（拒绝 NaN/Infinity：会污染位姿比对）。</summary>
+    private static bool TryParseFinite(string text, out double value)
+    {
+        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
+            double.IsFinite(value))
+            return true;
+        value = 0;
+        return false;
     }
 
     /// <summary>STATUS 应答格式化（纯函数，可单测）：OK,ready|busy,队列深度,队列上限,最近耗时ms。</summary>

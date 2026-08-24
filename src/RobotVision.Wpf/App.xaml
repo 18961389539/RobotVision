@@ -1,0 +1,72 @@
+<Application x:Class="RobotVision.WpfHost.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             ShutdownMode="OnMainWindowClose">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Dark" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+
+            <!-- WPF-UI NavigationViewContentPresenter 默认 IsDynamicScrollViewerEnabled=true，
+                 会用 DynamicScrollViewer 包裹 Page，导致 Page 高度=内容不撑满可视区。
+                 这里把全局 Page.ScrollViewer.CanContentScroll 设为 False，
+                 导航后自动切到无 ScrollViewer 的 ContentPresenter 模板，Page 真正撑满内容区。 -->
+            <Style TargetType="Page">
+                <Setter Property="ScrollViewer.CanContentScroll" Value="False" />
+            </Style>
+
+            <!-- ===== 全局 DataGrid 风格（隐式样式：所有页面表格自动生效，无需逐页修改） =====
+                 BasedOn WPF-UI 主题样式，仅做可读性增强：斑马纹、行高、垂直居中、表头强化。 -->
+
+            <Style TargetType="{x:Type DataGrid}" BasedOn="{StaticResource {x:Type DataGrid}}">
+                <Setter Property="AlternationCount" Value="2" />
+                <!-- 表格主体背景/前景：WPF-UI 3.x 未覆盖 DataGrid 默认白底，这里补深色 -->
+                <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="RowBackground" Value="Transparent" />
+                <!-- 斑马纹：用主题的次级控件填充色，深浅主题下均与背景协调 -->
+                <Setter Property="AlternatingRowBackground"
+                        Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                <Setter Property="GridLinesVisibility" Value="None" />
+                <Setter Property="HorizontalGridLinesBrush"
+                        Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                <Setter Property="VerticalGridLinesBrush" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+            </Style>
+
+            <Style TargetType="{x:Type DataGridRow}" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                <Setter Property="MinHeight" Value="32" />
+                <Setter Property="Margin" Value="0" />
+            </Style>
+
+            <Style TargetType="{x:Type DataGridCell}" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Padding" Value="8,0" />
+                <Setter Property="BorderThickness" Value="0" />
+                <!-- 焦点格不画虚线框（选中行高亮已足够指示，虚线在暗色下很突兀） -->
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            </Style>
+
+            <Style TargetType="{x:Type DataGridColumnHeader}"
+                   BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+                <Setter Property="MinHeight" Value="34" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Padding" Value="8,0" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+            </Style>
+
+            <!-- ToolTip：跟随主题、适度留白与停留时长（工控机上短闪即逝的提示不可用） -->
+            <Style TargetType="{x:Type ToolTip}" BasedOn="{StaticResource {x:Type ToolTip}}">
+                <Setter Property="ToolTipService.InitialShowDelay" Value="250" />
+                <Setter Property="ToolTipService.ShowDuration" Value="10000" />
+                <Setter Property="ToolTipService.Placement" Value="MousePoint" />
+                <Setter Property="Padding" Value="10,6" />
+                <Setter Property="MaxWidth" Value="420" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

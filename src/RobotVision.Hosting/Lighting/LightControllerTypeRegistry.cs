@@ -18,11 +18,13 @@ public sealed class LightControllerTypeRegistry
     private readonly Dictionary<string, ILightControllerFactory> _factories = new(StringComparer.OrdinalIgnoreCase);
     private string[]? _cachedTypeNames;
 
-    /// <summary>预置内置类型工厂（None）。</summary>
+    /// <summary>预置内置类型工厂（None / Network / Serial）。</summary>
     public static LightControllerTypeRegistry CreateDefault()
     {
         var registry = new LightControllerTypeRegistry();
         registry.Register(new NoneLightControllerFactory());
+        registry.Register(new NetworkLightControllerFactory());
+        registry.Register(new SerialLightControllerFactory());
         return registry;
     }
 

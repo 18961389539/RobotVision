@@ -45,7 +45,8 @@ public class AngleStrategyTypeRegistryTests
         Assert.True(registry.IsKnown(AngleMode.MaskMinAreaRect));
         Assert.True(registry.IsKnown(AngleMode.DualCenterLine));
         Assert.True(registry.IsKnown(AngleMode.KeyPointLine));
-        Assert.Equal(3, registry.Modes.Count);
+        Assert.True(registry.IsKnown(AngleMode.MaskTemplate));
+        Assert.Equal(4, registry.Modes.Count);
     }
 
     [Fact]
@@ -67,6 +68,7 @@ public class AngleStrategyTypeRegistryTests
         Assert.IsType<MaskMinAreaRectStrategy>(registry.Create(AngleMode.MaskMinAreaRect, models));
         Assert.IsType<DualCenterLineStrategy>(registry.Create(AngleMode.DualCenterLine, models));
         Assert.IsType<KeyPointLineStrategy>(registry.Create(AngleMode.KeyPointLine, models));
+        Assert.IsType<MaskTemplateStrategy>(registry.Create(AngleMode.MaskTemplate, models));
     }
 
     [Fact]

@@ -232,6 +232,50 @@ public class VisionServiceQueueTests : IDisposable
         Assert.True(avgMs > 0, "平均耗时应 > 0");
         Assert.True(p95Ms > 0, "P95 应 > 0");
     }
+
+    [Fact]
+    public async Task QueueDepthExceeded_RecordsBusyInHealth()
+    {
+        var recipes = new RecipeLoader(_recipeFolder);
+        var cameras = new CameraManager();
+        cameras.Register(new FileCamera("cam1", _replayFolder, intervalMs: 400));
+        var calibration = new CalibrationManager();
+        calibration.LoadIntrinsic(new IntrinsicProfile
+        {
+            CameraId = "cam1",
+            Width = 64,
+            Height = 64,
+            CameraMatrix = [100, 0, 32, 0, 100, 32, 0, 0, 1],
+            DistCoeffs = [0, 0, 0, 0, 0],
+        });
+        var failureImages = new FailureImageStore(
+            new FailureImageConfig { Folder = Path.Combine(Path.GetTempPath(), "rv_nowhere") },
+            NullLogger<FailureImageStore>.Instance);
+        var service = new VisionService(recipes, cameras, new LightingManager(), calibration,
+            new AngleStrategyFactory(new RobotVision.Infrastructure.Inference.ModelManager(Path.GetTempPath())),
+            failureImages,
+            NullLogger<VisionService>.Instance)
+        {
+            MaxQueueDepth = 1,
+            MaxConcurrent = 1,
+        };
+
+        var blocker = service.RunAsync("SLOW", CancellationToken.None);
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (!service.IsProcessing && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+        Assert.True(service.IsProcessing, "占位请求应已进入取图");
+
+        var rejected = await Task.WhenAll(
+            Enumerable.Range(0, 4).Select(_ => service.RunAsync("SLOW", CancellationToken.None)));
+        Assert.All(rejected, r => Assert.Equal(VisionErrorCode.Busy, r.ErrorCode));
+
+        await blocker;
+        var (total, failed, timedOut, _, _) = service.Health;
+        Assert.Equal(5, total);
+        Assert.Equal(5, failed);
+        Assert.Equal(0, timedOut);
+    }
 }
 
 

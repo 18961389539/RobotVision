@@ -36,6 +36,12 @@ public sealed class AppConfig
     /// <summary>失败现场图像留存配置（远程排障还原失败时刻的画面）。</summary>
     public FailureImageConfig FailureImage { get; set; } = new();
 
+    /// <summary>推理配置（Provider / 会话上限）。</summary>
+    public InferenceConfig Inference { get; set; } = new();
+
+    /// <summary>拍照位姿校验（TRIGGER,配方名,X,Y,RZ 带位姿时与 OnArm 外参档案比对）。</summary>
+    public PoseCheckConfig PoseCheck { get; set; } = new();
+
     public List<CameraConfig> Cameras { get; set; } = [];
 
     public List<LightControllerConfig> LightControllers { get; set; } = [];
@@ -53,6 +59,29 @@ public sealed class FailureImageConfig
 
     /// <summary>按时间保留最近 N 天；≤0 表示不按时间清理。与数量配额取更严格者。</summary>
     public int RetainedDays { get; set; }
+}
+
+public sealed class InferenceConfig
+{
+    /// <summary>推理 Provider：Cpu（默认）。换 GPU 需引用对应 YoloDotNet.ExecutionProvider
+    /// 包并在 YoloDotNetEngineFactory 补充分支（未实现的 Provider 首次加载模型时报错）。</summary>
+    public string Provider { get; set; } = "Cpu";
+
+    /// <summary>LRU 会话上限：超过后卸载最久未使用的会话（0 或负数 = 不限制）。</summary>
+    public int MaxSessions { get; set; } = 8;
+}
+
+/// <summary>拍照位姿校验配置：OnArm（相机装末端）工位的 TRIGGER 位姿一致性检查。</summary>
+public sealed class PoseCheckConfig
+{
+    /// <summary>总开关。false = PLC 上报位姿也不校验（调试/过渡期用，正式产线应开启）。</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>拍照点 TCP 平面偏差容差（mm，XY 欧氏距离，超过返回 1012）。</summary>
+    public double XyToleranceMm { get; set; } = 0.5;
+
+    /// <summary>拍照点第 4 轴角度容差（deg，归一化差，超过返回 1012）。</summary>
+    public double RzToleranceDeg { get; set; } = 0.5;
 }
 
 public sealed class FileLoggingConfig
@@ -112,8 +141,8 @@ public sealed class LightControllerConfig
     public string Id { get; set; } = "";
 
     /// <summary>
-    /// None = 无操作虚拟（未接硬件时的调试兜底）；Serial / Modbus / Tcp
-    /// 待实现 ILightController 后在此接入（同相机注册处的扩展模式）。
+    /// None = 无操作虚拟（未接硬件时的调试兜底）；
+    /// Network = UDP/TCP 网络控制器；Serial = RS232/RS485 串口控制器。
     /// </summary>
     public string Type { get; set; } = "None";
 
@@ -125,11 +154,20 @@ public sealed class LightControllerConfig
     /// <summary>Modbus 控制器：从站地址。</summary>
     public int Address { get; set; } = 1;
 
-    /// <summary>TCP 控制器：端点（host:port）。</summary>
+    /// <summary>网络控制器：端点（host:port），UDP/TCP 共用（参照 VPDLFramework ECLightControl 的 ControllerIPPort）。</summary>
     public string Endpoint { get; set; } = "";
+
+    /// <summary>网络控制器：协议（Tcp / Udp，默认 Tcp；参照 ECLightControl 的 LightEthernetType，0=UDP 1=TCP）。</summary>
+    public string Protocol { get; set; } = "Tcp";
+
+    /// <summary>网络控制器：本机绑定端点（host:port，可选；UDP 接收应答时用于固定本地端口）。</summary>
+    public string LocalEndpoint { get; set; } = "";
 
     /// <summary>控制命令超时（ms）。</summary>
     public int TimeoutMs { get; set; } = 200;
+
+    /// <summary>网络控制器：TCP 断线重连尝试次数（参照 ECLightControl.ReconnectTCP）。</summary>
+    public int ReconnectAttempts { get; set; } = 3;
 }
 
 public static class AppConfigExtensions

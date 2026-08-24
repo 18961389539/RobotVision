@@ -39,6 +39,10 @@ public class LightControllerTypeRegistryTests
         {
         }
 
+        public void SendRaw(string command)
+        {
+        }
+
         public void TurnOff()
         {
         }
@@ -54,6 +58,8 @@ public class LightControllerTypeRegistryTests
         var registry = LightControllerTypeRegistry.Default;
 
         Assert.True(registry.IsKnown("None"));
+        Assert.True(registry.IsKnown("Network"));
+        Assert.True(registry.IsKnown("Serial"));
         Assert.True(registry.TryGet("none", out var factory));
         Assert.IsType<NoneLightControllerFactory>(factory);
     }

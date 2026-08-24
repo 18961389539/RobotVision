@@ -19,13 +19,14 @@ public sealed class AngleStrategyTypeRegistry
     private readonly Dictionary<AngleMode, IAngleStrategyFactory> _factories = [];
     private AngleMode[]? _cachedModes;
 
-    /// <summary>预置内置策略工厂（三种角度模式）。</summary>
+    /// <summary>预置内置策略工厂（四种角度模式）。</summary>
     public static AngleStrategyTypeRegistry CreateDefault()
     {
         var registry = new AngleStrategyTypeRegistry();
         registry.Register(new MaskMinAreaRectStrategyFactory());
         registry.Register(new DualCenterLineStrategyFactory());
         registry.Register(new KeyPointLineStrategyFactory());
+        registry.Register(new MaskTemplateStrategyFactory());
         return registry;
     }
 

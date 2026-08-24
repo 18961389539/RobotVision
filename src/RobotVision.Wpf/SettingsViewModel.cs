@@ -1,0 +1,218 @@
+using System.Windows.Threading;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using RobotVision.Hosting;
+using RobotVision.Infrastructure.Communication;
+
+namespace RobotVision.WpfHost;
+
+/// <summary>
+/// 服务参数管理：运行参数（超时/队列/连接上限/失败留存/白名单）保存即热生效；
+/// 并发槽位（MaxConcurrent）与 TCP backlog 修改需重启程序生效；
+/// 网络端点（IP/端口）保存后热重启监听（无需重启程序，失败自动回滚并提示）。
+/// 校验集中在 AppSettingsStore（值域 + 相机取图超时联动），本页只负责展示与交互。
+/// </summary>
+public partial class SettingsViewModel : ObservableObject
+{
+    // 出厂默认值（与 appsettings.json 初始一致）
+    private const int DefaultTimeoutMs = 5000;
+    private const int DefaultMaxQueueDepth = 4;
+    private const int DefaultMaxConcurrent = 2;
+    private const int DefaultTcpBacklog = 16;
+    private const int DefaultMaxConnections = 0;
+    private const bool DefaultFailureEnabled = true;
+    private const int DefaultFailureRetainedCount = 200;
+    private const string DefaultIpAddress = "0.0.0.0";
+    private const int DefaultTcpPort = 9999;
+
+    private readonly AppConfig _cfg;
+    private readonly TcpServerManager _tcp;
+    private readonly VisionService _vision;
+    private readonly FailureImageStore _failures;
+    private readonly AppSettingsStore _store;
+    private readonly DispatcherTimer _timer;
+
+    /// <summary>最近一次载入/保存时的参数快照（脏标记基准）。</summary>
+    private ServiceSettingsValues? _baseline;
+
+    [ObservableProperty]
+    private int _timeoutMs;
+
+    [ObservableProperty]
+    private int _maxQueueDepth;
+
+    [ObservableProperty]
+    private int _maxConcurrent;
+
+    [ObservableProperty]
+    private int _tcpBacklog;
+
+    [ObservableProperty]
+    private int _maxConnections;
+
+    [ObservableProperty]
+    private bool _failureEnabled;
+
+    [ObservableProperty]
+    private int _failureRetainedCount;
+
+    [ObservableProperty]
+    private string _ipAddress = "";
+
+    [ObservableProperty]
+    private int _tcpPort;
+
+    /// <summary>白名单多行文本（每行一条，空 = 允许所有，支持 192.168.* 通配）。</summary>
+    [ObservableProperty]
+    private string _whitelistText = "";
+
+    [ObservableProperty]
+    private string _message = "";
+
+    [ObservableProperty]
+    private string _status = "";
+
+    public SettingsViewModel(
+        AppConfig cfg,
+        TcpServerManager tcp,
+        VisionService vision,
+        FailureImageStore failures,
+        AppSettingsStore store)
+    {
+        _cfg = cfg;
+        _tcp = tcp;
+        _vision = vision;
+        _failures = failures;
+        _store = store;
+
+        LoadFromRuntime();
+
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _timer.Tick += (_, _) => RefreshStatus();
+        // 定时器由页面 Loaded/Unloaded 启停（与 System/Communication 页一致），
+        // 不在构造启动：单例 VM 常驻，页面从未打开时不应空转。
+    }
+
+    /// <summary>编辑内容相对最近一次载入/保存是否有差异（未保存修改提示用）。</summary>
+    public bool HasUnsavedChanges =>
+        _baseline is not null && !Same(_baseline, CurrentValues());
+
+    /// <summary>从运行中的管理器读取当前值（再次进入页面时同步外部改动）。</summary>
+    public void LoadFromRuntime()
+    {
+        TimeoutMs = _tcp.TimeoutMs;
+        MaxQueueDepth = _vision.MaxQueueDepth;
+        MaxConcurrent = _vision.MaxConcurrent;
+        TcpBacklog = _tcp.Backlog;
+        MaxConnections = _tcp.MaxConnections;
+        FailureEnabled = _failures.Enabled;
+        FailureRetainedCount = _failures.RetainedCount;
+        IpAddress = _cfg.IpAddress;
+        TcpPort = _cfg.TcpPort;
+        WhitelistText = string.Join(Environment.NewLine, _cfg.IpWhitelist);
+        _baseline = CurrentValues();
+        RefreshStatus();
+    }
+
+    public void StartTimer() => _timer.Start();
+
+    public void StopTimer() => _timer.Stop();
+
+    private void RefreshStatus() =>
+        Status = $"监听 {_tcp.ListenEndPoint} · {(_tcp.IsRunning ? "运行中" : "已停止")} · " +
+                 $"当前连接 {_tcp.ConnectedClients} · 累计接入 {_tcp.TotalConnections} · " +
+                 $"拒绝 {_tcp.RejectedConnections} · 累计请求 {_tcp.TotalRequests}";
+
+    [RelayCommand]
+    private void Save()
+    {
+        try
+        {
+            var values = CurrentValues();
+
+            // 校验集中在 Store（值域 + 相机取图超时联动），非法值抛 InvalidDataException
+            _store.Save(values);
+
+            // 先落盘、后应用热参数：写盘失败时热参数保持原样
+            _tcp.TimeoutMs = values.TimeoutMs;
+            _vision.MaxQueueDepth = values.MaxQueueDepth;
+            _tcp.MaxConnections = values.MaxConnections;
+            _tcp.IpWhitelist = values.IpWhitelist;
+            _failures.Enabled = values.FailureEnabled;
+            _failures.RetainedCount = values.FailureRetainedCount;
+
+            // 端点变化：服务内热重启监听（无需重启程序），失败自动回滚到旧端点
+            var endpointChanged = !string.Equals(_cfg.IpAddress, values.IpAddress, StringComparison.OrdinalIgnoreCase)
+                                  || _cfg.TcpPort != values.TcpPort;
+            // 并发槽位/backlog 首次固化或监听启动时读取，运行中修改需重启程序生效
+            var restartNeeded = values.MaxConcurrent != _baseline?.MaxConcurrent ||
+                                values.TcpBacklog != _baseline?.TcpBacklog;
+            var endpointText = $"{values.IpAddress}:{values.TcpPort}";
+            if (endpointChanged)
+            {
+                var ok = _tcp.Restart(values.IpAddress, values.TcpPort);
+                Message = ok
+                    ? $"已保存并应用；监听已热重启到 {endpointText}（客户端将短暂断开）" + RestartSuffix(restartNeeded)
+                    : $"已保存；监听 {endpointText} 启动失败，已回滚到 {_tcp.ListenEndPoint}（请检查端口占用）";
+            }
+            else
+            {
+                Message = "已保存并应用（全部参数即时生效）" + RestartSuffix(restartNeeded);
+            }
+
+            _baseline = CurrentValues();
+            RefreshStatus();
+        }
+        catch (Exception ex)
+        {
+            Message = $"保存失败: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void RestoreDefaults()
+    {
+        TimeoutMs = DefaultTimeoutMs;
+        MaxQueueDepth = DefaultMaxQueueDepth;
+        MaxConcurrent = DefaultMaxConcurrent;
+        TcpBacklog = DefaultTcpBacklog;
+        MaxConnections = DefaultMaxConnections;
+        FailureEnabled = DefaultFailureEnabled;
+        FailureRetainedCount = DefaultFailureRetainedCount;
+        IpAddress = DefaultIpAddress;
+        TcpPort = DefaultTcpPort;
+        WhitelistText = "";
+        Message = "已填入出厂默认值，点击「保存并应用」生效";
+    }
+
+    [RelayCommand]
+    private void Reload() => LoadFromRuntime();
+
+    [RelayCommand]
+    private void OpenSettingsFolder() =>
+        RecipeViewModel.ShellOpen(System.IO.Path.GetDirectoryName(_store.SettingsPath)!);
+
+    private static string RestartSuffix(bool restartNeeded) =>
+        restartNeeded ? "（并发槽位/TCP backlog 修改需重启程序生效）" : "";
+
+    private ServiceSettingsValues CurrentValues()
+    {
+        var whitelist = WhitelistText
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(l => l.Length > 0)
+            .ToList();
+        return new ServiceSettingsValues(
+            TimeoutMs, MaxQueueDepth, MaxConcurrent, TcpBacklog, MaxConnections,
+            FailureEnabled, FailureRetainedCount,
+            IpAddress.Trim(), TcpPort, whitelist);
+    }
+
+    private static bool Same(ServiceSettingsValues a, ServiceSettingsValues b) =>
+        a.TimeoutMs == b.TimeoutMs && a.MaxQueueDepth == b.MaxQueueDepth &&
+        a.MaxConcurrent == b.MaxConcurrent && a.TcpBacklog == b.TcpBacklog &&
+        a.MaxConnections == b.MaxConnections && a.FailureEnabled == b.FailureEnabled &&
+        a.FailureRetainedCount == b.FailureRetainedCount &&
+        string.Equals(a.IpAddress, b.IpAddress, StringComparison.OrdinalIgnoreCase) &&
+        a.TcpPort == b.TcpPort &&
+        a.IpWhitelist.SequenceEqual(b.IpWhitelist, StringComparer.OrdinalIgnoreCase);
+}

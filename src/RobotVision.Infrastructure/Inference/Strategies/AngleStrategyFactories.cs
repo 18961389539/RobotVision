@@ -36,3 +36,14 @@ public sealed class KeyPointLineStrategyFactory : IAngleStrategyFactory
     public IAngleStrategy Create(ModelManager models, ILogger? logger = null) =>
         new KeyPointLineStrategy(models);
 }
+
+/// <summary>MaskTemplate 策略工厂：分割粗定位 + 精修（模板匹配/直线拟合）。</summary>
+public sealed class MaskTemplateStrategyFactory : IAngleStrategyFactory
+{
+    public AngleMode Mode => AngleMode.MaskTemplate;
+
+    public string Label => "分割+精修（模板匹配或直线拟合）";
+
+    public IAngleStrategy Create(ModelManager models, ILogger? logger = null) =>
+        new MaskTemplateStrategy(models);
+}

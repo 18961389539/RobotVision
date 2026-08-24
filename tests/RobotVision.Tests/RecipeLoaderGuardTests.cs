@@ -97,7 +97,7 @@ public sealed class RecipeLoaderGuardTests : IDisposable
         var recipe = new RecipeConfig
         {
             Name = "T1", CameraId = "cam", AngleMode = AngleMode.KeyPointLine,
-            Models = ["m.onnx"], KeypointIndexA = 1, KeypointIndexB = 1,
+            Models = ["m.onnx"], Keypoint = new KeypointOptions { IndexA = 1, IndexB = 1 },
         };
         Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
     }
@@ -146,6 +146,62 @@ public sealed class RecipeLoaderGuardTests : IDisposable
 
         Assert.True(recipe.DebugPassthrough);
         Assert.Null(recipe.StationId);
+    }
+
+    [Fact]
+    public void Validate_MaskTemplate_RequiresExactlyOneModel()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx", "b.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.LineFit },
+        };
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+    }
+
+    [Fact]
+    public void Validate_MaskTemplate_TemplateMethod_RequiresTaughtImage()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.Template },
+        };
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+    }
+
+    [Fact]
+    public void Validate_MaskTemplate_LineFit_DoesNotRequireTemplate()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.LineFit },
+        };
+        RecipeLoader.Validate(recipe);
+    }
+
+    [Fact]
+    public void Validate_MaskTemplate_MatchThresholdOutOfRange_Throws()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.LineFit, MatchThreshold = 1.5 },
+        };
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
     }
 }
 

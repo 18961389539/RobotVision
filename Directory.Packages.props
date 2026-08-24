@@ -1,0 +1,49 @@
+<Project>
+  <!--
+    Central Package Management（CPM）：所有包版本在此集中声明，项目 csproj 只写 PackageReference。
+    升级依赖只改本文件一处。开启方式：根 Directory.Packages.props 存在即自动启用。
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 视觉与推理 -->
+    <PackageVersion Include="OpenCvSharp4" Version="4.10.0.20240615" />
+    <PackageVersion Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240615" />
+    <PackageVersion Include="YoloDotNet" Version="4.2.0" />
+    <PackageVersion Include="YoloDotNet.ExecutionProvider.Cpu" Version="1.1.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.23.0" />
+    <PackageVersion Include="HelixToolkit.Wpf.SharpDX" Version="3.1.2" />
+
+    <!-- 相机硬件 -->
+    <PackageVersion Include="Basler.Pylon.NET.x64" Version="10.3.2.636" />
+    <PackageVersion Include="LDVisionCamera.Net" Version="1.0.0-rc.37" />
+
+    <!-- Microsoft.Extensions（统一 8.0.x 补丁线；net10 升级时整体切 10.x） -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+
+    <!-- 日志 -->
+    <PackageVersion Include="Serilog" Version="4.0.2" />
+    <PackageVersion Include="Serilog.Extensions.Logging" Version="8.0.0" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="6.0.0" />
+
+    <!-- UI -->
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageVersion Include="WPF-UI" Version="3.1.1" />
+
+    <!-- 硬件：串口 -->
+    <PackageVersion Include="System.IO.Ports" Version="8.0.0" />
+
+    <!-- 测试 -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageVersion Include="xunit" Version="2.9.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+</Project>

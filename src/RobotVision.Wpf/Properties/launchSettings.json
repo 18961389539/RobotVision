@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "RobotVision.Wpf": {
+      "commandName": "Project",
+      "workingDirectory": "$(ProjectDir)..\\..\\"
+    }
+  }
+}

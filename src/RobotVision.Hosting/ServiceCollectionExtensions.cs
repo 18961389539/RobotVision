@@ -1,6 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using RobotVision.Core;
+using RobotVision.Core.Abstractions;
+using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Cameras;
@@ -16,7 +19,7 @@ using RobotVision.Hosting.Lighting;
 
 /// <summary>
 /// 视觉服务的统一组装：配置 → 相机/模型/标定管理器 → VisionService → TCP。
-/// 控制台宿主（RobotVision.App）与 WPF 宿主（RobotVision.UI）共用，保证两条入口行为一致。
+/// 由 WPF 宿主（RobotVision.WpfHost）组装调用。
 /// </summary>
 public static class ServiceCollectionExtensions
 {
@@ -107,14 +110,27 @@ public static class ServiceCollectionExtensions
                 }
                 catch (Exception ex)
                 {
+                    var kind = string.Equals(camera.Type, "File", StringComparison.OrdinalIgnoreCase)
+                        ? CameraKind.File
+                        : string.Equals(camera.Type, "Virtual", StringComparison.OrdinalIgnoreCase)
+                            ? CameraKind.Virtual
+                            : CameraKind.Real;
+                    var message = ex is VisionException vex
+                        ? vex.Message
+                        : $"相机 {camera.Id} 初始化失败: {ex.Message}";
+                    manager.Register(new FailedCamera(camera.Id, kind, message));
                     log.LogError(ex, "相机 {Id} 初始化失败，使用该相机的配方将返回错误码 {Code}",
-                        camera.Id, (int)RobotVision.Core.Models.VisionErrorCode.CameraNotRegistered);
+                        camera.Id, (int)VisionErrorCode.CameraInitFailed);
                 }
             }
             return manager;
         });
 
-        services.AddSingleton(new ModelManager(modelsFolder));
+        // 推理引擎工厂：Provider 可配（appsettings Inference:Provider，默认 Cpu）；
+        // 工厂同时注册为服务，供模型管理页的测试推理创建独立引擎（不占用产线会话）
+        var engineFactory = new YoloDotNetEngineFactory(cfg.Inference.Provider);
+        services.AddSingleton<IInferenceEngineFactory>(engineFactory);
+        services.AddSingleton(new ModelManager(modelsFolder, engineFactory, cfg.Inference.MaxSessions));
 
         // 光源控制器：None 类型为无操作虚拟实现（调试兜底），
         // 真实控制器（串口/Modbus/TCP）实现 ILightControllerFactory 并注册到
@@ -152,7 +168,7 @@ public static class ServiceCollectionExtensions
                 catch (Exception ex)
                 {
                     log.LogError(ex, "光源控制器 {Id} 初始化失败，使用该控制器的配方将返回错误码 {Code}",
-                        light.Id, (int)RobotVision.Core.Models.VisionErrorCode.LightNotRegistered);
+                        light.Id, (int)VisionErrorCode.LightNotRegistered);
                 }
             }
             return manager;
@@ -160,7 +176,13 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(sp =>
         {
-            var calibration = new CalibrationManager();
+            var calibration = new CalibrationManager
+            {
+                // TRIGGER 位姿校验容差（PoseCheck 段；保存设置后经 RuntimeSync 热应用）
+                PoseCheckEnabled = cfg.PoseCheck.Enabled,
+                PoseXyToleranceMm = cfg.PoseCheck.XyToleranceMm,
+                PoseRzToleranceDeg = cfg.PoseCheck.RzToleranceDeg,
+            };
             var calibLog = sp.GetRequiredService<ILogger<CalibrationManager>>();
             foreach (var (file, error) in calibration.LoadDirectory(calibrationFolder))
                 calibLog.LogWarning("标定档案 {File} 加载失败: {Error}", file, error);
@@ -197,7 +219,8 @@ public static class ServiceCollectionExtensions
                 cfg.IpAddress,
                 cfg.TcpPort,
                 cfg.TimeoutMs,
-                (recipe, ct) => sp.GetRequiredService<VisionService>().RunAsync(recipe, ct),
+                // TRIGGER,配方名 → pose=null（旧格式跳过位姿校验）；TRIGGER,配方名,X,Y,RZ → OnArm 一致性校验
+                (recipe, pose, ct) => sp.GetRequiredService<VisionService>().RunAsync(recipe, pose, ct),
                 sp.GetRequiredService<ILogger<TcpServerManager>>())
             {
                 MaxConnections = cfg.MaxConnections,
@@ -224,6 +247,12 @@ public static class ServiceCollectionExtensions
 
                 var vision = sp.GetRequiredService<VisionService>();
                 vision.MaxQueueDepth = Math.Max(1, updated.MaxQueueDepth);
+
+                // 位姿校验容差热应用（1012 的判定标准保存即生效）
+                var calibration = sp.GetRequiredService<CalibrationManager>();
+                calibration.PoseCheckEnabled = updated.PoseCheck.Enabled;
+                calibration.PoseXyToleranceMm = updated.PoseCheck.XyToleranceMm;
+                calibration.PoseRzToleranceDeg = updated.PoseCheck.RzToleranceDeg;
 
                 var failures = sp.GetRequiredService<FailureImageStore>();
                 failures.Enabled = updated.FailureImage.Enabled;
@@ -271,8 +300,9 @@ public static class ServiceCollectionExtensions
 
         if (!string.IsNullOrEmpty(recipe.StationId) &&
             !calibration.ExtrinsicProfiles.Any(p =>
-                string.Equals(p.StationId, recipe.StationId, StringComparison.OrdinalIgnoreCase)))
-            return $"工位未做外参标定: {recipe.StationId}";
+                string.Equals(p.StationId, recipe.StationId, StringComparison.OrdinalIgnoreCase)) &&
+            !calibration.HasPolynomial(recipe.StationId))
+            return $"工位未做外参/多项式标定: {recipe.StationId}";
 
         if (recipe.RotationCompensation == RotationCompensationMode.EccentricTool &&
             !string.IsNullOrEmpty(recipe.StationId) &&

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="WPF-UI" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RobotVision.Hosting\RobotVision.Hosting.csproj" />
+    <ProjectReference Include="..\ImageViewerControl\ImageViewerControl.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\recipes\**\*" CopyToOutputDirectory="PreserveNewest" Link="recipes\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\data\calibration\**\*" CopyToOutputDirectory="PreserveNewest" Link="data\calibration\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\data\replay\**\*" CopyToOutputDirectory="PreserveNewest" Link="data\replay\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\models\**\*" CopyToOutputDirectory="PreserveNewest" Link="models\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>
