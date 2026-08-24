@@ -230,6 +230,12 @@ public sealed class TcpServerManager : IDisposable
             catch { /* 关闭阶段忽略 */ }
         }
         _clients.Clear();
+
+        var leftoverSessions = _sessions.Values.ToArray();
+        _sessions.Clear();
+        foreach (var session in leftoverSessions)
+            RaiseClientEvent(ClientDisconnected, session);
+
         cts?.Dispose();
     }
 

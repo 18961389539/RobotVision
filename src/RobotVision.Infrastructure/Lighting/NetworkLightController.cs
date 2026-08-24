@@ -141,11 +141,13 @@ public sealed class NetworkLightController : ILightController
 
     private void SendFrame(byte[] frame)
     {
-        if (_disposed || frame.Length == 0)
+        if (frame.Length == 0)
             return;
 
         lock (_sendLock)
         {
+            if (_disposed)
+                return;
             try
             {
                 if (Protocol == LightProtocol.Udp)

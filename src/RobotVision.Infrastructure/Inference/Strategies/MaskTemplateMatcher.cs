@@ -174,12 +174,26 @@ public static class MaskTemplateMatcher
         var degB = degA >= 0 ? degA - 180.0 : degA + 180.0;
         var a = SingleMatch(uprightGray, templateGray, degA);
         var b = SingleMatch(uprightGray, templateGray, degB);
-        if (a is null && b is null)
-            return edgeMatch; // 灰度无法复核（目标靠边/尺寸不足）：退回纯边缘结果
+        return SelectHybridOrientation(edgeMatch, a, b);
+    }
 
-        if (a?.Score >= b?.Score)
-            return new MaskTemplateMatchResult(edgeMatch.Score, degA, a!.CenterInUpright);
-        return new MaskTemplateMatchResult(edgeMatch.Score, degB, b!.CenterInUpright);
+    /// <summary>
+    /// 灰度头尾二选一：任一侧失败用另一侧；双侧失败退回边缘结果。
+    /// 不能写 <c>a?.Score &gt;= b?.Score</c>——一侧为 null 时比较为 false，会解引用另一侧的 null。
+    /// </summary>
+    public static MaskTemplateMatchResult SelectHybridOrientation(
+        MaskTemplateMatchResult edgeMatch,
+        MaskTemplateMatchResult? grayA,
+        MaskTemplateMatchResult? grayB)
+    {
+        if (grayA is null && grayB is null)
+            return edgeMatch;
+        if (grayB is null)
+            return new MaskTemplateMatchResult(edgeMatch.Score, grayA!.RotationDeg, grayA.CenterInUpright);
+        if (grayA is null)
+            return new MaskTemplateMatchResult(edgeMatch.Score, grayB.RotationDeg, grayB.CenterInUpright);
+        var win = grayA.Score >= grayB.Score ? grayA : grayB;
+        return new MaskTemplateMatchResult(edgeMatch.Score, win.RotationDeg, win.CenterInUpright);
     }
 
     /// <summary>单角度灰度匹配：模板旋转到指定角后在转正图上滑窗一次。尺寸不够返回 null。</summary>

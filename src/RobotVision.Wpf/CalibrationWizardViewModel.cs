@@ -327,7 +327,9 @@ public partial class CalibrationWizardViewModel : ObservableObject
         }
         catch (VisionException vex)
         {
-            Message = Mode is WizardMode.Extrinsic or WizardMode.Rotation
+            var needIntrinsic = Mode is WizardMode.Extrinsic
+                || (Mode is WizardMode.Rotation && !_calibration.HasPolynomial(StationId.Trim()));
+            Message = needIntrinsic
                 ? $"{vex.Message}（外参/旋转中心取图前须先完成该相机的内参标定）"
                 : vex.Message;
         }
@@ -378,7 +380,16 @@ public partial class CalibrationWizardViewModel : ObservableObject
             return new GrabResult(preview, null, polyInfo);
         }
 
-        // 外参与旋转中心必须在去畸变坐标系下取点（与推理一致）
+        if (Mode is WizardMode.Rotation &&
+            !string.IsNullOrWhiteSpace(StationId) &&
+            _calibration.HasPolynomial(StationId.Trim()))
+        {
+            var preview = frame.Clone();
+            return new GrabResult(preview, null,
+                $"新图已就绪（原图 {preview.Width}×{preview.Height}，多项式工位用原图坐标系，与推理一致）");
+        }
+
+        // 外参与（无多项式时的）旋转中心必须在去畸变坐标系下取点（与推理一致）
         var undistorted = _calibration.Undistort(cameraId, frame);
         var text = Mode == WizardMode.Extrinsic
             ? $"新图已就绪（{undistorted.Width}×{undistorted.Height}），请依次点 9 个标定点"
@@ -500,7 +511,7 @@ public partial class CalibrationWizardViewModel : ObservableObject
     {
         if (_measuredToolOffset is null)
         {
-            Message = "请先计算（需 ≥2 个带第4轴角的标记点与工位外参档案）";
+            Message = "请先计算（需 ≥2 个带第4轴角的标记点与工位外参或多项式档案）";
             return;
         }
         ToolOffsetDeg = _measuredToolOffset.Value;
@@ -577,30 +588,46 @@ public partial class CalibrationWizardViewModel : ObservableObject
                     break;
 
                 case WizardMode.Rotation:
-                    _calibration.RequireIntrinsic(SelectedCamera);
-                    var intrinsicForRot = GetIntrinsic(SelectedCamera);
+                    var rotationStationId = StationId.Trim();
+                    var rotationHasPolynomial = _calibration.HasPolynomial(rotationStationId);
+                    int rotWidth, rotHeight;
+                    if (rotationHasPolynomial)
+                    {
+                        var poly = _calibration.PolynomialProfiles.First(p =>
+                            string.Equals(p.StationId, rotationStationId, StringComparison.OrdinalIgnoreCase));
+                        rotWidth = poly.Width;
+                        rotHeight = poly.Height;
+                    }
+                    else
+                    {
+                        _calibration.RequireIntrinsic(SelectedCamera);
+                        var intrinsicForRot = GetIntrinsic(SelectedCamera);
+                        rotWidth = intrinsicForRot?.Width ?? 0;
+                        rotHeight = intrinsicForRot?.Height ?? 0;
+                    }
+
                     var rotation = await Task.Run(() =>
                         RotationCenterCalibrator.Calibrate(
-                            StationId.Trim(), SelectedCamera,
+                            rotationStationId, SelectedCamera,
                             [.. Points.Select(p => new Point2f((float)p.PixelX, (float)p.PixelY))],
-                            intrinsicForRot?.Width ?? 0, intrinsicForRot?.Height ?? 0));
+                            rotWidth, rotHeight));
                     _pendingRotation = rotation with { ToolOffsetDeg = ToolOffsetDeg };
                     Result = Format(_pendingRotation);
                     _measuredToolOffset = null;
 
-                    // 方向自检 + 偏角实测（填了第 4 轴角度即自动执行）：需该工位外参，缺失时提示跳过
+                    // 方向自检 + 偏角实测：工位有外参或多项式映射即可（GetMapping 两者皆可）
                     var paired = Points.Where(p => p.RobotRzDeg.HasValue).ToArray();
-                    var rotationStationId = StationId.Trim();
-                    var rotationHasExtrinsic = _calibration.ExtrinsicProfiles.Any(
-                        e => string.Equals(e.StationId, rotationStationId, StringComparison.OrdinalIgnoreCase));
+                    var rotationHasMapping = rotationHasPolynomial ||
+                        _calibration.ExtrinsicProfiles.Any(e =>
+                            string.Equals(e.StationId, rotationStationId, StringComparison.OrdinalIgnoreCase));
                     var pairedPoints = paired.Select(p => new Point2f((float)p.PixelX, (float)p.PixelY)).ToArray();
                     var pairedAngles = paired.Select(p => p.RobotRzDeg!.Value).ToArray();
 
-                    if (!rotationHasExtrinsic)
+                    if (!rotationHasMapping)
                     {
                         Result += paired.Length >= 2
-                            ? "\n提示: 工位无外参档案，跳过方向自检与偏角实测（建议先标外参，再回来验证）"
-                            : "\n提示: 在点表\"第4轴角\"列填写各点角度（≥2 个 + 工位外参）可实测工具零位偏角；≥3 个可同时做旋转方向自检";
+                            ? "\n提示: 工位无外参/多项式档案，跳过方向自检与偏角实测（建议先标映射，再回来验证）"
+                            : "\n提示: 在点表\"第4轴角\"列填写各点角度（≥2 个 + 工位外参或多项式）可实测工具零位偏角；≥3 个可同时做旋转方向自检";
                         break;
                     }
 

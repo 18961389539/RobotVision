@@ -58,6 +58,29 @@ public class FileCameraTests : IDisposable
     }
 
     [Fact]
+    public void Grab_ChinesePath_ReadsImage()
+    {
+        var cnDir = Path.Combine(Path.GetTempPath(), "回放测试_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cnDir);
+        try
+        {
+            using var src = new Mat(32, 32, MatType.CV_8UC3, Scalar.All(80));
+            Cv2.ImEncode(".png", src, out var bytes);
+            File.WriteAllBytes(Path.Combine(cnDir, "中文.png"), bytes);
+
+            using var camera = new FileCamera("cam", cnDir);
+            using var frame = camera.Grab();
+            Assert.False(frame.Image.Empty());
+            Assert.Equal(32, frame.Image.Width);
+        }
+        finally
+        {
+            try { Directory.Delete(cnDir, true); }
+            catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public void Ctor_MissingFolder_ThrowsInitFailed()
     {
         var ex = Assert.Throws<VisionException>(() => new FileCamera("cam", Path.Combine(_dir, "nope")));

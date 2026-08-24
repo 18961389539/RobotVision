@@ -1,3 +1,4 @@
+using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using Xunit;
 
@@ -35,6 +36,79 @@ public sealed class RecipeLoaderTests : IDisposable
         Assert.Equal(AngleMode.KeyPointLine, recipe.AngleMode);
         Assert.Equal("st1", recipe.StationId);
         Assert.Equal("R01", recipe.Name);
+    }
+
+    /// <summary>旧版平铺字段 JSON（子对象化前的格式）应仍能加载，setter-only 兼容属性迁移到子对象。</summary>
+    [Fact]
+    public void Get_LegacyFlatKeypointFields_MigrateToSubobjects()
+    {
+        File.WriteAllText(Path.Combine(_folder, "LEGACY.json"), """
+            {
+              "cameraId": "cam1",
+              "angleMode": "KeyPointLine",
+              "models": [ "m.onnx" ],
+              "keypointIndexA": 2,
+              "keypointIndexB": 5,
+              "keypointMinConfidence": 0.4
+            }
+            """);
+
+        var recipe = new RecipeLoader(_folder).Get("LEGACY");
+
+        Assert.Equal(2, recipe.Keypoint.IndexA);
+        Assert.Equal(5, recipe.Keypoint.IndexB);
+        Assert.Equal(0.4, recipe.Keypoint.MinConfidence);
+    }
+
+    /// <summary>旧版平铺字段 JSON：pixelConfidence / pairingMaxDistancePx 同样迁移。</summary>
+    [Fact]
+    public void Get_LegacyFlatStrategyFields_MigrateToSubobjects()
+    {
+        File.WriteAllText(Path.Combine(_folder, "LEGACY2.json"), """
+            {
+              "cameraId": "cam1",
+              "angleMode": "MaskMinAreaRect",
+              "models": [ "m.onnx" ],
+              "pixelConfidence": 0.8
+            }
+            """);
+        File.WriteAllText(Path.Combine(_folder, "LEGACY3.json"), """
+            {
+              "cameraId": "cam1",
+              "angleMode": "DualCenterLine",
+              "models": [ "m1.onnx", "m2.onnx" ],
+              "pairingMaxDistancePx": 123
+            }
+            """);
+
+        var loader = new RecipeLoader(_folder);
+        Assert.Equal(0.8, loader.Get("LEGACY2").Segmentation.PixelConfidence);
+        Assert.Equal(123.0, loader.Get("LEGACY3").DualModel.PairingMaxDistancePx);
+    }
+
+    /// <summary>新格式子对象 JSON：保存后再次读取值一致（序列化往返）。</summary>
+    [Fact]
+    public void Save_RoundTripsSubobjects()
+    {
+        var loader = new RecipeLoader(_folder);
+        var recipe = new RecipeConfig
+        {
+            Name = "RT",
+            CameraId = "cam1",
+            AngleMode = AngleMode.KeyPointLine,
+            Models = ["m.onnx"],
+            Keypoint = new KeypointOptions { IndexA = 1, IndexB = 3, MinConfidence = 0.55 },
+            DualModel = new DualModelOptions { PairingMaxDistancePx = 222 },
+            Segmentation = new SegmentationOptions { PixelConfidence = 0.77 },
+        };
+        loader.Save(recipe);
+
+        var loaded = loader.Get("RT");
+        Assert.Equal(1, loaded.Keypoint.IndexA);
+        Assert.Equal(3, loaded.Keypoint.IndexB);
+        Assert.Equal(0.55, loaded.Keypoint.MinConfidence);
+        Assert.Equal(222.0, loaded.DualModel.PairingMaxDistancePx);
+        Assert.Equal(0.77, loaded.Segmentation.PixelConfidence);
     }
 
     [Fact]
@@ -161,11 +235,14 @@ public sealed class RecipeLoaderTests : IDisposable
         File.WriteAllText(Path.Combine(_folder, "R03.json"), """{ "cameraId": "cam", "models": ["m.onnx"] }""");
         var loader = new RecipeLoader(_folder)
         {
-            ReferenceValidator = r => r.CameraId == "cam" ? "相机未注册: cam" : null,
+            ReferenceValidator = r => r.CameraId == "cam"
+                ? new RecipeReferenceError("相机未注册: cam", VisionErrorCode.CameraNotRegistered)
+                : null,
         };
 
         var ex = Assert.Throws<InvalidRecipeException>(() => loader.Get("R03"));
         Assert.Contains("相机未注册", ex.Message);
+        Assert.Equal(VisionErrorCode.CameraNotRegistered, ex.ErrorCode);
     }
 
     [Fact]

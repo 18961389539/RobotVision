@@ -54,4 +54,40 @@ public sealed class MaskTemplateCropMappingTests
                 $"回投应接近矩形中心（映射 {mapped.X:0.0} vs 真值 {cx}，裁剪坐标 {cropCenter.X:0.0}）");
         }
     }
+
+    [Fact]
+    public void SelectHybridOrientation_OneGrayNull_UsesTheOther()
+    {
+        var edge = new MaskTemplateMatchResult(0.9, 12, new Point2d(10, 20));
+        var a = new MaskTemplateMatchResult(0.4, 12, new Point2d(11, 21));
+
+        var fromA = MaskTemplateMatcher.SelectHybridOrientation(edge, a, null);
+        Assert.Equal(edge.Score, fromA.Score);
+        Assert.Equal(a.RotationDeg, fromA.RotationDeg);
+        Assert.Equal(a.CenterInUpright, fromA.CenterInUpright);
+
+        var b = new MaskTemplateMatchResult(0.5, -168, new Point2d(9, 19));
+        var fromB = MaskTemplateMatcher.SelectHybridOrientation(edge, null, b);
+        Assert.Equal(b.RotationDeg, fromB.RotationDeg);
+        Assert.Equal(b.CenterInUpright, fromB.CenterInUpright);
+    }
+
+    [Fact]
+    public void SelectHybridOrientation_BothNull_ReturnsEdge()
+    {
+        var edge = new MaskTemplateMatchResult(0.88, 3, new Point2d(1, 2));
+        var picked = MaskTemplateMatcher.SelectHybridOrientation(edge, null, null);
+        Assert.Same(edge, picked);
+    }
+
+    [Fact]
+    public void SelectHybridOrientation_PicksHigherGrayScore()
+    {
+        var edge = new MaskTemplateMatchResult(0.9, 0, new Point2d(0, 0));
+        var low = new MaskTemplateMatchResult(0.2, 0, new Point2d(1, 1));
+        var high = new MaskTemplateMatchResult(0.8, 180, new Point2d(2, 2));
+        var picked = MaskTemplateMatcher.SelectHybridOrientation(edge, low, high);
+        Assert.Equal(180, picked.RotationDeg);
+        Assert.Equal(edge.Score, picked.Score);
+    }
 }

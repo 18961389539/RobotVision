@@ -208,8 +208,7 @@ public sealed class VisionService(
         }
         catch (InvalidRecipeException ex)
         {
-            return VisionResult.Fail(recipeName, VisionErrorCode.UnknownRecipe,
-                ex.Message, stopwatch.Elapsed.TotalMilliseconds);
+            return VisionResult.Fail(recipeName, ex.ErrorCode, ex.Message, stopwatch.Elapsed.TotalMilliseconds);
         }
         catch (OperationCanceledException)
         {

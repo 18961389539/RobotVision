@@ -195,7 +195,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
             var source = await Task.Run(() =>
             {
                 using var frame = _cameras.Grab(cameraId).Image;
-                var preview = frame.Clone();
+                using var preview = frame.Clone();
                 // 全图推理（Roi=null）也画整框：让操作员确认"当前是全图"这一事实
                 var r = roi ?? new Roi(0, 0, 1, 1);
                 var rect = new OpenCvSharp.Rect(

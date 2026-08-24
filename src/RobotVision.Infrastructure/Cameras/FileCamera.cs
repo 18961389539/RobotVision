@@ -68,10 +68,29 @@ public sealed class FileCamera : ICamera
             file = _files[_index++];
         }
 
-        var mat = Cv2.ImRead(file, ImreadModes.Color);
+        return new CameraFrame(ReadImage(file), DateTime.UtcNow);
+    }
+
+    /// <summary>
+    /// 按字节流解码：OpenCV ImRead 对非 ASCII（中文）路径在 Windows 上常返回空图。
+    /// 与 ChessboardIntrinsicCalibrator 同一口径。
+    /// </summary>
+    private static Mat ReadImage(string file)
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new VisionException(VisionErrorCode.CameraGrabFailed, $"无法读取图像: {file}");
+        }
+
+        var mat = Cv2.ImDecode(bytes, ImreadModes.Color);
         if (mat.Empty())
             throw new VisionException(VisionErrorCode.CameraGrabFailed, $"无法读取图像: {file}");
-        return new CameraFrame(mat, DateTime.UtcNow);
+        return mat;
     }
 
     public void Dispose()

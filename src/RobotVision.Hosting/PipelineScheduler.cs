@@ -115,18 +115,33 @@ public sealed class PipelineScheduler(ILogger log)
 
             if (acquired)
             {
-                // 获槽成功立即置执行阶段（与取消回调同锁），竞态窗口内的取消按 1008 处理
-                lock (stageLock) { stage = 1; }
-                try
+                var run = false;
+                lock (stageLock)
                 {
-                    // 取图/光源延时等阶段响应取消（取消后按 1008 处理超时）；
-                    // 推理段不可中断（Task.Run 内不响应取消），调用方超时后任务跑完丢弃结果。
-                    var result = await core(recipeName, ct);
-                    waiter.TrySetResult(result);
+                    // 获槽成功后、置 stage 前若已取消：释放槽位且不跑 core。
+                    // 取消回调已按 stage==0 置 1010；此处再跑会一边回排队超时一边继续推理。
+                    if (ct.IsCancellationRequested)
+                        Pipeline.Release();
+                    else
+                    {
+                        stage = 1;
+                        run = true;
+                    }
                 }
-                finally
+
+                if (run)
                 {
-                    Pipeline.Release();
+                    try
+                    {
+                        // 取图/光源延时等阶段响应取消（取消后按 1008 处理超时）；
+                        // 推理段不可中断（Task.Run 内不响应取消），调用方超时后任务跑完丢弃结果。
+                        var result = await core(recipeName, ct);
+                        waiter.TrySetResult(result);
+                    }
+                    finally
+                    {
+                        Pipeline.Release();
+                    }
                 }
             }
         }

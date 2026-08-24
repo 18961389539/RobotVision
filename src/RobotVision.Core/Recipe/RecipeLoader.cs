@@ -1,14 +1,24 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using RobotVision.Core.Models;
 
 namespace RobotVision.Core.Recipe;
 
 public sealed class RecipeNotFoundException(string name)
     : Exception($"配方不存在: {name}");
 
-public sealed class InvalidRecipeException(string name, string reason)
-    : Exception($"配方 {name} 无效: {reason}");
+public sealed class InvalidRecipeException(
+    string name,
+    string reason,
+    VisionErrorCode errorCode = VisionErrorCode.UnknownRecipe)
+    : Exception($"配方 {name} 无效: {reason}")
+{
+    public VisionErrorCode ErrorCode { get; } = errorCode;
+}
+
+/// <summary>配方引用完整性失败（相机/光源/模型/标定），带协议错误码。</summary>
+public readonly record struct RecipeReferenceError(string Message, VisionErrorCode Code);
 
 /// <summary>从配方目录加载 JSON 配方并缓存。配方文件名即配方名（{name}.json）。</summary>
 public sealed class RecipeLoader(string folder)
@@ -32,10 +42,10 @@ public sealed class RecipeLoader(string folder)
 
     /// <summary>
     /// 引用完整性校验器（由组装层注入，联动相机/模型/标定管理器）。
-    /// 返回 null 表示通过；返回错误消息时抛 InvalidRecipeException。
+    /// 返回 null 表示通过；返回错误时抛带协议码的 InvalidRecipeException。
     /// 纯值域校验见 <see cref="Validate"/>，两者互补。
     /// </summary>
-    public Func<RecipeConfig, string?>? ReferenceValidator { get; set; }
+    public Func<RecipeConfig, RecipeReferenceError?>? ReferenceValidator { get; set; }
 
     /// <summary>配方文件是否已存在（供 UI 覆盖确认）。</summary>
     public bool FileExists(string name) =>
@@ -104,7 +114,7 @@ public sealed class RecipeLoader(string folder)
 
         var error = validate(recipe);
         if (error is not null)
-            throw new InvalidRecipeException(recipe.Name, error);
+            throw new InvalidRecipeException(recipe.Name, error.Value.Message, error.Value.Code);
     }
 
     /// <summary>启动期或加载时校验，把配置错误拦在进入产线之前。</summary>

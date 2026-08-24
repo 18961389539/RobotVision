@@ -96,6 +96,8 @@ public static class ServiceCollectionExtensions
                     {
                         log.LogWarning("相机 {Id} 类型 {Type} 无工厂（实现 ICameraFactory 并调用 CameraTypeRegistry.Register 一行接入）",
                             camera.Id, camera.Type);
+                        manager.Register(new FailedCamera(camera.Id, InferCameraKind(camera.Type),
+                            $"相机 {camera.Id} 类型 {camera.Type} 无工厂"));
                         continue;
                     }
 
@@ -110,11 +112,7 @@ public static class ServiceCollectionExtensions
                 }
                 catch (Exception ex)
                 {
-                    var kind = string.Equals(camera.Type, "File", StringComparison.OrdinalIgnoreCase)
-                        ? CameraKind.File
-                        : string.Equals(camera.Type, "Virtual", StringComparison.OrdinalIgnoreCase)
-                            ? CameraKind.Virtual
-                            : CameraKind.Real;
+                    var kind = InferCameraKind(camera.Type);
                     var message = ex is VisionException vex
                         ? vex.Message
                         : $"相机 {camera.Id} 初始化失败: {ex.Message}";
@@ -158,6 +156,8 @@ public static class ServiceCollectionExtensions
                     {
                         log.LogWarning("光源控制器 {Id} 类型 {Type} 无工厂（实现 ILightControllerFactory 并调用 LightControllerTypeRegistry.Register 一行接入）",
                             light.Id, light.Type);
+                        manager.Register(new FailedLightController(light.Id,
+                            $"光源控制器 {light.Id} 类型 {light.Type} 无工厂"));
                         continue;
                     }
 
@@ -167,6 +167,8 @@ public static class ServiceCollectionExtensions
                 }
                 catch (Exception ex)
                 {
+                    manager.Register(new FailedLightController(light.Id,
+                        $"光源控制器 {light.Id} 初始化失败: {ex.Message}"));
                     log.LogError(ex, "光源控制器 {Id} 初始化失败，使用该控制器的配方将返回错误码 {Code}",
                         light.Id, (int)VisionErrorCode.LightNotRegistered);
                 }
@@ -274,11 +276,16 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    private static CameraKind InferCameraKind(string? type) =>
+        string.Equals(type, "File", StringComparison.OrdinalIgnoreCase) ? CameraKind.File
+        : string.Equals(type, "Virtual", StringComparison.OrdinalIgnoreCase) ? CameraKind.Virtual
+        : CameraKind.Real;
+
     /// <summary>
     /// 配方引用完整性校验：把"相机未注册/模型文件缺失/工位未标定/旋转中心缺失"
-    /// 从触发时才报错提前到加载/保存时拦截。返回错误消息或 null（通过）。
+    /// 从触发时才报错提前到加载/保存时拦截。返回错误（含协议码）或 null（通过）。
     /// </summary>
-    private static string? ValidateRecipeReferences(
+    private static RecipeReferenceError? ValidateRecipeReferences(
         RecipeConfig recipe,
         CameraManager cameras,
         ModelManager models,
@@ -286,29 +293,31 @@ public static class ServiceCollectionExtensions
         LightingManager lighting)
     {
         if (!cameras.CameraIds.Any(id => string.Equals(id, recipe.CameraId, StringComparison.OrdinalIgnoreCase)))
-            return $"相机未注册: {recipe.CameraId}";
+            return new RecipeReferenceError($"相机未注册: {recipe.CameraId}", VisionErrorCode.CameraNotRegistered);
 
         if (!string.IsNullOrEmpty(recipe.LightControllerId) &&
             !lighting.IsRegistered(recipe.LightControllerId))
-            return $"光源控制器未注册: {recipe.LightControllerId}";
+            return new RecipeReferenceError($"光源控制器未注册: {recipe.LightControllerId}", VisionErrorCode.LightNotRegistered);
 
         foreach (var model in recipe.Models)
         {
             if (!models.ModelFileExists(model))
-                return $"模型文件不存在: {model}";
+                return new RecipeReferenceError($"模型文件不存在: {model}", VisionErrorCode.ModelNotAvailable);
         }
 
         if (!string.IsNullOrEmpty(recipe.StationId) &&
             !calibration.ExtrinsicProfiles.Any(p =>
                 string.Equals(p.StationId, recipe.StationId, StringComparison.OrdinalIgnoreCase)) &&
             !calibration.HasPolynomial(recipe.StationId))
-            return $"工位未做外参/多项式标定: {recipe.StationId}";
+            return new RecipeReferenceError($"工位未做外参/多项式标定: {recipe.StationId}", VisionErrorCode.NotCalibrated);
 
         if (recipe.RotationCompensation == RotationCompensationMode.EccentricTool &&
             !string.IsNullOrEmpty(recipe.StationId) &&
             !calibration.RotationCenterProfiles.Any(p =>
                 string.Equals(p.StationId, recipe.StationId, StringComparison.OrdinalIgnoreCase)))
-            return $"工位未做旋转中心标定: {recipe.StationId}（EccentricTool 需要）";
+            return new RecipeReferenceError(
+                $"工位未做旋转中心标定: {recipe.StationId}（EccentricTool 需要）",
+                VisionErrorCode.NotCalibrated);
 
         return null;
     }
