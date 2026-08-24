@@ -13,14 +13,14 @@ namespace RobotVision.Infrastructure.Inference;
 /// </summary>
 public interface IInferenceEngine : IDisposable
 {
-    /// <summary>目标检测：返回检测框 + 置信度。</summary>
-    IReadOnlyList<ObjectDetection> RunObjectDetection(SKBitmap image, double confidence, double iou);
+    /// <summary>目标检测：返回检测框 + 置信度。默认参数与 YoloDotNet Yolo 类一致。</summary>
+    IReadOnlyList<ObjectDetection> RunObjectDetection(SkiaSharp.SKBitmap image, double confidence = 0.25, double iou = 0.45);
 
-    /// <summary>实例分割：返回掩码 + 检测框 + 置信度。</summary>
-    IReadOnlyList<Segmentation> RunSegmentation(SKBitmap image, double confidence, double pixelConfidence, double iou);
+    /// <summary>实例分割：返回掩码 + 检测框 + 置信度。默认参数与 YoloDotNet Yolo 类一致。</summary>
+    IReadOnlyList<Segmentation> RunSegmentation(SkiaSharp.SKBitmap image, double confidence = 0.25, double pixelConfidence = 0.5, double iou = 0.45);
 
-    /// <summary>姿态估计（关键点）：返回关键点 + 检测框 + 置信度。</summary>
-    IReadOnlyList<PoseEstimation> RunPoseEstimation(SKBitmap image, double confidence, double iou);
+    /// <summary>姿态估计（关键点）：返回关键点 + 检测框 + 置信度。默认参数与 YoloDotNet Yolo 类一致。</summary>
+    IReadOnlyList<PoseEstimation> RunPoseEstimation(SkiaSharp.SKBitmap image, double confidence = 0.25, double iou = 0.45);
 }
 
 /// <summary>

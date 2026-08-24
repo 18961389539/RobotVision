@@ -71,4 +71,16 @@ public class RotationCenterCalibratorTests
         Assert.Throws<VisionException>(() =>
             RotationCenterCalibrator.Calibrate("st1", "cam1", points));
     }
+
+    [Fact]
+    public void Calibrate_TinyRadius_Rejected()
+    {
+        // 半径 3px 的"圆"：跨度 6px 通过绝对退化检查，但偏心量可忽略且轴心对噪声极敏感——拒绝
+        var points = CirclePoints(100, 100, 3, 0, 45, 90, 135, 180);
+
+        var ex = Assert.Throws<VisionException>(() =>
+            RotationCenterCalibrator.Calibrate("st1", "cam1", points));
+        Assert.Contains("半径", ex.Message);
+        Assert.Contains("过小", ex.Message);
+    }
 }

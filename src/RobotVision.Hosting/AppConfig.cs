@@ -6,8 +6,14 @@ public sealed class AppConfig
 
     public int TcpPort { get; set; } = 9999;
 
-    /// <summary>单次 TRIGGER 的总超时（ms）。</summary>
+    /// <summary>单次 TRIGGER 的总超时（ms）。与空闲断线无关。</summary>
     public int TimeoutMs { get; set; } = 5000;
+
+    /// <summary>
+    /// TCP 读侧空闲超时（ms）。0 = 永久保持连接（默认，适配 PLC 节拍间隙）；
+    /// 需要回收死连接时可设 30 天 = 2592000000。不再与 TimeoutMs 绑定。
+    /// </summary>
+    public long IdleTimeoutMs { get; set; }
 
     /// <summary>并发 TCP 连接上限，0 表示不限。</summary>
     public int MaxConnections { get; set; } = 0;

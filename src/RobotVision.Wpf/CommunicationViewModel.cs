@@ -105,7 +105,6 @@ public partial class CommunicationViewModel : ObservableObject
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) => RefreshStatus();
-        _timer.Start();
         RefreshStatus();
     }
 

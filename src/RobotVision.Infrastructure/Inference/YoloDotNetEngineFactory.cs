@@ -2,6 +2,7 @@ using RobotVision.Core;
 using RobotVision.Core.Models;
 using YoloDotNet;
 using YoloDotNet.ExecutionProvider.Cpu;
+using YoloDotNet.Models;
 
 namespace RobotVision.Infrastructure.Inference;
 

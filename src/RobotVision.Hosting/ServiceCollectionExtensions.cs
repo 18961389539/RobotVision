@@ -221,16 +221,18 @@ public static class ServiceCollectionExtensions
                 cfg.IpAddress,
                 cfg.TcpPort,
                 cfg.TimeoutMs,
-                // TRIGGER,配方名 → pose=null（旧格式跳过位姿校验）；TRIGGER,配方名,X,Y,RZ → OnArm 一致性校验
+                // TRIGGER,配方名 → pose=null：OnArm 已记录示教位姿时 1014；带 X,Y,RZ 则 1012 校验
                 (recipe, pose, ct) => sp.GetRequiredService<VisionService>().RunAsync(recipe, pose, ct),
                 sp.GetRequiredService<ILogger<TcpServerManager>>())
             {
                 MaxConnections = cfg.MaxConnections,
                 IpWhitelist = cfg.IpWhitelist,
                 Backlog = cfg.TcpBacklog,
-                // STATUS 命令：实时管线状态（是否处理中 / 队列深度 / 最近耗时）
+                IdleTimeoutMs = cfg.IdleTimeoutMs,
+                // STATUS：ready 仅在未执行且队列为空时成立，避免 PLC 在排队时误判空闲
                 StateProvider = () => new TcpServerManager.TcpServerState(
-                    !vision.IsProcessing, vision.QueueDepth, vision.MaxQueueDepth, vision.LastElapsedMs),
+                    !vision.IsProcessing && vision.QueueDepth == 0,
+                    vision.QueueDepth, vision.MaxQueueDepth, vision.LastElapsedMs),
             };
         });
 
@@ -244,6 +246,7 @@ public static class ServiceCollectionExtensions
             {
                 var tcp = sp.GetRequiredService<TcpServerManager>();
                 tcp.TimeoutMs = updated.TimeoutMs;
+                tcp.IdleTimeoutMs = updated.IdleTimeoutMs;
                 tcp.MaxConnections = updated.MaxConnections;
                 tcp.IpWhitelist = updated.IpWhitelist;
 

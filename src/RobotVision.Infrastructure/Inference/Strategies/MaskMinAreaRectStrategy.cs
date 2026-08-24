@@ -23,7 +23,7 @@ public sealed class MaskMinAreaRectStrategy(ModelManager models) : IAngleStrateg
         using var bitmap = RoiHelper.ToBitmap(undistorted, recipe.Roi, out var ox, out var oy);
         var session = models.Open(recipe.Models[0], InferenceTask.Segmentation);
         var results = session.Run(y =>
-            y.RunSegmentation(bitmap, recipe.Confidence, recipe.PixelConfidence, recipe.Iou), ct);
+            y.RunSegmentation(bitmap, recipe.Confidence, recipe.Segmentation.PixelConfidence, recipe.Iou), ct);
 
         var poses = new List<PixelPose>();
         foreach (var segmentation in results)

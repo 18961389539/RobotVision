@@ -55,6 +55,7 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         JsonAtomicWrite.Update(_settingsPath, Indented, obj =>
         {
             obj["TimeoutMs"] = values.TimeoutMs;
+            obj["IdleTimeoutMs"] = values.IdleTimeoutMs;
             obj["MaxQueueDepth"] = values.MaxQueueDepth;
             obj["MaxConcurrent"] = values.MaxConcurrent;
             obj["TcpBacklog"] = values.TcpBacklog;
@@ -63,6 +64,12 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             obj["TcpPort"] = values.TcpPort;
             obj["IpWhitelist"] = JsonSerializer.SerializeToNode(values.IpWhitelist, Indented);
 
+            var poseCheck = obj["PoseCheck"] as JsonObject ?? [];
+            poseCheck["Enabled"] = values.PoseCheckEnabled;
+            poseCheck["XyToleranceMm"] = values.PoseXyToleranceMm;
+            poseCheck["RzToleranceDeg"] = values.PoseRzToleranceDeg;
+            obj["PoseCheck"] = poseCheck;
+
             var failure = obj["FailureImage"] as JsonObject ?? [];
             failure["Enabled"] = values.FailureEnabled;
             failure["RetainedCount"] = values.FailureRetainedCount;
@@ -70,6 +77,7 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         });
 
         cfg.TimeoutMs = values.TimeoutMs;
+        cfg.IdleTimeoutMs = values.IdleTimeoutMs;
         cfg.MaxQueueDepth = values.MaxQueueDepth;
         cfg.MaxConcurrent = values.MaxConcurrent;
         cfg.TcpBacklog = values.TcpBacklog;
@@ -79,6 +87,9 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         cfg.IpWhitelist = [.. values.IpWhitelist];
         cfg.FailureImage.Enabled = values.FailureEnabled;
         cfg.FailureImage.RetainedCount = values.FailureRetainedCount;
+        cfg.PoseCheck.Enabled = values.PoseCheckEnabled;
+        cfg.PoseCheck.XyToleranceMm = values.PoseXyToleranceMm;
+        cfg.PoseCheck.RzToleranceDeg = values.PoseRzToleranceDeg;
 
         // 落盘 + 内存同步完成后，把可热应用的参数同步到运行中的管理器（见 RuntimeSync 注释）
         RuntimeSync?.Invoke(cfg);
@@ -95,6 +106,12 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
     {
         if (values.TimeoutMs < 500)
             throw new InvalidDataException("请求超时不能低于 500ms");
+        if (values.IdleTimeoutMs < 0)
+            throw new InvalidDataException("空闲超时不能为负（0 = 永久保持连接）");
+        if (values.IdleTimeoutMs is > 0 and < 1000)
+            throw new InvalidDataException("空闲超时若启用须 ≥1000ms（0 = 永久）");
+        if (values.PoseXyToleranceMm <= 0 || values.PoseRzToleranceDeg <= 0)
+            throw new InvalidDataException("PoseCheck 容差必须为正");
         if (values.MaxQueueDepth < 1)
             throw new InvalidDataException("队列深度至少为 1");
         if (values.MaxConcurrent < 1 || values.MaxConcurrent > values.MaxQueueDepth)
@@ -125,6 +142,12 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
     {
         if (cfg.TimeoutMs < 500)
             throw new InvalidDataException($"appsettings.json 的 TimeoutMs={cfg.TimeoutMs} 低于 500ms，无法保证相机取图与推理的合理裕量");
+        if (cfg.IdleTimeoutMs < 0)
+            throw new InvalidDataException($"appsettings.json 的 IdleTimeoutMs={cfg.IdleTimeoutMs} 不能为负（0 = 永久保持连接）");
+        if (cfg.IdleTimeoutMs is > 0 and < 1000)
+            throw new InvalidDataException($"appsettings.json 的 IdleTimeoutMs={cfg.IdleTimeoutMs} 若启用须 ≥1000ms（0 = 永久）");
+        if (cfg.PoseCheck.XyToleranceMm <= 0 || cfg.PoseCheck.RzToleranceDeg <= 0)
+            throw new InvalidDataException("appsettings.json 的 PoseCheck 容差必须为正");
         if (cfg.MaxQueueDepth < 1)
             throw new InvalidDataException($"appsettings.json 的 MaxQueueDepth={cfg.MaxQueueDepth} 至少为 1");
         if (cfg.MaxConcurrent < 1 || cfg.MaxConcurrent > cfg.MaxQueueDepth)
@@ -164,4 +187,8 @@ public sealed record ServiceSettingsValues(
     int FailureRetainedCount,
     string IpAddress,
     int TcpPort,
-    IReadOnlyList<string> IpWhitelist);
+    IReadOnlyList<string> IpWhitelist,
+    long IdleTimeoutMs = 0,
+    bool PoseCheckEnabled = true,
+    double PoseXyToleranceMm = 0.5,
+    double PoseRzToleranceDeg = 0.5);

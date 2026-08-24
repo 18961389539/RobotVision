@@ -90,6 +90,25 @@
                                    FontSize="14"
                                    ToolTip="触发一次完整流程：取图 → 去畸变 → 推理 → 坐标变换（快捷键 F5）"
                                    Command="{Binding TriggerCommand}" />
+                        <CheckBox Content="上报拍照位姿（末端相机必须勾选）"
+                                  IsChecked="{Binding IncludeTriggerPose}" Margin="0,8,0,4" FontSize="11" />
+                        <UniformGrid Columns="3">
+                            <StackPanel Margin="0,0,4,0">
+                                <TextBlock Text="X mm" FontSize="10" />
+                                <ui:NumberBox Value="{Binding TriggerPoseX}" SmallChange="0.1"
+                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,4,0">
+                                <TextBlock Text="Y mm" FontSize="10" />
+                                <ui:NumberBox Value="{Binding TriggerPoseY}" SmallChange="0.1"
+                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="RZ °" FontSize="10" />
+                                <ui:NumberBox Value="{Binding TriggerPoseRz}" SmallChange="0.1"
+                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                            </StackPanel>
+                        </UniformGrid>
                         <ui:Button Appearance="Secondary" Content="恢复预览"
                                    Margin="0,8,0,0"
                                    Command="{Binding ResumePreviewCommand}" />

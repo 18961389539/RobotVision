@@ -3,14 +3,17 @@
   // 默认相机 cam_basler（Basler 实拍）；无相机环境联调可切回 cam_file 回放
   "cameraId": "cam_basler",
   "stationId": "",
-  "debugPassthrough": true,
+  "debugPassthrough": false,
   "angleMode": "KeyPointLine",
   "models": [ "a01_kpt.onnx" ],
   "confidence": 0.5,
   "iou": 0.7,
-  "keypointIndexA": 0,
-  "keypointIndexB": 1,
-  "keypointMinConfidence": 0.3
+  // 策略专属参数收敛为子对象：旧版平铺字段（keypointIndexA 等）仍可读取（自动迁移）
+  "keypoint": {
+    "indexA": 0,
+    "indexB": 1,
+    "minConfidence": 0.3
+  }
   // 光源（可选，缺省不亮灯）：取图前点亮 1 号通道 200 亮度，稳定 10ms 后取图
   // "lightControllerId": "light_none",
   // "lighting": {

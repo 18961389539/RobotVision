@@ -118,6 +118,9 @@ public sealed record ExtrinsicProfile
     /// 工位不该被误判为"未记录"而跳过校验。旧档案缺省 false（跳过校验，向后兼容）。</summary>
     public bool HasTeachPose { get; init; }
 
+    /// <summary>OnArm 位姿处理：Check（须与标定一致）/ Translate（允许平移合成）。旧档案缺省 Check。</summary>
+    public string ComposeMode { get; init; } = PoseComposeMode.Check;
+
     /// <summary>标定平面 Z 高度（机器人系，供多厚度零件分层标定比对；0 = 未记录）。
     /// 九点外参是单平面仿射：零件高度差会引入透视误差（≈ 视场偏移×Δh/工作距离），
     /// 高度差大的产线应按料厚分层标定多组档案。</summary>

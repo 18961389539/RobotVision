@@ -18,11 +18,11 @@ RobotVision.sln
 │   │   ├── Lighting/                   #   LightingManager / NoopLightController（无操作光源）
 │   │   ├── Calibration/                #   CalibrationManager / 棋盘格内参 / 九点外参标定器
 │   │   ├── Communication/              #   TcpServerManager（行协议、超时、连接管理）
-│   │   └── Inference/                  #   ModelManager / Mat↔SKBitmap 转换 / 三种角度策略
-│   ├── RobotVision.Hosting/            # 共享组装层：AddRobotVision 统一 DI、VisionService、
-│   │                                  #   文件日志（控制台宿主与 WPF 宿主行为一致）
-│   ├── RobotVision.App/                # 控制台宿主（无头生产部署）
-│   └── RobotVision.UI/                 # WPF 宿主（实时画面叠加、手动触发调试）
+│   │   └── Inference/                  #   ModelManager（IInferenceEngine 抽象）/ 策略与工厂注册表
+│   ├── RobotVision.Hosting/            # 共享组装层：AddRobotVision 统一 DI、VisionService
+│   │                                  #   （编排）/ PipelineScheduler（并发队列）/ VisionMetrics（统计）、
+│   │                                  #   文件日志（滚动文件 + UI 日志sink）
+│   └── RobotVision.Wpf/                # WPF 宿主（TCP 服务 + 实时画面叠加、手动触发调试）
 ├── tools/
 │   └── RobotVision.CalibTool/          # 命令行标定工具（内参 + 外参）
 ├── tests/
@@ -47,7 +47,7 @@ dotnet test RobotVision.sln
 
 ```powershell
 # 开发：从仓库根目录运行（相对目录按"exe 目录优先、工作目录回退"解析）
-dotnet run --project src/RobotVision.App
+dotnet run --project src/RobotVision.Wpf
 ```
 
 **目录解析规则**：`recipes/`、`models/`、`data/`、相机回放目录等相对路径，
@@ -55,9 +55,11 @@ dotnet run --project src/RobotVision.App
 exe 目录不存在时回退到当前工作目录（开发布局：`dotnet run` 从仓库根启动）。
 Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资产放在 exe 旁。
 
-配置见 `src/RobotVision.App/appsettings.json`：TCP 监听地址/端口、超时、
-排队深度（`maxQueueDepth`，默认 4）、目录、相机列表。
-真实相机（海康/Basler 等）实现 `ICamera` 后在 `Program.cs` 的相机注册处接入。
+配置见 `src/RobotVision.Wpf/appsettings.json`：TCP 监听地址/端口、超时、
+排队深度（`maxQueueDepth`，默认 4）、目录、相机列表、推理
+（`Inference:Provider` 默认 `Cpu`、`Inference:MaxSessions` 默认 8）。
+真实相机（海康/Basler 等）实现 `ICamera` + `ICameraFactory` 后调用
+`CameraTypeRegistry.Default.Register(...)` 一行注册接入。
 
 **文件日志**（默认开启）：Serilog 滚动文件，按天滚动（`logs/robotvision-yyyyMMdd.log`）、
 自动清理超期文件（默认保留 30 天）。条目含毫秒时间戳、级别、来源类别与完整异常堆栈——
@@ -89,11 +91,15 @@ Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资�
 
 ## TCP 协议（UTF-8 编码的 ASCII 子集，`\n` 结尾）
 
+完整协议规范（含 PLC 集成指引、时序与处置流程）见 `docs/PLC-TRIGGER-Protocol.md`。
+
 | 请求 | 应答 | 说明 |
 |---|---|---|
 | `PING` | `PONG` | 心跳（仅证明连接存活，不反映管线忙闲） |
 | `STATUS` | `OK,ready\|busy,队列深度,队列上限,最近耗时ms` | 管线状态查询（PLC 触发前预判） |
-| `TRIGGER,配方名` | `OK,配方名,目标数,x,y,角度[,...],耗时ms` | 触发一次完整流程 |
+| `TRIGGER,配方名` | `OK,配方名,目标数,x,y,角度[,...],耗时ms` | 触发一次完整流程（v1 格式） |
+| `TRIGGER,配方名,X,Y,RZ` | 同上 | 触发并上报拍照位姿（相机装末端的工位必须用；
+与 OnArm 外参档案比对，不一致返回 1012） |
 | 出错 | `ERR,错误码,消息` | 见下表 |
 
 **错误消息契约**：业务错误（1001~1008 等）返回 Sanitize 后的可读消息（逗号/换行已消毒）；
@@ -113,7 +119,8 @@ Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资�
 1004 未标定（含 stationId 缺失且未开调试直通）/ 1005 模型不可用 / 1006 光源控制器未注册 /
 1007 未检出目标 / 1008 处理超时（已进入推理，后台跑完释放）/ 1009 排队超限（Busy）/
 1010 排队超时（未进入推理，已放弃排队）/ 1011 相机初始化失败（pylon 运行库缺失/设备打开失败）/
-1099 内部错误。
+1012 拍照位姿不一致（OnArm 工位，TRIGGER 上报位姿与外参标定位姿超容差，容差见 PoseCheck 段）/
+1013 TRIGGER 参数格式错误（段数/数值非法）/ 1099 内部错误。
 
 配方名只允许字母、数字、下划线、中划线——`TRIGGER,..\xxx` 之类的路径穿越探测
 一律按 1001 拒绝。启动时预加载全部配方并校验（cameraId/models/阈值/keypoint 索引等），
@@ -176,10 +183,13 @@ dotnet run --project tools/RobotVision.CalibTool -- rotation `
 
 验收参考：内参 RMS ≤ 0.3px 优秀 / ≤ 0.5px 可用；外参最大残差 ≤ 0.1（机器人单位）；
 旋转中心半径残差 RMS ≤ 0.3px 优秀 / ≤ 0.5px 可用，长短轴比 ≤ 1.2。
-标定结果保存到 `data/calibration/`，App 启动时自动加载。
+标定结果保存到 `data/calibration/`，程序启动时自动加载。
 
 **一致性铁律**：外参/旋转中心标定必须使用去畸变后的图像坐标（标定图先经过内参去畸变处理，
 或在去畸变后的图像上取像素点），否则像素→机器人变换会引入系统性偏差。
+外参/旋转中心档案记录标定时分辨率：换相机/改分辨率后与当前内参不一致时拒绝使用
+（返回 1004，需重新标定），杜绝旧像素坐标系静默错位。标定档案均为原子落盘
+（临时文件替换），写一半崩溃不会损坏档案。
 
 ### 旋转中心补偿（9+3 标定）
 
@@ -190,13 +200,82 @@ dotnet run --project tools/RobotVision.CalibTool -- rotation `
 2. `CalibTool rotation` 拟合轨迹圆得到轴心像素坐标（≥5 点附带椭圆长短轴比质检）；
 3. 配方设置 `"rotationCompensation": "EccentricTool"` 开启补偿。
 
-运行时输出 `P' = C + R(−θ)·(P − C)`（机器人坐标系内）：机器人先移动到输出位置，
-再旋转第 4 轴到输出角度，工具尖端恰好落在零件检测位置。
+运行时输出（机器人坐标系内，含工具零位偏角 δ）：
+位置 `P' = C + R(δ−θ)·(P − C)`，第 4 轴角 `φ = θ − δ`。
+机器人先移动到输出位置，再旋转第 4 轴到 φ，工具尖端恰好落在零件检测位置。
+δ=0（工具零位与 X 轴对齐）时退化为经典形式。
+
+**工具零位偏角 δ**（旋转中心档案 `ToolOffsetDeg`）：第 4 轴零位时工具指向相对
+X 轴的偏角（吸嘴安装偏角/工具坐标系残差）。未补偿时位置误差 `2r·sin(δ/2)`
+（r=30mm、δ=3° → 1.6mm）。**可从带角度的标定点自动实测**（标记绕轴心方位角 βᵢ −
+第 4 轴角 φᵢ 的圆均值）：向导点表填 ≥2 个第4轴角并计算后点「填入实测偏角」；
+CalibTool 用 `--tool-offset auto`。离散度 >5° 提示标记噪声大；若实测值与预期差约
+180°，说明标记取在工具另一端，手动 ±180 修正。输出角度范围 (-180,180]，
+[0,360) 表示的机器人由 PLC 换算。
+
+**旋转方向自检**（强烈建议）：标定时逐点记录第 4 轴角度（csv 第三列
+`像素x,像素y,第4轴角`，或向导点表"第4轴角"列，≥3 个，**录入顺序任意**），标定完成后
+自动比对"标记点绕轴心旋转方向"与"第 4 轴角度方向"是否一致——第 4 轴正方向与图像
+旋转方向相反的机器人（各品牌 RZ 正方向不一）在此被拦截，而不是带病投产后按
+`2r·sin` 放大误差。自检需该工位已有外参档案（点与轴心同过外参映射后比对）。
+
 前提：第 4 轴角度正方向与机器人 XY 系旋转方向一致（右手系逆时针为正），
 不一致的机器人请在示教侧取反角度。
 
 注意：角度跨度不足（如 0°/5°/10°）会被拒绝——近距角度使圆拟合病态；
-标记点几乎不动说明工具同心，无需补偿。
+拟合半径 <10px 也会被拒绝（偏心量可忽略无需补偿，且小圆轴心对噪声极敏感）。
+标定点分布检查：九点外参要求最大三角形 ≥ 图像面积 1%（挤在角落的局部拟合
+对视场其他位置是灾难性外推）；外参留一交叉验证最大误差 >1.0（机器人单位）
+计入质量警告（疑似抄错点）。档案目录中同 Id 双档案（手工重命名产生）按
+文件名排序先者生效、后者报错，行为确定。
+
+### 多项式标定（单图模式，替代"内参+外参"）
+
+`{工位}.polynomial.json`：一张棋盘格图 → 像素坐标映射的多项式模型
+（二阶 6 系数/轴，默认；三阶 10 系数，畸变较大时）。一个模型整体吸收畸变/透视/安装角/像素当量
+（VisionPro 式），该工位**推理直接用原图**（跳过内参去畸变与外参仿射）。
+
+两种输出坐标空间（档案 `CoordinateSpace`）：
+
+- **Image（棋盘毫米系，免示教）**：目标坐标 = 网格索引×格距（原点=棋盘首角点，轴=棋盘行列方向）。
+  **零示教**：棋盘放平在工件平面 → 拍一张 → 计算 → 保存。适合"只要像素→毫米"（上位机自行换算/
+  纯测量）：径向畸变/透视/安装旋转/各向异性/比例系统误差全部吸收，且输出 RMS 残差自检。
+  优于单一 mm/px 标量比例（后者假设全图比例均匀，镜头角落 1~3% 漂移不可见）。
+  位姿校验/平移合成不适用（无机器人系概念）。
+- **Robot（机器人系）**：一张棋盘格图 + 2 个同行参考角点（机器人带针尖对准示教）锚定机器人系，
+  输出可直接给机器人。标定流程（向导 Polynomial 模式或 `CalibTool polynomial`）：
+  拍一张棋盘格图 → 自动检测全部内角点 → 图上点选同一行的 2 个参考角点（自动吸附亚像素精度）
+  → 抄录其机器人坐标 → 棋盘朝向（±90° 行方向歧义）由两种候选拟合的 RMS 自动判定。
+
+适用前提：小畸变镜头、单一工作平面、统一高度（棋盘须放平在与被测面同高的平面）。
+
+检查与防呆：参考点间距与方格边长交叉校验（差 >5% 拒绝）、网格点数 ≥ 系数+4、
+推理图像分辨率必须与档案一致、OnArm 位姿校验/合成同外参工位。
+
+**OnArm + ComposeMode=Translate（平移合成）**：相机只有平移、姿态不变时，位置映射
+自动加 `(当前TCP − 示教TCP)`——换拍照点**无需重标**，TRIGGER 上报的位姿从"拦截器"
+变"合成器"（RZ 仍须一致，超容差 1012）。配 `--compose translate --tcp-x --tcp-y --rz`。
+仅 Robot 坐标空间适用。CalibTool 免示教：`polynomial --space image`（无需 --ref）。
+
+旋转中心补偿与多项式工位完全兼容（工具不同心照常补偿）：轴心像素坐标直接经多项式映射
+到机器人系，方向自检/偏角实测同样支持。外参工位与多项式工位可并存（每工位一种），多项式优先。
+
+### 相机安装模式（固定机架 / 装在末端）
+
+外参档案记录安装模式（`MountType`，默认 `Fixed`）：
+
+- **Fixed（固定机架，eye-to-hand）**：外参一次标定全工位有效（现状行为）；
+- **OnArm（装在末端随动，eye-in-hand）**：档案**仅在标定时记录的拍照位姿下有效**
+  （`TeachTcpX/TeachTcpY/TeachRzDeg`）。标定取图与生产拍照必须用同一位姿
+  （TCP 与第 4 轴角都一致）；换拍照点/改拍照 RZ 必须重标该工位外参。
+  每个拍照位姿一组档案（stationId 按工位+拍照点命名，如 `st1_pick1`）。
+
+九点标定流程对两种模式完全相同（OnArm 时带针走 9 点的拍照位姿 = 生产拍照位姿）。
+标定向导选择安装模式并记录位姿；CalibTool 用 `--mount onarm --tcp-x --tcp-y --rz`。
+
+**标定平面 Z**（`CalibrationPlaneZ`，可选）：九点外参是单平面仿射，零件高度差
+引入透视误差（≈ 视场偏移 × Δh / 工作距离；WD=200mm、Δh=10mm、偏离光轴 80mm
+→ 约 4mm）。高度差大的产线按料厚分层标定多组档案（每料厚一组 stationId）。
 
 ## 三种角度模式（recipe.angleMode）
 
@@ -215,7 +294,7 @@ dotnet run --project tools/RobotVision.CalibTool -- rotation `
 
 ## 模型会话与并发
 
-`ModelManager` 按 **(模型路径, 推理任务)** 缓存 Yolo 实例，加载后空跑一帧预热：
+`ModelManager` 按 **(模型路径, 文件版本, 推理任务)** 缓存 Yolo 实例，加载后空跑一帧预热：
 
 - **单次物化**：缓存值为 `Lazy<T>`，并发 `Open` 同一模型只有一个加载真正执行——
   输家的包装对象未物化即被丢弃，不会泄漏 ONNX 会话（数百 MB 级）；
@@ -223,7 +302,13 @@ dotnet run --project tools/RobotVision.CalibTool -- rotation `
 - **预热失败也清理**：Yolo 已创建但预热抛错时立即 Dispose，不挂半初始化会话；
 - **同模型推理串行**：Yolo 实例非线程安全，`ModelSession.Run` 内部信号量串行化；
 - **任务参与缓存键**：同一文件被不同任务打开时行为确定（各自的预热各自成败），
-  而非"谁先加载谁的任务赢"。
+  而非"谁先加载谁的任务赢"（注意：多任务各占一份会话内存，UI 会提示双份缓存）；
+- **文件版本参与缓存键**（mtime+大小）：替换 `.onnx` 后下次推理自动加载新版本
+  并清理旧会话——不依赖人工"先卸载再推理"，杜绝旧模型静默服务；
+- **安全卸载**：卸载/裁剪/退出先置卸载标记、再等待在途推理离开临界区、最后释放
+  引擎（幂等）——绝不 Dispose 正在推理的会话；已失效会话的后续 Run 返回
+  ModelNotAvailable（可重试，重试自动加载新会话）；
+- **LRU 上限可配**：`Inference:MaxSessions`（默认 8，0 = 不限），超限回收最久未用会话。
 
 
 ## 配方示例（recipes/A01.json）
@@ -237,12 +322,15 @@ dotnet run --project tools/RobotVision.CalibTool -- rotation `
   "models": [ "a01_kpt.onnx" ],
   "confidence": 0.5,
   "iou": 0.7,
-  "keypointIndexA": 0,
-  "keypointIndexB": 1,
-  "keypointMinConfidence": 0.3,
+  "keypoint": { "indexA": 0, "indexB": 1, "minConfidence": 0.3 },
   "rotationCompensation": "None"
 }
 ```
+
+策略专属参数收敛为能力子对象：`keypoint`（KeyPointLine）/ `dualModel`（DualCenterLine，
+含 `pairingMaxDistancePx`）/ `segmentation`（MaskMinAreaRect，含 `pixelConfidence`）。
+**旧版平铺字段（`keypointIndexA` 等）仍可读取**——setter-only 兼容属性在加载时自动迁移到
+子对象，存量配方文件无需手工改写；保存时统一输出子对象格式。
 
 **光源（可选）**：缺省不亮灯，行为与旧版完全一致。需要照明时在 appsettings
 注册光源控制器，配方成对指定 `lightControllerId` + `lighting`：
@@ -273,10 +361,18 @@ dotnet run --project tools/RobotVision.CalibTool -- rotation `
 
 ## 更换推理后端
 
-当前使用 CPU（`YoloDotNet.ExecutionProvider.Cpu`）。更换 GPU 时：
-1. NuGet 包替换为 `YoloDotNet.ExecutionProvider.Cuda` / `DirectML` / `OpenVino`；
-2. `ModelManager.Load` 中的 `CpuExecutionProvider` 换成对应 Provider 类；
-3. 其余代码不变。
+推理引擎已抽象为 `IInferenceEngine`（检测/分割/关键点三个入口，与 YoloDotNet 签名一致），
+`ModelManager` 通过 `IInferenceEngineFactory` 创建引擎——**策略层、VisionService、UI 均不感知具体框架**。
+默认实现 `YoloDotNetEngineFactory` 使用 CPU（`YoloDotNet.ExecutionProvider.Cpu`），
+由 appsettings 的 `Inference:Provider` 配置（默认 `Cpu`）。更换 GPU 时：
+
+1. NuGet 引用对应 ExecutionProvider 包（`YoloDotNet.ExecutionProvider.Cuda` / `DirectML` / `OpenVino`）；
+2. 在 `YoloDotNetEngineFactory` 按 provider 名补充分支
+   （如 `"CUDA" => new Yolo(new YoloOptions { ExecutionProvider = new CudaExecutionProvider(path) })`）；
+3. appsettings 的 `Inference:Provider` 改为对应名称，无需改代码与 DI 注册。
+
+换整个推理框架（如 ONNX Runtime 直连）＝实现 `IInferenceEngine` + `IInferenceEngineFactory` 替换注册，
+同样零改动策略层。`ModelSession.Run(Func&lt;IInferenceEngine,T&gt;)` 内信号量串行化语义保留（引擎实例非线程安全）。
 
 ## 并发与线程安全
 

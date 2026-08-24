@@ -94,7 +94,12 @@ public sealed class RecipeLoader(string folder)
         var info = new FileInfo(path);
         if (!forceReload && _cache.TryGetValue(name, out var cached) &&
             cached.LastWriteUtc == info.LastWriteTimeUtc && cached.Length == info.Length)
-            return cached.Recipe.Clone(); // 缓存存本体、返回克隆：调用方改动不污染共享缓存
+        {
+            var hit = cached.Recipe.Clone();
+            // 标定/相机热删除不改配方文件：每次命中仍做引用校验，避免缓存里的「有效」配方继续上线
+            ValidateReferences(hit);
+            return hit;
+        }
 
         var recipe = JsonSerializer.Deserialize<RecipeConfig>(File.ReadAllText(path), JsonOptions)
             ?? throw new RecipeNotFoundException(name);

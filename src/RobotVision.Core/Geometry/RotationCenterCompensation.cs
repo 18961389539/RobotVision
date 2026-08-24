@@ -20,14 +20,17 @@ public static class RotationCenterCompensation
     }
 
     /// <summary>
-    /// 偏心工具补偿：位置绕轴心反转零件角 θ，角度保持不变。P' = C + R(−θ)·(P − C)。
-    /// 机器人先移动到 P'，再旋转第 4 轴到 AngleDeg，工具尖端恰好落回原检测位置 P。
+    /// 偏心工具补偿（含工具零位偏角）。物理链路：
+    /// 工具指向零件方向需第 4 轴转角 φ = 零件角 θ − 工具零位偏角 δ；
+    /// 命令位置 P' = C + R(δ−θ)·(P − C)，输出角度 φ = θ − δ。
+    /// 机器人先移动到 P'，再旋转第 4 轴到 φ，工具尖端恰好落回原检测位置 P。
+    /// δ = 0（工具零位与 X 轴对齐）时退化为经典形式 P' = C + R(−θ)·(P−C)、角度 θ。
     /// 前提：第 4 轴角度正方向与机器人 XY 系旋转方向一致（右手系逆时针为正），
-    /// 不一致的机器人请在示教侧取反角度。
+    /// 不一致的机器人请在示教侧取反角度（方向自检见 CalibrationManager.VerifyRotationDirection）。
     /// </summary>
-    public static RobotPose Apply(RobotPose pose, double cx, double cy)
+    public static RobotPose Apply(RobotPose pose, double cx, double cy, double toolOffsetDeg = 0.0)
     {
-        var (x, y) = Rotate(pose.X, pose.Y, cx, cy, -pose.AngleDeg);
-        return new RobotPose(x, y, pose.AngleDeg);
+        var (x, y) = Rotate(pose.X, pose.Y, cx, cy, toolOffsetDeg - pose.AngleDeg);
+        return new RobotPose(x, y, AngleGeometry.NormalizeSignedDeg(pose.AngleDeg - toolOffsetDeg));
     }
 }

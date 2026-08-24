@@ -18,66 +18,126 @@ public enum InferenceTask
 /// 等待信号量阶段响应取消（多工位共用模型排队时超时可中断）；推理本身不可取消。
 /// 推理调用以 Func&lt;IInferenceEngine,T&gt; 委托传给调用方——策略层只依赖抽象，
 /// 不感知具体推理框架（YoloDotNet/ONNX 等）。
+/// 会话可能因模型卸载/文件替换/裁剪而失效：失效后的 Run 抛 ModelNotAvailable（可重试，
+/// 重试会加载新会话），绝不触碰已释放的引擎——"卸载与推理竞态"由此闭环。
 /// </summary>
-public sealed class ModelSession(IInferenceEngine engine, SemaphoreSlim gate)
+public sealed class ModelSession
 {
+    private readonly ModelManager.LoadedModel _owner;
+
+    internal ModelSession(ModelManager.LoadedModel owner) => _owner = owner;
+
     public T Run<T>(Func<IInferenceEngine, T> inference, CancellationToken ct = default)
     {
-        gate.Wait(ct);
+        _owner.Gate.Wait(ct);
         try
         {
-            return inference(engine);
+            if (_owner.Unloaded)
+                throw new VisionException(VisionErrorCode.ModelNotAvailable,
+                    "模型会话已被卸载（模型文件可能刚被替换），请重试");
+            return inference(_owner.Engine);
         }
         finally
         {
-            gate.Release();
+            _owner.Gate.Release();
         }
     }
 }
 
 /// <summary>
-/// 推理模型管理类：按 (模型路径, 推理任务) 缓存引擎实例，加载后空跑一帧预热，
+/// 推理模型管理类：按 (模型路径, 文件版本, 推理任务) 缓存引擎实例，加载后空跑一帧预热，
 /// 避免首次请求耗时突增触发机器人超时。
+/// 缓存键含文件版本（LastWriteTimeUtc + Length）：替换 .onnx 后 Open 自动加载新版本
+/// 并清理旧版本会话——不再依赖人工"先卸载再推理"，杜绝旧模型静默服务。
 /// 并发安全设计：
 /// - 缓存值为 Lazy：GetOrAdd 的工厂委托可能被并发调用多次，但只有占据字典槽位的
 ///   Lazy 会真正执行加载，输家的包装对象未物化即被丢弃——不会泄漏 ONNX 会话
 ///   （数百 MB 级，泄漏一两个就可能 OOM）；
 /// - 加载失败不缓存（Lazy 默认缓存异常，须显式移除），模型文件后补后可重试；
 /// - 任务参与缓存键：同一文件被不同任务打开时行为确定（各自的预热各自成败），
-///   而非"谁先加载谁的任务赢"。
+///   而非"谁先加载谁的任务赢"；
+/// - 字典变更统一经 _sync 短锁；加载/预热在锁外执行（不阻塞其他模型的打开）；
+/// - 安全卸载：先置卸载标记，再等在途推理离开临界区，最后释放引擎（幂等）——
+///   卸载/裁剪/退出永不 Dispose 正在推理的会话。
 /// 推理后端（ExecutionProvider/框架）由 <see cref="IInferenceEngineFactory"/> 决定——
-/// 默认 YoloDotNet CPU，换 GPU/框架 = 替换工厂，本类与策略层零改动。
+/// 默认 YoloDotNet CPU（appsettings 的 Inference:Provider 可配），换 GPU/框架 =
+/// 替换工厂，本类与策略层零改动。
 /// </summary>
-public sealed class ModelManager(string modelsFolder, IInferenceEngineFactory? engineFactory = null) : IDisposable
+public sealed class ModelManager(
+    string modelsFolder,
+    IInferenceEngineFactory? engineFactory = null,
+    int maxSessions = 8) : IDisposable
 {
-    private readonly IInferenceEngineFactory _engineFactory = engineFactory ?? new YoloDotNetEngineFactory();
+    /// <summary>缓存键：路径 + 任务 + 文件版本（mtime/大小），路径大小写不敏感。</summary>
+    private readonly record struct ModelKey(string Path, InferenceTask Task, DateTime StampUtc, long Size);
 
-    private sealed record LoadedModel(IInferenceEngine Engine, SemaphoreSlim Gate) : IDisposable
-    {
-        public void Dispose()
-        {
-            Engine.Dispose();
-            Gate.Dispose();
-        }
-    }
-
-    private sealed class ModelKeyComparer : IEqualityComparer<(string Path, InferenceTask Task)>
+    private sealed class ModelKeyComparer : IEqualityComparer<ModelKey>
     {
         public static readonly ModelKeyComparer Instance = new();
 
-        public bool Equals((string Path, InferenceTask Task) x, (string Path, InferenceTask Task) y) =>
-            string.Equals(x.Path, y.Path, StringComparison.OrdinalIgnoreCase) && x.Task == y.Task;
+        public bool Equals(ModelKey x, ModelKey y) =>
+            string.Equals(x.Path, y.Path, StringComparison.OrdinalIgnoreCase)
+            && x.Task == y.Task && x.StampUtc == y.StampUtc && x.Size == y.Size;
 
-        public int GetHashCode((string Path, InferenceTask Task) obj) =>
-            StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Path) ^ ((int)obj.Task << 8);
+        // 版本字段不参与哈希（同路径同任务的不同版本落到相近桶，正确性由 Equals 保证）
+        public int GetHashCode(ModelKey obj) =>
+            HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Path), (int)obj.Task);
     }
 
-    private readonly ConcurrentDictionary<(string Path, InferenceTask Task), Lazy<LoadedModel>> _models =
+    /// <summary>
+    /// 已加载的模型会话：引擎 + 串行化信号量 + 卸载标记。
+    /// Dispose 幂等且安全：置 Unloaded → 等待在途推理退出临界区 → 释放引擎。
+    /// Gate 故意不 Dispose：可能有并发 Run 正排队等信号量，
+    /// SemaphoreSlim.Dispose 对仍有等待者的实例行为未定义（信号量本身无非托管资源）。
+    /// </summary>
+    internal sealed class LoadedModel(IInferenceEngine engine, SemaphoreSlim gate)
+    {
+        public IInferenceEngine Engine { get; } = engine;
+
+        public SemaphoreSlim Gate { get; } = gate;
+
+        /// <summary>已卸载标记：已取得 session 的在途/后续 Run 进入临界区后据此失败。</summary>
+        public volatile bool Unloaded;
+
+        /// <summary>最近一次被 Open 的时间（TickCount64），LRU 裁剪依据（Volatile/Interlocked 访问）。</summary>
+        public long LastAccessTicks = Environment.TickCount64;
+
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+                return;
+            Unloaded = true;      // 后续 Run 在临界区内立即失败，不再触碰引擎
+            Gate.Wait();          // 等待在途推理完成（推理有限时，必然结束）
+            try
+            {
+                Engine.Dispose();
+            }
+            finally
+            {
+                Gate.Release();
+            }
+        }
+    }
+
+    private readonly IInferenceEngineFactory _engineFactory = engineFactory ?? new YoloDotNetEngineFactory();
+
+    /// <summary>LRU 会话上限（0 或负数 = 不限制）。超过上限时卸载最久未使用的会话，防内存持续膨胀。</summary>
+    public int MaxSessions { get; } = maxSessions;
+
+    private readonly ConcurrentDictionary<ModelKey, Lazy<LoadedModel>> _models =
         new(ModelKeyComparer.Instance);
+
+    /// <summary>字典变更（增删）短锁：加载/预热/等待推理均在锁外，锁内无耗时操作。</summary>
+    private readonly object _sync = new();
 
     private volatile bool _disposed;
 
-    public int LoadedCount => _models.Values.Count(l => l.IsValueCreated);
+    public int LoadedCount
+    {
+        get { lock (_sync) return _models.Values.Count(l => l.IsValueCreated); }
+    }
 
     public string ModelsFolder => modelsFolder;
 
@@ -97,11 +157,21 @@ public sealed class ModelManager(string modelsFolder, IInferenceEngineFactory? e
         !string.IsNullOrWhiteSpace(fileName) &&
         File.Exists(Path.IsPathRooted(fileName) ? fileName : Path.Combine(modelsFolder, fileName));
 
-    /// <summary>已物化的缓存键（供管理界面显示加载状态）。</summary>
-    public IReadOnlyList<(string Path, InferenceTask Task)> LoadedKeys =>
-        _models.Where(kv => kv.Value.IsValueCreated)
-            .Select(kv => (kv.Key.Path, kv.Key.Task))
-            .ToList();
+    /// <summary>已物化的缓存键（供管理界面显示加载状态；按 (路径, 任务) 去重，版本不外露）。</summary>
+    public IReadOnlyList<(string Path, InferenceTask Task)> LoadedKeys
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _models
+                    .Where(kv => kv.Value.IsValueCreated)
+                    .Select(kv => (kv.Key.Path, kv.Key.Task))
+                    .Distinct()
+                    .ToList();
+            }
+        }
+    }
 
     public string ResolvePath(string modelFile) =>
         Path.IsPathRooted(modelFile) ? modelFile : Path.Combine(modelsFolder, modelFile);
@@ -109,42 +179,171 @@ public sealed class ModelManager(string modelsFolder, IInferenceEngineFactory? e
     public ModelSession Open(string modelFile, InferenceTask task)
     {
         var path = ResolvePath(modelFile);
-        var key = (path, task);
+        // 文件版本进入缓存键：文件不存在时 LastWriteTimeUtc 为 1601-01-01、Size 记 -1，
+        // 由 Load 统一报"文件不存在"
+        var info = new FileInfo(path);
+        var key = new ModelKey(path, task, info.LastWriteTimeUtc, info.Exists ? info.Length : -1L);
 
-        var lazy = _models.GetOrAdd(key, k => new Lazy<LoadedModel>(() => Load(k.Path, k.Task)));
+        Lazy<LoadedModel> lazy;
+        lock (_sync)
+            lazy = _models.GetOrAdd(key, k => new Lazy<LoadedModel>(() => Load(k.Path, k.Task)));
 
         LoadedModel loaded;
         try
         {
-            loaded = lazy.Value;
+            loaded = lazy.Value; // 加载 + 预热在锁外，不阻塞其他模型的打开
         }
         catch
         {
             // 原子移除"仍属于本失败实例"的槽位：并发下其他线程可能已重试并放入新 Lazy，
             // KVP 版 TryRemove 仅在键与值（引用）都匹配时才删除，不会误删他人的成功项
-            _models.TryRemove(KeyValuePair.Create(key, lazy));
+            lock (_sync)
+                _models.TryRemove(KeyValuePair.Create(key, lazy));
             throw;
         }
 
-        // 缓存命中路径同样复查 _disposed：Dispose 可能发生在 GetOrAdd 与取 Value 之间，
-        // 此时返回指向已释放 ONNX 会话的句柄会让后续推理崩溃（会话释放后不可用）
-        if (_disposed)
-            throw new VisionException(VisionErrorCode.ModelNotAvailable, "模型管理器已释放，无法打开会话");
+        // 物化后复查仍在缓存：物化期间条目可能已被卸载/裁剪/整表清空。
+        // 不在则本线程自行释放（幂等），杜绝"无人接管的新鲜 ONNX 会话"泄漏
+        bool orphaned;
+        lock (_sync)
+        {
+            orphaned = _disposed
+                       || !_models.TryGetValue(key, out var current)
+                       || !ReferenceEquals(current, lazy);
+        }
+        if (orphaned)
+        {
+            loaded.Dispose();
+            throw new VisionException(VisionErrorCode.ModelNotAvailable,
+                "模型会话已被卸载（模型文件可能刚被替换或触发裁剪），请重试");
+        }
 
-        return new ModelSession(loaded.Engine, loaded.Gate);
+        // 记录最近访问（LRU 裁剪依据）、回收超出上限的最旧会话、清理同路径旧版本
+        Interlocked.Exchange(ref loaded.LastAccessTicks, Environment.TickCount64);
+        TrimToCapacity();
+        EvictStaleVersions(key);
+
+        return new ModelSession(loaded);
     }
 
     /// <summary>
-    /// 按 (模型路径, 推理任务) 卸载缓存并 Dispose 对应会话，供配方重配/模型文件替换时调用。
-    /// 未物化的条目直接移除缓存（未持有 ONNX 会话，无资源可释放）。
-    /// 并发安全：ConcurrentDictionary 的 TryRemove 原子，Dispose 与该条目的后续 Open 互不干扰
-    /// （Open 已物化时拿到旧实例后由 _disposed 复查或本方法释放兜底）。
+    /// 会话数超过 <see cref="MaxSessions"/> 时，卸载最久未使用的会话（LRU）。
+    /// 仅统计已物化条目（未物化的 Lazy 不持有 ONNX 会话，无回收意义）。
+    /// 卸载经 LoadedModel.Dispose 安全路径：等待在途推理完成，绝不释放使用中的会话。
     /// </summary>
+    private void TrimToCapacity()
+    {
+        if (MaxSessions <= 0)
+            return;
+
+        while (true)
+        {
+            ModelKey oldest = default;
+            var oldestTicks = long.MaxValue;
+            int created;
+            lock (_sync)
+            {
+                created = 0;
+                foreach (var kv in _models)
+                {
+                    if (!kv.Value.IsValueCreated)
+                        continue;
+                    created++;
+                    var ticks = Volatile.Read(ref kv.Value.Value.LastAccessTicks);
+                    if (ticks < oldestTicks)
+                    {
+                        oldestTicks = ticks;
+                        oldest = kv.Key;
+                    }
+                }
+                if (created <= MaxSessions)
+                    return;
+            }
+            // 锁外移除并等待在途推理；失败（被并发移除）则重算
+            if (!TryRemoveEntry(oldest))
+                continue;
+        }
+    }
+
+    /// <summary>
+    /// 清理同 (路径, 任务) 的旧版本条目（文件被替换后的孤儿会话）。
+    /// 未物化的旧版本 Lazy 一并移除（物化中的线程由 Open 的复查路径自行释放）。
+    /// </summary>
+    private void EvictStaleVersions(ModelKey keep)
+    {
+        var comparer = ModelKeyComparer.Instance;
+        List<ModelKey> stale;
+        lock (_sync)
+        {
+            stale = _models.Keys
+                .Where(k => k.Task == keep.Task
+                            && string.Equals(k.Path, keep.Path, StringComparison.OrdinalIgnoreCase)
+                            // 必须用字典比较器判断版本差异：record 默认相等对路径大小写敏感，
+                            // 会把仅大小写不同的同键条目误判为旧版本
+                            && !comparer.Equals(k, keep))
+                .ToList();
+        }
+        foreach (var key in stale)
+            TryRemoveEntry(key);
+    }
+
+    /// <summary>按 (模型路径, 推理任务) 卸载当前版本及所有历史版本缓存，供配方重配/模型文件替换时调用。</summary>
     public void Unload(string modelFile, InferenceTask task)
     {
-        var key = (ResolvePath(modelFile), task);
-        if (_models.TryRemove(key, out var lazy) && lazy.IsValueCreated)
-            lazy.Value.Dispose();
+        var path = ResolvePath(modelFile);
+        List<ModelKey> keys;
+        lock (_sync)
+        {
+            keys = _models.Keys
+                .Where(k => k.Task == task
+                            && string.Equals(k.Path, path, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        foreach (var key in keys)
+            TryRemoveEntry(key);
+    }
+
+    /// <summary>按模型文件卸载其全部任务会话（模型文件被替换时用；文件名大小写不敏感）。</summary>
+    public void UnloadAll(string modelFile)
+    {
+        var path = ResolvePath(modelFile);
+        List<ModelKey> keys;
+        lock (_sync)
+        {
+            keys = _models.Keys
+                .Where(k => string.Equals(k.Path, path, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        foreach (var key in keys)
+            TryRemoveEntry(key);
+    }
+
+    /// <summary>卸载全部会话并释放（模型目录整体更换/退出前清理）。</summary>
+    public void UnloadAll()
+    {
+        List<ModelKey> keys;
+        lock (_sync)
+            keys = _models.Keys.ToList();
+        foreach (var key in keys)
+            TryRemoveEntry(key);
+    }
+
+    /// <summary>
+    /// 原子移除缓存条目；已物化的经安全路径释放（等待在途推理，幂等）。
+    /// 返回是否由本调用移除（false = 已被并发移除）。
+    /// </summary>
+    private bool TryRemoveEntry(ModelKey key)
+    {
+        Lazy<LoadedModel>? lazy = null;
+        lock (_sync)
+        {
+            if (_models.TryGetValue(key, out var current)
+                && _models.TryRemove(KeyValuePair.Create(key, current)))
+                lazy = current;
+        }
+        if (lazy is not null && lazy.IsValueCreated)
+            lazy.Value.Dispose(); // 锁外等待在途推理，不阻塞其他 Open
+        return lazy is not null;
     }
 
     private LoadedModel Load(string path, InferenceTask task)
@@ -165,15 +364,7 @@ public sealed class ModelManager(string modelsFolder, IInferenceEngineFactory? e
                 $"模型预热失败: {Path.GetFileName(path)}（{task}）: {ex.Message}", ex);
         }
 
-        var loaded = new LoadedModel(engine, new SemaphoreSlim(1, 1));
-        // Dispose 与加载竞态闭环：Dispose 遍历时该 Lazy 尚未物化（跳过），
-        // 加载完成后发现已 Dispose 则立即释放会话，避免加载中的 ONNX 泄漏
-        if (_disposed)
-        {
-            loaded.Dispose();
-            throw new ObjectDisposedException(nameof(ModelManager));
-        }
-        return loaded;
+        return new LoadedModel(engine, new SemaphoreSlim(1, 1));
     }
 
     /// <summary>
@@ -201,9 +392,16 @@ public sealed class ModelManager(string modelsFolder, IInferenceEngineFactory? e
     public void Dispose()
     {
         _disposed = true;
-        foreach (var lazy in _models.Values)
-            if (lazy.IsValueCreated) // 未物化的 Lazy 访问 Value 反而会触发加载
+        List<Lazy<LoadedModel>> snapshot;
+        lock (_sync)
+        {
+            snapshot = _models.Values.ToList();
+            _models.Clear();
+        }
+        // 锁外逐个安全释放（等待在途推理退出）；物化中的线程由 Open 复查路径自行释放。
+        // 幂等保护下与 Open 路径的双重释放不会发生
+        foreach (var lazy in snapshot)
+            if (lazy.IsValueCreated)
                 lazy.Value.Dispose();
-        _models.Clear();
     }
 }

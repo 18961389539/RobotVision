@@ -14,7 +14,8 @@ using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
 using RobotVision.Infrastructure.Lighting;
 using RobotVision.Core.Models;
-using YoloDotNet.Extensions;
+using System.Windows.Threading;
+using RobotVision.Infrastructure.Communication;
 
 namespace RobotVision.WpfHost;
 
@@ -40,6 +41,8 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     private readonly VisionService _vision;
     private readonly LightingManager _lighting;
     private readonly AngleStrategyTypeRegistry _angleRegistry;
+    private readonly TcpServerManager _tcp;
+    private readonly DispatcherTimer _dirtyTimer;
 
     /// <summary>进入当前编辑状态时的基线副本（脏标记比较基准）。</summary>
     private RecipeConfig? _baseline;
@@ -123,6 +126,18 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     }
 
     [ObservableProperty]
+    private bool _includeTriggerPose;
+
+    [ObservableProperty]
+    private double _triggerPoseX;
+
+    [ObservableProperty]
+    private double _triggerPoseY;
+
+    [ObservableProperty]
+    private double _triggerPoseRz;
+
+    [ObservableProperty]
     private string _searchText = "";
 
     public RecipeViewModel(
@@ -132,7 +147,8 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         CalibrationManager calibration,
         VisionService vision,
         LightingManager lighting,
-        AngleStrategyTypeRegistry angleRegistry)
+        AngleStrategyTypeRegistry angleRegistry,
+        TcpServerManager tcp)
     {
         _loader = loader;
         _cameras = cameras;
@@ -141,6 +157,9 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         _vision = vision;
         _lighting = lighting;
         _angleRegistry = angleRegistry;
+        _tcp = tcp;
+        _dirtyTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _dirtyTimer.Tick += (_, _) => NotifyEditorMutated();
         // 测试触发的结果画面：与监控页同一快照通道（成功完成推理后发布），
         // 仅在测试期间捕获（TCP/监控页触发的快照不覆盖本页显示）
         _vision.FrameProcessed += OnTestFrameProcessed;
@@ -221,8 +240,31 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>配方页可见时轮询脏标记：Editor.* 绑定不经过 ViewModel setter。</summary>
+    public void StartDirtyWatch() => _dirtyTimer.Start();
+
+    public void StopDirtyWatch() => _dirtyTimer.Stop();
+
+    /// <summary>刷新未保存横幅与按模式显隐（角度/工位等 Editor 属性变更后）。</summary>
+    public void NotifyEditorMutated()
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(UnsavedHint));
+        OnPropertyChanged(nameof(RotationCenterHint));
+        OnPropertyChanged(nameof(MappingHint));
+        OnPropertyChanged(nameof(AngleModeHint));
+        OnPropertyChanged(nameof(IsDualMode));
+        OnPropertyChanged(nameof(IsKeyPointMode));
+        OnPropertyChanged(nameof(IsSegmentationMode));
+        OnPropertyChanged(nameof(IsMaskTemplateMode));
+        OnPropertyChanged(nameof(IsTemplateMethod));
+        OnPropertyChanged(nameof(HasTemplate));
+        OnPropertyChanged(nameof(PrimaryModel));
+        OnPropertyChanged(nameof(SecondaryModel));
+    }
+
     /// <summary>
-    /// 示教模板（MaskTemplate 模式）：取图 → 分割 → 置信度最高的目标转正裁剪 →
+    /// 示教模板（MaskTemplate 模式）：点亮配方光源 → 取图 → 分割 → 置信度最高的目标转正裁剪 →
     /// base64 内嵌配方。变换与运行时策略共用 MaskTemplateMatcher，坐标系一致。
     /// </summary>
     [RelayCommand]
@@ -244,6 +286,10 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         try
         {
             Message = $"示教模板取图中 · {cameraId} …";
+            using var lightingScope = _lighting.Apply(Editor.LightControllerId, Editor.Lighting);
+            if (lightingScope.StabilizeDelayMs > 0)
+                await Task.Delay(lightingScope.StabilizeDelayMs);
+
             var (b64, w, h) = await Task.Run(() =>
             {
                 using var frame = _cameras.Grab(cameraId).Image;
@@ -309,6 +355,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
                     roiOwned?.Dispose();
                 }
             });
+            lightingScope.Dispose();
 
             Editor.Template.TemplateImageBase64 = b64;
             OnPropertyChanged(nameof(HasTemplate));
@@ -352,6 +399,47 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
              string.Equals(p.StationId, Editor.StationId, StringComparison.OrdinalIgnoreCase)))
             ? $"工位 {Editor.StationId ?? "（空）"} 未做旋转轴心标定：偏心补偿保存/触发将被拒绝，请先在标定向导完成轴心标定"
             : "";
+
+    /// <summary>工位映射提示：多项式优先、棋盘毫米系、双档案并存。</summary>
+    public string MappingHint
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Editor.StationId))
+                return Editor.DebugPassthrough
+                    ? "台架直通已开启：TRIGGER 返回像素坐标，禁止对接 PLC"
+                    : "";
+            var station = Editor.StationId!;
+            var poly = _calibration.PolynomialProfiles.FirstOrDefault(p =>
+                string.Equals(p.StationId, station, StringComparison.OrdinalIgnoreCase));
+            var hasExt = _calibration.HasExtrinsic(station);
+            if (poly is not null && hasExt)
+                return $"工位 {station} 同时有多项式与外参：生产只用多项式（原图），外参被忽略";
+            if (poly is not null &&
+                string.Equals(poly.CoordinateSpace, PolynomialCoordinateSpace.Image, StringComparison.OrdinalIgnoreCase))
+                return $"工位 {station} 为棋盘毫米系（非机器人基座标），PLC 不能直接当 TCP 坐标使用";
+            if (poly is not null &&
+                string.Equals(poly.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase) &&
+                poly.HasTeachPose)
+                return $"工位 {station} 为末端相机：TRIGGER 必须带 X,Y,RZ，否则 1014";
+            var ext = _calibration.ExtrinsicProfiles.FirstOrDefault(p =>
+                string.Equals(p.StationId, station, StringComparison.OrdinalIgnoreCase));
+            if (ext is not null &&
+                string.Equals(ext.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase) &&
+                ext.HasTeachPose)
+                return $"工位 {station} 为末端相机：TRIGGER 必须带 X,Y,RZ，否则 1014";
+            return "";
+        }
+    }
+
+    /// <summary>角度模式现场提示：最小外接矩形 180° 歧义、双模型就近配对。</summary>
+    public string AngleModeHint => Editor.AngleMode switch
+    {
+        AngleMode.MaskMinAreaRect => "最小外接矩形角度为 [0,180)，无头尾方向；偏心工具补偿可能差 180°",
+        AngleMode.DualCenterLine => "双模型连线为一对一就近配对，多目标间距接近时可能配错",
+        AngleMode.MaskTemplate => "模板匹配失败会回退粗角度 [0,180)（无方向）；示教须与生产同一套照明",
+        _ => "",
+    };
 
     /// <summary>已注册光源控制器列表（下拉选择；为空 = 未配置任何光源）。</summary>
     public IReadOnlyList<string> LightControllerIds => _lighting.ControllerIds.ToList();
@@ -566,6 +654,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
             while (Editor.Models.Count < 1)
                 Editor.Models.Add("");
             Editor.Models[0] = value;
+            NotifyEditorMutated();
         }
     }
 
@@ -577,22 +666,13 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
             while (Editor.Models.Count < 2)
                 Editor.Models.Add("");
             Editor.Models[1] = value;
+            NotifyEditorMutated();
         }
     }
 
     partial void OnSearchTextChanged(string value) => OnPropertyChanged(nameof(VisibleRecipes));
 
-    partial void OnEditorChanged(RecipeConfig value)
-    {
-        OnPropertyChanged(nameof(HasUnsavedChanges));
-        OnPropertyChanged(nameof(RotationCenterHint));
-        OnPropertyChanged(nameof(IsDualMode));
-        OnPropertyChanged(nameof(IsKeyPointMode));
-        OnPropertyChanged(nameof(IsSegmentationMode));
-        OnPropertyChanged(nameof(IsMaskTemplateMode));
-        OnPropertyChanged(nameof(IsTemplateMethod));
-        OnPropertyChanged(nameof(HasTemplate));
-    }
+    partial void OnEditorChanged(RecipeConfig value) => NotifyEditorMutated();
 
     /// <summary>角度模式联动显隐：次模型/配对距离仅双模型；关键点参数仅关键点；掩码置信度仅分割；
     /// 模板参数仅分割+模板匹配。Editor 属性级绑定不触发 OnEditorChanged，AngleMode 的编辑器联动见 NotifyEditorBindings。</summary>
@@ -617,15 +697,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     public bool IsTemplateMethod => Editor.Template.RefineMethod == SegmentRefineMethod.Template;
 
     /// <summary>角度模式切换联动（页面 SelectionChanged 调用）：刷新按模式显隐的派生属性。</summary>
-    public void NotifyAngleModeChanged()
-    {
-        OnPropertyChanged(nameof(IsDualMode));
-        OnPropertyChanged(nameof(IsKeyPointMode));
-        OnPropertyChanged(nameof(IsSegmentationMode));
-        OnPropertyChanged(nameof(IsMaskTemplateMode));
-        OnPropertyChanged(nameof(IsTemplateMethod));
-        OnPropertyChanged(nameof(HasTemplate));
-    }
+    public void NotifyAngleModeChanged() => NotifyEditorMutated();
 
     [RelayCommand]
     public void Refresh()
@@ -807,14 +879,24 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         if (string.IsNullOrEmpty(_originalName))
             return;
 
+        if (HasUnsavedChanges &&
+            MessageBox.Show("有未保存的修改：测试触发仍用磁盘上的旧配方。继续？",
+                "未保存修改", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
         IsBusy = true;
         TestImage = null; // 清上一轮结果图（失败时不显示旧画面误导）
         _awaitSnapshotFor = _originalName; // 置位一次性捕获标志（见字段注释）
         try
         {
             Message = $"测试触发中：{_originalName} …";
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            var result = await _vision.RunAsync(_originalName, cts.Token);
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(500, _tcp.TimeoutMs)));
+            TcpClientPose? pose = IncludeTriggerPose
+                ? new TcpClientPose(TriggerPoseX, TriggerPoseY, TriggerPoseRz)
+                : null;
+            var result = pose is null
+                ? await _vision.RunAsync(_originalName, cts.Token)
+                : await _vision.RunAsync(_originalName, pose, cts.Token);
             if (result.Ok)
             {
                 // 成功：保持标志置位——快照回调可能在 RunAsync 返回后才执行，
@@ -976,6 +1058,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _dirtyTimer.Stop();
         _vision.FrameProcessed -= OnTestFrameProcessed;
     }
 }

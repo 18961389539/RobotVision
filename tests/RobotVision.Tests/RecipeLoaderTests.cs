@@ -254,4 +254,22 @@ public sealed class RecipeLoaderTests : IDisposable
 
         Assert.NotNull(recipe);
     }
+
+    [Fact]
+    public void Get_CacheHit_RevalidatesReferences()
+    {
+        File.WriteAllText(Path.Combine(_folder, "R05.json"), """{ "cameraId": "cam", "models": ["m.onnx"] }""");
+        var allow = true;
+        var loader = new RecipeLoader(_folder)
+        {
+            ReferenceValidator = _ => allow
+                ? null
+                : new RecipeReferenceError("工位未做外参/多项式标定: st1", VisionErrorCode.NotCalibrated),
+        };
+
+        Assert.Equal("cam", loader.Get("R05").CameraId);
+        allow = false;
+        var ex = Assert.Throws<InvalidRecipeException>(() => loader.Get("R05"));
+        Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
+    }
 }

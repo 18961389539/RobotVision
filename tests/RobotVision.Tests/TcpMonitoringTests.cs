@@ -16,7 +16,7 @@ public class TcpMonitoringTests : IDisposable
     {
         _tcp = new TcpServerManager(
             "127.0.0.1", GetFreePort(), 2000,
-            (recipe, ct) => Task.FromResult(VisionResult.Success(recipe,
+            (recipe, _, ct) => Task.FromResult(VisionResult.Success(recipe,
                 [new RobotPose(1.5, 2.5, 30)], 4)),
             NullLogger<TcpServerManager>.Instance);
     }
@@ -36,7 +36,8 @@ public class TcpMonitoringTests : IDisposable
     {
         await stream.WriteAsync(Encoding.UTF8.GetBytes(request + "\n"));
         var buffer = new byte[4096];
-        var read = await stream.ReadAsync(buffer);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var read = await stream.ReadAsync(buffer, timeout.Token);
         return Encoding.UTF8.GetString(buffer, 0, read).Trim();
     }
 
@@ -139,5 +140,33 @@ public class TcpMonitoringTests : IDisposable
         await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
         var reply = await RoundTripAsync(client.GetStream(), "PING");
         Assert.Equal("PONG", reply);
+    }
+
+    [Fact]
+    public async Task IdleTimeoutZero_KeepsConnectionUntilClientCloses()
+    {
+        _tcp.IdleTimeoutMs = 0;
+        _tcp.Start();
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
+        var stream = client.GetStream();
+        Assert.Equal("PONG", await RoundTripAsync(stream, "PING"));
+        await Task.Delay(400);
+        Assert.Equal(1, _tcp.ConnectedClients);
+        Assert.Equal("PONG", await RoundTripAsync(stream, "PING"));
+    }
+
+    [Fact]
+    public async Task IdleTimeoutPositive_DisconnectsAfterSilence()
+    {
+        _tcp.IdleTimeoutMs = 250;
+        var disconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _tcp.ClientDisconnected += _ => disconnected.TrySetResult();
+        _tcp.Start();
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
+        Assert.Equal("PONG", await RoundTripAsync(client.GetStream(), "PING"));
+        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, _tcp.ConnectedClients);
     }
 }

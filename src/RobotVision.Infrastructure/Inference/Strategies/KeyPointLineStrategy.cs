@@ -28,13 +28,13 @@ public sealed class KeyPointLineStrategy(ModelManager models) : IAngleStrategy
         {
             // KeyPoints 可能为 null（模型未输出关键点/输出异常），防御性跳过
             var keypoints = estimation.KeyPoints;
-            if (keypoints is null || keypoints.Length <= Math.Max(recipe.KeypointIndexA, recipe.KeypointIndexB))
+            if (keypoints is null || keypoints.Length <= Math.Max(recipe.Keypoint.IndexA, recipe.Keypoint.IndexB))
                 continue;
 
-            var keyA = keypoints[recipe.KeypointIndexA];
-            var keyB = keypoints[recipe.KeypointIndexB];
-            if (keyA.Confidence < recipe.KeypointMinConfidence ||
-                keyB.Confidence < recipe.KeypointMinConfidence)
+            var keyA = keypoints[recipe.Keypoint.IndexA];
+            var keyB = keypoints[recipe.Keypoint.IndexB];
+            if (keyA.Confidence < recipe.Keypoint.MinConfidence ||
+                keyB.Confidence < recipe.Keypoint.MinConfidence)
                 continue;
 
             var dx = keyB.X - keyA.X;

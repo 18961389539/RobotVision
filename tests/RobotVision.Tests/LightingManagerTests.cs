@@ -41,6 +41,10 @@ public class LightingManagerTests
             LastConfig = lighting;
         }
 
+        public void SendRaw(string command)
+        {
+        }
+
         public void TurnOff() => TurnOffCount++;
 
         public void Dispose() => DisposedCount++;

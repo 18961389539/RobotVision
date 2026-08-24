@@ -21,7 +21,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 {
     private const int LogCapacity = 500;
     private static readonly TimeSpan PreviewInterval = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan TriggerTimeout = TimeSpan.FromSeconds(10);
 
     private readonly VisionService _vision;
     private readonly CameraManager _cameras;
@@ -35,6 +34,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private bool _showingSnapshot;
     private int _previewBusy;
+
+    [ObservableProperty]
+    private bool _includeTriggerPose;
+
+    [ObservableProperty]
+    private double _triggerPoseX;
+
+    [ObservableProperty]
+    private double _triggerPoseY;
+
+    [ObservableProperty]
+    private double _triggerPoseRz;
 
     [ObservableProperty]
     private BitmapSource? _displayImage;
@@ -179,8 +190,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
-            using var cts = new CancellationTokenSource(TriggerTimeout);
-            var result = await _vision.RunAsync(recipeName, cts.Token);
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(500, _tcp.TimeoutMs)));
+            TcpClientPose? pose = IncludeTriggerPose
+                ? new TcpClientPose(TriggerPoseX, TriggerPoseY, TriggerPoseRz)
+                : null;
+            var result = pose is null
+                ? await _vision.RunAsync(recipeName, cts.Token)
+                : await _vision.RunAsync(recipeName, pose, cts.Token);
 
             if (!result.Ok)
             {

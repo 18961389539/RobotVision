@@ -59,22 +59,54 @@ public class CalibToolCsvTests
     [Fact]
     public void ParsePoints_SkipsHeaderAndComments()
     {
-        var points = CsvPointParser.ParsePoints([
+        var (points, angles) = CsvPointParser.ParsePoints([
             "pixel_x,pixel_y",
             "# 说明",
             "600.0,350.0",
             "750.0,420.0",
         ]);
 
+        Assert.Null(angles); // 2 列 = 无角度记录
         Assert.Equal(2, points.Length);
         Assert.Equal(600f, points[0].X);
         Assert.Equal(420f, points[1].Y);
     }
 
     [Fact]
+    public void ParsePoints_ThreeColumns_ParsesAngles()
+    {
+        var (points, angles) = CsvPointParser.ParsePoints([
+            "pixel_x,pixel_y,rz_deg",
+            "600.0,350.0,0",
+            "750.0,420.0,45",
+            "680.0,540.0,90",
+        ]);
+
+        Assert.NotNull(angles);
+        Assert.Equal(3, points.Length);
+        Assert.Equal(3, angles.Length);
+        Assert.Equal(0, angles[0]);
+        Assert.Equal(45, angles[1]);
+        Assert.Equal(90, angles[2]);
+    }
+
+    [Fact]
+    public void ParsePoints_MixedColumnCounts_TreatedAsNoAngles()
+    {
+        // 混合 2/3 列：角度与点数不一一对应，按无角度处理（自检要求成对）
+        var (points, angles) = CsvPointParser.ParsePoints([
+            "600.0,350.0,0",
+            "750.0,420.0",
+        ]);
+
+        Assert.Null(angles);
+        Assert.Equal(2, points.Length);
+    }
+
+    [Fact]
     public void ParsePoints_WrongColumnCount_Throws()
     {
-        Assert.Throws<FormatException>(() => CsvPointParser.ParsePoints(["1.0,2.0,3.0"]));
+        Assert.Throws<FormatException>(() => CsvPointParser.ParsePoints(["1.0,2.0,3.0,4.0"]));
     }
 
     [Fact]

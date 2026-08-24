@@ -101,4 +101,78 @@ public class ProtocolTests
         var state = new TcpServerManager.TcpServerState(ready, queue, max, lastMs);
         Assert.Equal(expected, TcpServerManager.FormatStatus(state));
     }
+
+    // ---- TRIGGER 扩展格式（TRIGGER,配方名,X,Y,RZ）----
+
+    [Fact]
+    public void ParseTriggerArgument_LegacyOneSegment_PosesNull()
+    {
+        var (name, pose, error) = TcpServerManager.ParseTriggerArgument("A01");
+        Assert.Equal("A01", name);
+        Assert.Null(pose); // 旧格式：无位姿（OnArm 已记录示教位姿时由管线返回 1014）
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void ParseTriggerArgument_FourSegments_PosesParsed()
+    {
+        var (name, pose, error) = TcpServerManager.ParseTriggerArgument("A01, 100.25 , -50.5, 45.0");
+        Assert.Equal("A01", name);
+        Assert.Null(error);
+        Assert.NotNull(pose);
+        Assert.Equal(100.25, pose!.X, 9);
+        Assert.Equal(-50.5, pose.Y, 9);
+        Assert.Equal(45.0, pose.RzDeg, 9);
+    }
+
+    [Theory]
+    [InlineData("A01,1.0")]                 // 2 段
+    [InlineData("A01,1.0,2.0")]             // 3 段
+    [InlineData("A01,1.0,2.0,3.0,4.0")]     // 5 段
+    public void ParseTriggerArgument_WrongSegmentCount_ReturnsError(string argument)
+    {
+        var (_, _, error) = TcpServerManager.ParseTriggerArgument(argument);
+        Assert.Equal("TRIGGER_ARGUMENT_COUNT", error);
+    }
+
+    [Theory]
+    [InlineData("A01,NaN,2.0,3.0")]
+    [InlineData("A01,1.0,Infinity,3.0")]
+    [InlineData("A01,1.0,2.0,abc")]
+    public void ParseTriggerArgument_NonFiniteOrNonNumeric_ReturnsError(string argument)
+    {
+        var (_, _, error) = TcpServerManager.ParseTriggerArgument(argument);
+        Assert.Equal("INVALID_POSE_NUMBER", error);
+    }
+
+    [Fact]
+    public void ParseTriggerArgument_EmptyRecipeInFourSegments_ReturnsError()
+    {
+        var (_, _, error) = TcpServerManager.ParseTriggerArgument(",1.0,2.0,3.0");
+        Assert.Equal("MISSING_RECIPE", error);
+    }
+
+    [Fact]
+    public void FormatReply_PoseMismatchUses1012()
+    {
+        var result = VisionResult.Fail("A01", VisionErrorCode.PoseMismatch,
+            "拍照位姿不一致: 上报与标定偏差超容差", 5);
+        Assert.StartsWith("ERR,1012,", TcpServerManager.FormatReply(result));
+    }
+
+    [Fact]
+    public void FormatReply_InvalidTriggerArgumentUses1013()
+    {
+        var result = VisionResult.Fail("A01", VisionErrorCode.InvalidTriggerArgument,
+            "TRIGGER_ARGUMENT_COUNT", 0);
+        Assert.Equal("ERR,1013,TRIGGER_ARGUMENT_COUNT", TcpServerManager.FormatReply(result));
+    }
+
+    [Fact]
+    public void FormatReply_PoseRequiredUses1014()
+    {
+        var result = VisionResult.Fail("A01", VisionErrorCode.PoseRequired,
+            "OnArm 工位必须使用 TRIGGER,配方名,X,Y,RZ", 0);
+        Assert.StartsWith("ERR,1014,", TcpServerManager.FormatReply(result));
+    }
 }

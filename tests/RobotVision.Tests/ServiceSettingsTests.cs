@@ -29,7 +29,7 @@ public class TcpAccessControlTests : IDisposable
     {
         var server = new TcpServerManager(
             "127.0.0.1", GetFreePort(), 2000,
-            (recipe, ct) => Task.FromResult(VisionResult.Success(recipe, [], 1)),
+            (recipe, _, ct) => Task.FromResult(VisionResult.Success(recipe, [], 1)),
             NullLogger<TcpServerManager>.Instance);
         server.Start();
         return server;
@@ -242,6 +242,8 @@ public class AppSettingsStoreTests : IDisposable
         Assert.Equal("192.168.2.*", root.GetProperty("IpWhitelist")[1].GetString());
         Assert.False(root.GetProperty("FailureImage").GetProperty("Enabled").GetBoolean());
         Assert.Equal(50, root.GetProperty("FailureImage").GetProperty("RetainedCount").GetInt32());
+        Assert.Equal(0, root.GetProperty("IdleTimeoutMs").GetInt64());
+        Assert.True(root.GetProperty("PoseCheck").GetProperty("Enabled").GetBoolean());
         // 其他节点保留
         Assert.Equal("cam_file", root.GetProperty("Cameras")[0].GetProperty("Id").GetString());
 
@@ -333,6 +335,52 @@ public class AppSettingsStoreTests : IDisposable
         var values = new ServiceSettingsValues(
             5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999,
             ["192.168.*.10"]); // 中间通配非法
+        Assert.Throws<InvalidDataException>(() => store.Save(values));
+    }
+
+    [Fact]
+    public void Save_IdleTimeoutNegative_Throws()
+    {
+        var cfg = WriteBase("""{ "IpAddress": "0.0.0.0", "TcpPort": 9999, "TimeoutMs": 5000 }""");
+        var store = new AppSettingsStore(cfg, _file);
+        var values = new ServiceSettingsValues(
+            5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999, [], IdleTimeoutMs: -1);
+        Assert.Throws<InvalidDataException>(() => store.Save(values));
+    }
+
+    [Fact]
+    public void Save_IdleTimeoutBelowOneSecond_Throws()
+    {
+        var cfg = WriteBase("""{ "IpAddress": "0.0.0.0", "TcpPort": 9999, "TimeoutMs": 5000 }""");
+        var store = new AppSettingsStore(cfg, _file);
+        var values = new ServiceSettingsValues(
+            5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999, [], IdleTimeoutMs: 999);
+        Assert.Throws<InvalidDataException>(() => store.Save(values));
+    }
+
+    [Fact]
+    public void Save_IdleTimeoutThirtyDays_Writes()
+    {
+        var cfg = WriteBase("""{ "IpAddress": "0.0.0.0", "TcpPort": 9999, "TimeoutMs": 5000 }""");
+        var store = new AppSettingsStore(cfg, _file);
+        store.Save(new ServiceSettingsValues(
+            5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999, [],
+            IdleTimeoutMs: TcpServerManager.IdleTimeoutThirtyDaysMs));
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(_file));
+        Assert.Equal(TcpServerManager.IdleTimeoutThirtyDaysMs,
+            doc.RootElement.GetProperty("IdleTimeoutMs").GetInt64());
+        Assert.Equal(TcpServerManager.IdleTimeoutThirtyDaysMs, cfg.IdleTimeoutMs);
+    }
+
+    [Fact]
+    public void Save_PoseCheckToleranceNonPositive_Throws()
+    {
+        var cfg = WriteBase("""{ "IpAddress": "0.0.0.0", "TcpPort": 9999, "TimeoutMs": 5000 }""");
+        var store = new AppSettingsStore(cfg, _file);
+        var values = new ServiceSettingsValues(
+            5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999, [],
+            PoseXyToleranceMm: 0);
         Assert.Throws<InvalidDataException>(() => store.Save(values));
     }
 }

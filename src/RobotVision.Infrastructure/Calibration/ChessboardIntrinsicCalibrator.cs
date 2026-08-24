@@ -42,40 +42,75 @@ public static class ChessboardIntrinsicCalibrator
         Mat[] rvecs = [];
         Mat[] tvecs = [];
         var imageSize = new Size(0, 0);
+
+        // 失败原因分类清单：区分"读不了图"（路径/格式/权限）与"未检出棋盘"（规格/姿态），
+        // 把用户引向正确的排障方向，而不是一律提示"检查棋盘规格"
+        var unreadable = new List<string>();
+        var undetected = new List<string>();
+
         try
         {
             for (var idx = 0; idx < imageFiles.Count; idx++)
             {
-                using var img = Cv2.ImRead(imageFiles[idx], ImreadModes.Color);
-                if (img.Empty())
-                    continue;
-
-                // 批次分辨率一致性校验：CalibrateCamera 的 imageSize 是全局的，混合分辨率
-                // 会把内参映射到错误的坐标系（imageSize 取最后一张），标定结果完全错误
-                if (imageSize.Width == 0)
+                // imdecode 按字节流解码：imread 对非 ASCII（中文）路径支持不稳，会静默返回空图
+                Mat img;
+                var bytes = Array.Empty<byte>();
+                try
                 {
-                    imageSize = img.Size();
+                    bytes = File.ReadAllBytes(imageFiles[idx]);
                 }
-                else if (img.Size() != imageSize)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    throw new VisionException(VisionErrorCode.NotCalibrated,
-                        $"图像 {Path.GetFileName(imageFiles[idx])} 分辨率 {img.Width}x{img.Height} " +
-                        $"与批次首张 {imageSize.Width}x{imageSize.Height} 不一致（混合分辨率无法标定）");
+                    unreadable.Add(Path.GetFileName(imageFiles[idx]));
+                    continue;
                 }
 
-                using var gray = new Mat();
-                Cv2.CvtColor(img, gray, ColorConversionCodes.BGR2GRAY);
+                using (img = Cv2.ImDecode(bytes, ImreadModes.Color))
+                {
+                    if (img.Empty())
+                    {
+                        unreadable.Add(Path.GetFileName(imageFiles[idx]));
+                        continue;
+                    }
 
-                if (!Cv2.FindChessboardCornersSB(gray, patternSize, out var corners))
-                    continue;
+                    // 批次分辨率一致性校验：CalibrateCamera 的 imageSize 是全局的，混合分辨率
+                    // 会把内参映射到错误的坐标系（imageSize 取最后一张），标定结果完全错误
+                    if (imageSize.Width == 0)
+                    {
+                        imageSize = img.Size();
+                    }
+                    else if (img.Size() != imageSize)
+                    {
+                        throw new VisionException(VisionErrorCode.NotCalibrated,
+                            $"图像 {Path.GetFileName(imageFiles[idx])} 分辨率 {img.Width}x{img.Height} " +
+                            $"与批次首张 {imageSize.Width}x{imageSize.Height} 不一致（混合分辨率无法标定）");
+                    }
 
-                objectPoints.Add(Mat.FromArray(board));
-                imagePoints.Add(Mat.FromArray(corners));
+                    using var gray = new Mat();
+                    Cv2.CvtColor(img, gray, ColorConversionCodes.BGR2GRAY);
+
+                    if (!Cv2.FindChessboardCornersSB(gray, patternSize, out var corners))
+                    {
+                        undetected.Add(Path.GetFileName(imageFiles[idx]));
+                        continue;
+                    }
+
+                    objectPoints.Add(Mat.FromArray(board));
+                    imagePoints.Add(Mat.FromArray(corners));
+                }
             }
 
             if (imagePoints.Count < MinImageCount)
+            {
+                var details = new List<string>();
+                if (unreadable.Count > 0)
+                    details.Add($"无法读取 {unreadable.Count} 张（{JoinSample(unreadable)}），请检查路径/格式/权限");
+                if (undetected.Count > 0)
+                    details.Add($"未检出棋盘 {undetected.Count} 张（{JoinSample(undetected)}），请检查棋盘规格或更换姿态");
+                var detail = details.Count > 0 ? "：" + string.Join("；", details) : "";
                 throw new VisionException(VisionErrorCode.NotCalibrated,
-                    $"有效棋盘图像不足: {imagePoints.Count}/{MinImageCount}，请检查棋盘规格或更换姿态重拍");
+                    $"有效棋盘图像不足: {imagePoints.Count}/{MinImageCount}{detail}");
+            }
 
             using var cameraMatrix = new Mat(3, 3, MatType.CV_64F, Scalar.All(0));
             cameraMatrix.Set(0, 0, imageSize.Width);
@@ -154,4 +189,11 @@ public static class ChessboardIntrinsicCalibrator
     /// <summary>按 Mat 实际布局读取第 i 个二维点（N×1 用 (i,0)，1×N 用 (0,i)）。</summary>
     private static Vec2f PointAt(Mat m, int i) =>
         m.Rows >= m.Cols ? m.At<Vec2f>(i, 0) : m.At<Vec2f>(0, i);
+
+    /// <summary>失败清单取样展示（最多 3 个文件名，超出加"等"），避免错误消息无限长。</summary>
+    private static string JoinSample(List<string> names)
+    {
+        var sample = string.Join("、", names.Take(3));
+        return names.Count > 3 ? sample + " 等" : sample;
+    }
 }

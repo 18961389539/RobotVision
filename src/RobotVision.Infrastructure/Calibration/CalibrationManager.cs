@@ -74,6 +74,10 @@ public sealed class CalibrationManager : IDisposable
     public bool HasPolynomial(string? stationId) =>
         !string.IsNullOrEmpty(stationId) && _polynomials.ContainsKey(stationId);
 
+    /// <summary>工位是否已有外参档案。</summary>
+    public bool HasExtrinsic(string? stationId) =>
+        !string.IsNullOrEmpty(stationId) && _extrinsics.ContainsKey(stationId);
+
     /// <summary>加载时发现的质量超标警告（供启动日志/UI 展示）。</summary>
     public IReadOnlyList<string> QualityWarnings => _qualityWarnings.ToArray();
 
@@ -316,6 +320,9 @@ public sealed class CalibrationManager : IDisposable
         if (!CameraMountType.IsValid(profile.MountType))
             throw new VisionException(VisionErrorCode.InternalError,
                 $"外参 {profile.StationId} 的 MountType 非法: {profile.MountType}（仅支持 Fixed/OnArm）");
+        if (!PoseComposeMode.IsValid(profile.ComposeMode))
+            throw new VisionException(VisionErrorCode.InternalError,
+                $"外参 {profile.StationId} 的 ComposeMode 非法: {profile.ComposeMode}（仅 Check/Translate）");
         if (!double.IsFinite(profile.TeachTcpX) || !double.IsFinite(profile.TeachTcpY) ||
             !double.IsFinite(profile.TeachRzDeg) || !double.IsFinite(profile.CalibrationPlaneZ))
             throw new VisionException(VisionErrorCode.InternalError, $"外参 {profile.StationId} 的拍照位姿/标定平面字段含非有限值");
@@ -351,6 +358,7 @@ public sealed class CalibrationManager : IDisposable
             AddQualityWarning($"外参 {profile.StationId} 质量超标: 最大残差 {profile.MaxResidual:0.000}（>{ExtrinsicResidualFair:0.0} 可用上限），建议重新标定");
         if (profile.LeaveOneOutMax > LeaveOneOutWarnLimit)
             AddQualityWarning($"外参 {profile.StationId} 留一最大误差 {profile.LeaveOneOutMax:0.000} 偏大（>{LeaveOneOutWarnLimit:0.0}），疑似存在抄错/误点，请核对点对");
+        WarnIfDualMapping(profile.StationId);
     }
 
     public void LoadRotationCenter(RotationCenterProfile profile)
@@ -405,6 +413,14 @@ public sealed class CalibrationManager : IDisposable
         _polynomials[profile.StationId] = profile;
         if (profile.MaxResidual > ExtrinsicResidualFair)
             AddQualityWarning($"多项式标定 {profile.StationId} 质量超标: 最大残差 {profile.MaxResidual:0.000}（>{ExtrinsicResidualFair:0.0} 可用上限），建议重新标定");
+        WarnIfDualMapping(profile.StationId);
+    }
+
+    /// <summary>同一工位多项式与外参并存时，生产只走多项式。必须警告，否则操作员以为外参仍生效。</summary>
+    private void WarnIfDualMapping(string stationId)
+    {
+        if (_polynomials.ContainsKey(stationId) && _extrinsics.ContainsKey(stationId))
+            AddQualityWarning($"工位 {stationId} 同时存在多项式与外参档案：生产优先使用多项式（原图+多项式映射），外参/去畸变被忽略。请删除不用的那份以免坐标系混淆");
     }
 
     public void SavePolynomial(PolynomialProfile profile)
@@ -766,12 +782,42 @@ public sealed class CalibrationManager : IDisposable
     }
 
     /// <summary>
+    /// OnArm 且已记录示教位姿时，无位姿的 TRIGGER 必须拒绝（1014）。
+    /// 多项式 Image 毫米系不锚定机器人系，不要求位姿。
+    /// 多项式优先于外参（与生产映射一致）。
+    /// </summary>
+    public bool ClientPoseRequired(string? stationId)
+    {
+        if (!PoseCheckEnabled || string.IsNullOrEmpty(stationId))
+            return false;
+        if (_polynomials.TryGetValue(stationId, out var poly))
+        {
+            if (string.Equals(poly.CoordinateSpace, PolynomialCoordinateSpace.Image, StringComparison.OrdinalIgnoreCase))
+                return false;
+            return string.Equals(poly.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase)
+                   && poly.HasTeachPose;
+        }
+        if (_extrinsics.TryGetValue(stationId, out var ext))
+            return string.Equals(ext.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase)
+                   && ext.HasTeachPose;
+        return false;
+    }
+
+    /// <summary>OnArm 工位缺位姿时抛 1014。pose 非空时无操作。</summary>
+    public void RequireClientPose(string? stationId, TcpClientPose? pose)
+    {
+        if (pose is not null || !ClientPoseRequired(stationId))
+            return;
+        throw new VisionException(VisionErrorCode.PoseRequired,
+            "OnArm 工位必须使用 TRIGGER,配方名,X,Y,RZ（未上报拍照位姿，拒绝执行以免输出错位坐标）");
+    }
+
+    /// <summary>
     /// PLC 上报拍照位姿与 OnArm 外参档案的标定位姿比对（TRIGGER,配方名,X,Y,RZ 触发）：
-    /// 不一致抛 1012 PoseMismatch——OnArm 档案只在标定拍照位姿下有效，位姿漂移后
-    /// 像素→机器人映射已失效，静默执行会输出错位坐标。
-    /// 跳过校验（直接返回）：位姿未上报（旧格式 PLC）/ Fixed 档案 / 档案未记录位姿
+    /// Check 模式比对 XY+RZ；Translate 模式仅比对 RZ（平移由 PixelToRobot 合成）。
+    /// 不一致抛 1012 PoseMismatch。
+    /// 跳过校验（直接返回）：位姿未上报（由 RequireClientPose 另拦）/ Fixed 档案 / 档案未记录位姿
     /// （HasTeachPose=false，含旧档案）/ 工位无外参（后续 PixelToRobot 报 1004）/ PoseCheckEnabled=false。
-    /// 注意：校验的是 PLC 上报值——上位机读错寄存器/未停稳采样无法检测（协议级局限，见 PLC 文档 §6.4）。
     /// </summary>
     public void VerifyClientPose(string? stationId, TcpClientPose pose)
     {
@@ -784,18 +830,25 @@ public sealed class CalibrationManager : IDisposable
         if (!ext.HasTeachPose)
             return; // 档案未记录位姿（旧档案/标定时未填）——无从比对，放行（档案侧已有提示）
 
+        var rzDeviation = Math.Abs(NormalizeDelta(pose.RzDeg - ext.TeachRzDeg));
+        if (rzDeviation > PoseRzToleranceDeg)
+            throw new VisionException(VisionErrorCode.PoseMismatch,
+                $"拍照姿态不一致: RZ 偏差 {rzDeviation:0.000}° 超容差 {PoseRzToleranceDeg:0.0}°" +
+                "（OnArm 工位拍照姿态必须与标定一致；Translate 模式只允许平移）");
+
+        if (string.Equals(ext.ComposeMode, PoseComposeMode.Translate, StringComparison.OrdinalIgnoreCase))
+            return;
+
         var dx = pose.X - ext.TeachTcpX;
         var dy = pose.Y - ext.TeachTcpY;
         var xyDeviation = Math.Sqrt(dx * dx + dy * dy);
-        var rzDeviation = Math.Abs(NormalizeDelta(pose.RzDeg - ext.TeachRzDeg));
-
-        if (xyDeviation > PoseXyToleranceMm || rzDeviation > PoseRzToleranceDeg)
+        if (xyDeviation > PoseXyToleranceMm)
             throw new VisionException(VisionErrorCode.PoseMismatch,
                 $"拍照位姿不一致: 上报 ({pose.X:0.000},{pose.Y:0.000},{pose.RzDeg:0.000}°) " +
                 $"与标定 ({ext.TeachTcpX:0.000},{ext.TeachTcpY:0.000},{ext.TeachRzDeg:0.000}°) " +
                 $"偏差 XY {xyDeviation:0.000}mm / RZ {rzDeviation:0.000}° 超容差 " +
                 $"({PoseXyToleranceMm:0.0}mm/{PoseRzToleranceDeg:0.0}°)。" +
-                "OnArm 工位拍照位姿必须与标定一致，请核对拍照点或重标该工位外参");
+                "OnArm 工位拍照位姿必须与标定一致，请核对拍照点或重标该工位外参；相机只有平移可改用 ComposeMode=Translate");
     }
 
     /// <summary>
@@ -880,7 +933,7 @@ public sealed class CalibrationManager : IDisposable
     /// 角度通过"中心点 + 方向前推点"两点映射后求 Atan2 得到，
     /// 自动处理 y 轴向下、镜像、非等比缩放等符号问题。
     /// </summary>
-    public RobotPose PixelToRobot(string? stationId, PixelPose pose, bool allowPassthrough = false, string? cameraId = null)
+    public RobotPose PixelToRobot(string? stationId, PixelPose pose, bool allowPassthrough = false, string? cameraId = null, TcpClientPose? clientPose = null)
     {
         if (string.IsNullOrEmpty(stationId))
         {
@@ -914,7 +967,21 @@ public sealed class CalibrationManager : IDisposable
             Ty(qx, qy) - Ty(pose.Cx, pose.Cy),
             Tx(qx, qy) - Tx(pose.Cx, pose.Cy)) * 180.0 / Math.PI;
 
-        return new RobotPose(Tx(pose.Cx, pose.Cy), Ty(pose.Cx, pose.Cy), AngleGeometry.NormalizeSignedDeg(angleDeg));
+        var x = Tx(pose.Cx, pose.Cy);
+        var y = Ty(pose.Cx, pose.Cy);
+
+        // 平移合成（OnArm + Translate + 已上报位姿）：映射整体平移，换拍照点不重标。
+        var translate = clientPose is not null &&
+                        string.Equals(profile.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(profile.ComposeMode, PoseComposeMode.Translate, StringComparison.OrdinalIgnoreCase) &&
+                        profile.HasTeachPose;
+        if (translate)
+        {
+            x += clientPose!.X - profile.TeachTcpX;
+            y += clientPose.Y - profile.TeachTcpY;
+        }
+
+        return new RobotPose(x, y, AngleGeometry.NormalizeSignedDeg(angleDeg));
     }
 
     private string ProfileFile(string kind, string id)

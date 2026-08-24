@@ -11,7 +11,11 @@ namespace RobotVision.Infrastructure.Calibration;
 /// </summary>
 public static class RotationCenterCalibrator
 {
-    public static RotationCenterProfile Calibrate(string stationId, string cameraId, Point2f[] points)
+    /// <summary>拟合半径下限（px）：低于此值的偏心距补偿量可忽略，且小圆拟合对噪声极敏感。</summary>
+    public const double MinRadiusPx = 10.0;
+
+    public static RotationCenterProfile Calibrate(string stationId, string cameraId, Point2f[] points,
+        int width = 0, int height = 0)
     {
         if (points.Length < 3)
             throw new VisionException(VisionErrorCode.NotCalibrated,
@@ -33,6 +37,13 @@ public static class RotationCenterCalibrator
             throw new VisionException(VisionErrorCode.NotCalibrated,
                 $"拟合半径 {radius:0.0}px 远大于标记点跨度 {maxPairwise:0.0}px：旋转角度跨度不足，请等间隔分布（如 0°/120°/240° 或每 45°）");
 
+        // 半径下限：偏心距极小的工具补偿量本身可忽略（d=2r·sin），且小圆的轴心方向
+        // 对标记提取噪声极敏感——直接拒绝，提示改用同心模式
+        if (radius < MinRadiusPx)
+            throw new VisionException(VisionErrorCode.NotCalibrated,
+                $"拟合半径 {radius:0.0}px 过小（<{MinRadiusPx:0}px）：偏心距极小无需补偿（请把配方 rotationCompensation 设为 None），" +
+                "且小圆拟合对标记噪声极敏感，轴心结果不可信");
+
         double sumSq = 0;
         foreach (var p in points)
         {
@@ -50,6 +61,9 @@ public static class RotationCenterCalibrator
             Rms = Math.Sqrt(sumSq / points.Length),
             AxisRatio = axisRatio,
             PointCount = points.Length,
+            // 标定时分辨率入档案：换相机/改分辨率后与内参比对，不一致即拒绝使用
+            Width = width,
+            Height = height,
             CalibratedAt = DateTime.Now,
         };
     }

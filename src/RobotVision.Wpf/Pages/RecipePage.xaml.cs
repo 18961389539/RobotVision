@@ -10,7 +10,12 @@ public partial class RecipePage : Page
         InitializeComponent();
         DataContext = App.Services.GetRequiredService(typeof(RecipeViewModel));
         // 再次进入页面时刷新相机下拉（相机管理页增删相机后）
-        Loaded += (_, _) => (DataContext as RecipeViewModel)?.RefreshCameras();
+        Loaded += (_, _) =>
+        {
+            (DataContext as RecipeViewModel)?.RefreshCameras();
+            (DataContext as RecipeViewModel)?.StartDirtyWatch();
+        };
+        Unloaded += (_, _) => (DataContext as RecipeViewModel)?.StopDirtyWatch();
     }
 
     /// <summary>角度模式/精修方法切换：Editor 属性级变更不触发 OnEditorChanged，

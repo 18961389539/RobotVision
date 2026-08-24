@@ -49,10 +49,12 @@ public static class CsvPointParser
         return ([.. pixels], [.. robots]);
     }
 
-    /// <summary>旋转中心点 CSV：像素x,像素y。返回坐标数组。</summary>
-    public static Point2f[] ParsePoints(IEnumerable<string> lines)
+    /// <summary>旋转中心点 CSV：像素x,像素y[,第4轴角]。
+    /// 2 列返回 Angles=null；3 列返回逐点第 4 轴角度（供旋转方向自检）。</summary>
+    public static (Point2f[] Points, double[]? Angles) ParsePoints(IEnumerable<string> lines)
     {
         var points = new List<Point2f>();
+        List<double>? angles = null;
         var fileLine = 0;
         var headerHandled = false;
 
@@ -71,17 +73,23 @@ public static class CsvPointParser
             headerHandled = true;
 
             var parts = line.Split(',').Select(p => p.Trim()).ToArray();
-            if (parts.Length != 2)
-                throw new FormatException($"无法解析第 {fileLine} 行（需要 2 列）: {raw}");
+            if (parts.Length is not (2 or 3))
+                throw new FormatException($"无法解析第 {fileLine} 行（需要 2 或 3 列: 像素x,像素y[,第4轴角]）: {raw}");
             if (parts.Any(p => !TryParseFinite(p, out _)))
                 throw new FormatException($"无法解析第 {fileLine} 行（含非数字或非有限数，拒绝 NaN/Infinity）: {raw}");
 
             points.Add(new Point2f(
                 float.Parse(parts[0], CultureInfo.InvariantCulture),
                 float.Parse(parts[1], CultureInfo.InvariantCulture)));
+            if (parts.Length == 3)
+                (angles ??= []).Add(double.Parse(parts[2], CultureInfo.InvariantCulture));
         }
 
-        return [.. points];
+        // 混合 2/3 列：角度数与点数不符时按无角度处理（自检要求一一对应）
+        if (angles is not null && angles.Count != points.Count)
+            angles = null;
+
+        return ([.. points], angles is null ? null : [.. angles]);
     }
 
     /// <summary>行内是否全部为可解析的有限数字（表头/说明行检测；NaN/Infinity 视为非法）。</summary>

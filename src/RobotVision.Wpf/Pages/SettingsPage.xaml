@@ -66,7 +66,20 @@
                             <StackPanel Margin="0,0,10,8">
                                 <TextBlock Text="请求超时（ms，建议 3000~5000）" Margin="0,0,0,4" />
                                 <ui:NumberBox Value="{Binding TimeoutMs}" Minimum="500" Maximum="60000"
-                                              SmallChange="500" SpinButtonPlacementMode="Inline" />
+                                              SmallChange="500" SpinButtonPlacementMode="Inline"
+                                              ToolTip="单次 TRIGGER 处理超时；与 TCP 空闲断线无关" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,0,8">
+                                <TextBlock Text="连接空闲超时（ms，0 = 永久）" Margin="0,0,0,4" />
+                                <ui:NumberBox Value="{Binding IdleTimeoutMs}" Minimum="0" Maximum="2592000000.0"
+                                              SmallChange="1000" SpinButtonPlacementMode="Inline"
+                                              ToolTip="0=PLC 节拍间隙不断开；需要回收死连接可点「30天」。半开连接仍由 KeepAlive 探测" />
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                    <ui:Button Content="永久" Appearance="Secondary" FontSize="11"
+                                               Command="{Binding SetIdleNeverCommand}" />
+                                    <ui:Button Content="30 天" Appearance="Secondary" FontSize="11" Margin="8,0,0,0"
+                                               Command="{Binding SetIdleThirtyDaysCommand}" />
+                                </StackPanel>
                             </StackPanel>
                             <StackPanel Margin="0,0,0,8">
                                 <TextBlock Text="推理队列深度（含执行中）" Margin="0,0,0,4" />
@@ -99,6 +112,36 @@
                         </UniformGrid>
                         <ui:TextBlock FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                       Text="总超时必须大于各 Basler 相机的 GrabTimeoutMs，否则相机取图超时将表现为 1008 而非 1003（保存时校验）；并发执行上限必须 ≤ 队列深度" />
+                    </StackPanel>
+                </ui:CardExpander>
+
+                <!-- 末端相机拍照位姿校验（1012/1014） -->
+                <ui:CardExpander IsExpanded="True" Margin="0,0,0,8" Padding="12">
+                    <ui:CardExpander.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBlock FontTypography="Subtitle" Text="拍照位姿校验（OnArm）" VerticalAlignment="Center" />
+                            <Border Style="{StaticResource HotBadge}">
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                            </Border>
+                        </StackPanel>
+                    </ui:CardExpander.Header>
+                    <StackPanel Margin="0,10,0,0">
+                        <ui:ToggleSwitch Content="启用位姿校验（正式产线应开启）"
+                                         IsChecked="{Binding PoseCheckEnabled}" />
+                        <UniformGrid Columns="2" Margin="0,8,0,0">
+                            <StackPanel Margin="0,0,10,8">
+                                <TextBlock Text="XY 容差（mm）" Margin="0,0,0,4" />
+                                <ui:NumberBox Value="{Binding PoseXyToleranceMm}" Minimum="0.01" Maximum="50"
+                                              SmallChange="0.1" SpinButtonPlacementMode="Inline" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,0,8">
+                                <TextBlock Text="RZ 容差（°）" Margin="0,0,0,4" />
+                                <ui:NumberBox Value="{Binding PoseRzToleranceDeg}" Minimum="0.01" Maximum="45"
+                                              SmallChange="0.1" SpinButtonPlacementMode="Inline" />
+                            </StackPanel>
+                        </UniformGrid>
+                        <ui:TextBlock FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                      Text="末端相机工位：未上报 X,Y,RZ 返回 1014；超容差返回 1012。关闭后两项均不拦截（仅调试）。" />
                     </StackPanel>
                 </ui:CardExpander>
 

@@ -255,9 +255,14 @@
                                 </StackPanel>
                             </UniformGrid>
                             <!-- 半宽 UniformGrid 内长文本会截断，直通开关独占一行显示 -->
-                            <CheckBox Content="台架调试直通（无标定返回像素）"
+                            <CheckBox Content="台架调试直通（无标定返回像素，禁止对接 PLC）"
                                       FontSize="11" Margin="0,0,0,4"
                                       IsChecked="{Binding Editor.DebugPassthrough}" />
+                            <TextBlock Text="{Binding MappingHint}" FontSize="11" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                       Margin="0,0,0,6"
+                                       Visibility="{Binding MappingHint,
+                                           Converter={StaticResource NonEmptyToVisibilityConverter}}" />
                             <ui:TextBox Text="{Binding Editor.Description, UpdateSourceTrigger=PropertyChanged}"
                                         FontSize="11" MinHeight="38" TextWrapping="Wrap"
                                         PlaceholderText="描述（备注，不参与推理）"
@@ -269,6 +274,11 @@
                         <!-- 推理与角度 -->
                         <StackPanel Margin="0,0,0,10">
                             <ui:TextBlock FontTypography="BodyStrong" Text="推理与角度" Margin="0,0,0,8" />
+                            <TextBlock Text="{Binding AngleModeHint}" FontSize="11" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Margin="0,0,0,8"
+                                       Visibility="{Binding AngleModeHint,
+                                           Converter={StaticResource NonEmptyToVisibilityConverter}}" />
                             <UniformGrid Columns="2">
                                 <StackPanel Margin="0,0,8,8">
                                     <TextBlock Text="角度模式" Margin="0,0,0,4" FontSize="12" />
@@ -403,10 +413,12 @@
                                             </Style.Triggers>
                                         </Style>
                                     </StackPanel.Style>
-                                    <TextBlock Text="配对距离(px)" Margin="0,0,0,4" FontSize="11" />
+                                    <TextBlock Text="配对距离(px)" Margin="0,0,0,4" FontSize="11"
+                                               ToolTip="A/B 一对一就近配对的最大像素距离；多目标间距接近时可能配错" />
                                     <ui:NumberBox Value="{Binding Editor.DualModel.PairingMaxDistancePx}"
                                                   Minimum="1" Maximum="100000" SmallChange="50"
-                                                  SpinButtonPlacementMode="Compact" />
+                                                  SpinButtonPlacementMode="Compact"
+                                                  ToolTip="A/B 一对一就近配对的最大像素距离；多目标间距接近时可能配错" />
                                 </StackPanel>
                             </WrapPanel>
 
@@ -614,6 +626,25 @@
                         </StackPanel>
 
                         <!-- 操作 -->
+                        <CheckBox Content="测试时上报拍照位姿（末端相机必须勾选，否则 1014）"
+                                  IsChecked="{Binding IncludeTriggerPose}" FontSize="11" Margin="0,0,0,4" />
+                        <UniformGrid Columns="3" Margin="0,0,0,8">
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Text="X mm" FontSize="10" />
+                                <ui:NumberBox Value="{Binding TriggerPoseX}" SmallChange="0.1"
+                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Text="Y mm" FontSize="10" />
+                                <ui:NumberBox Value="{Binding TriggerPoseY}" SmallChange="0.1"
+                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="RZ °" FontSize="10" />
+                                <ui:NumberBox Value="{Binding TriggerPoseRz}" SmallChange="0.1"
+                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                            </StackPanel>
+                        </UniformGrid>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />

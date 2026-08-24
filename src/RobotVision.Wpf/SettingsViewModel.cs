@@ -16,6 +16,7 @@ public partial class SettingsViewModel : ObservableObject
 {
     // 出厂默认值（与 appsettings.json 初始一致）
     private const int DefaultTimeoutMs = 5000;
+    private const long DefaultIdleTimeoutMs = 0;
     private const int DefaultMaxQueueDepth = 4;
     private const int DefaultMaxConcurrent = 2;
     private const int DefaultTcpBacklog = 16;
@@ -37,6 +38,19 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private int _timeoutMs;
+
+    /// <summary>0 = 永久保持连接；2592000000 = 30 天。</summary>
+    [ObservableProperty]
+    private double _idleTimeoutMs;
+
+    [ObservableProperty]
+    private bool _poseCheckEnabled;
+
+    [ObservableProperty]
+    private double _poseXyToleranceMm = 0.5;
+
+    [ObservableProperty]
+    private double _poseRzToleranceDeg = 0.5;
 
     [ObservableProperty]
     private int _maxQueueDepth;
@@ -101,6 +115,10 @@ public partial class SettingsViewModel : ObservableObject
     public void LoadFromRuntime()
     {
         TimeoutMs = _tcp.TimeoutMs;
+        IdleTimeoutMs = _tcp.IdleTimeoutMs;
+        PoseCheckEnabled = _cfg.PoseCheck.Enabled;
+        PoseXyToleranceMm = _cfg.PoseCheck.XyToleranceMm;
+        PoseRzToleranceDeg = _cfg.PoseCheck.RzToleranceDeg;
         MaxQueueDepth = _vision.MaxQueueDepth;
         MaxConcurrent = _vision.MaxConcurrent;
         TcpBacklog = _tcp.Backlog;
@@ -131,19 +149,21 @@ public partial class SettingsViewModel : ObservableObject
             var values = CurrentValues();
 
             // 校验集中在 Store（值域 + 相机取图超时联动），非法值抛 InvalidDataException
+            // 落盘会同步内存 AppConfig（含 IP/端口），端点比较必须用保存前的基线
+            var endpointChanged = _baseline is null
+                || !string.Equals(_baseline.IpAddress, values.IpAddress, StringComparison.OrdinalIgnoreCase)
+                || _baseline.TcpPort != values.TcpPort;
+
             _store.Save(values);
 
-            // 先落盘、后应用热参数：写盘失败时热参数保持原样
+            // RuntimeSync 已热应用超时/空闲/队列等；此处再写一遍与基线对齐，失败已在 Save 抛出
             _tcp.TimeoutMs = values.TimeoutMs;
+            _tcp.IdleTimeoutMs = values.IdleTimeoutMs;
             _vision.MaxQueueDepth = values.MaxQueueDepth;
             _tcp.MaxConnections = values.MaxConnections;
             _tcp.IpWhitelist = values.IpWhitelist;
             _failures.Enabled = values.FailureEnabled;
             _failures.RetainedCount = values.FailureRetainedCount;
-
-            // 端点变化：服务内热重启监听（无需重启程序），失败自动回滚到旧端点
-            var endpointChanged = !string.Equals(_cfg.IpAddress, values.IpAddress, StringComparison.OrdinalIgnoreCase)
-                                  || _cfg.TcpPort != values.TcpPort;
             // 并发槽位/backlog 首次固化或监听启动时读取，运行中修改需重启程序生效
             var restartNeeded = values.MaxConcurrent != _baseline?.MaxConcurrent ||
                                 values.TcpBacklog != _baseline?.TcpBacklog;
@@ -173,6 +193,10 @@ public partial class SettingsViewModel : ObservableObject
     private void RestoreDefaults()
     {
         TimeoutMs = DefaultTimeoutMs;
+        IdleTimeoutMs = DefaultIdleTimeoutMs;
+        PoseCheckEnabled = true;
+        PoseXyToleranceMm = 0.5;
+        PoseRzToleranceDeg = 0.5;
         MaxQueueDepth = DefaultMaxQueueDepth;
         MaxConcurrent = DefaultMaxConcurrent;
         TcpBacklog = DefaultTcpBacklog;
@@ -187,6 +211,12 @@ public partial class SettingsViewModel : ObservableObject
 
     [RelayCommand]
     private void Reload() => LoadFromRuntime();
+
+    [RelayCommand]
+    private void SetIdleNever() => IdleTimeoutMs = 0;
+
+    [RelayCommand]
+    private void SetIdleThirtyDays() => IdleTimeoutMs = TcpServerManager.IdleTimeoutThirtyDaysMs;
 
     [RelayCommand]
     private void OpenSettingsFolder() =>
@@ -204,7 +234,9 @@ public partial class SettingsViewModel : ObservableObject
         return new ServiceSettingsValues(
             TimeoutMs, MaxQueueDepth, MaxConcurrent, TcpBacklog, MaxConnections,
             FailureEnabled, FailureRetainedCount,
-            IpAddress.Trim(), TcpPort, whitelist);
+            IpAddress.Trim(), TcpPort, whitelist,
+            (long)Math.Round(IdleTimeoutMs),
+            PoseCheckEnabled, PoseXyToleranceMm, PoseRzToleranceDeg);
     }
 
     private static bool Same(ServiceSettingsValues a, ServiceSettingsValues b) =>
@@ -214,5 +246,9 @@ public partial class SettingsViewModel : ObservableObject
         a.FailureRetainedCount == b.FailureRetainedCount &&
         string.Equals(a.IpAddress, b.IpAddress, StringComparison.OrdinalIgnoreCase) &&
         a.TcpPort == b.TcpPort &&
+        a.IdleTimeoutMs == b.IdleTimeoutMs &&
+        a.PoseCheckEnabled == b.PoseCheckEnabled &&
+        Math.Abs(a.PoseXyToleranceMm - b.PoseXyToleranceMm) < 1e-9 &&
+        Math.Abs(a.PoseRzToleranceDeg - b.PoseRzToleranceDeg) < 1e-9 &&
         a.IpWhitelist.SequenceEqual(b.IpWhitelist, StringComparer.OrdinalIgnoreCase);
 }

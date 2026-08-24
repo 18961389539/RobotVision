@@ -808,6 +808,72 @@ public class CalibrationManagerTests
         manager.VerifyClientPose("st1", new TcpClientPose(101.0, 200.0, 45.0)); // 偏 1mm ≤ 2mm：通过
     }
 
+    [Fact]
+    public void RequireClientPose_OnArmWithTeachPose_NullPose_Throws1014()
+    {
+        var manager = PoseCheckManager();
+        var ex = Assert.Throws<VisionException>(() => manager.RequireClientPose("st1", null));
+        Assert.Equal(VisionErrorCode.PoseRequired, ex.ErrorCode);
+        manager.RequireClientPose("st1", new TcpClientPose(100, 200, 45));
+    }
+
+    [Fact]
+    public void ClientPoseRequired_FixedOrDisabled_IsFalse()
+    {
+        Assert.False(PoseCheckManager(mountType: "Fixed").ClientPoseRequired("st1"));
+        var off = PoseCheckManager();
+        off.PoseCheckEnabled = false;
+        Assert.False(off.ClientPoseRequired("st1"));
+    }
+
+    [Fact]
+    public void VerifyClientPose_Translate_IgnoresXy_ChecksRz()
+    {
+        var manager = new CalibrationManager();
+        manager.LoadExtrinsic(new ExtrinsicProfile
+        {
+            StationId = "st1", CameraId = "cam1", Affine = [1, 0, 0, 0, 1, 0],
+            MountType = "OnArm", ComposeMode = "Translate",
+            TeachTcpX = 100, TeachTcpY = 200, TeachRzDeg = 45, HasTeachPose = true,
+        });
+        manager.VerifyClientPose("st1", new TcpClientPose(180, 10, 45.2));
+        Assert.Throws<VisionException>(() =>
+            manager.VerifyClientPose("st1", new TcpClientPose(180, 10, 47)));
+    }
+
+    [Fact]
+    public void PixelToRobot_Translate_ShiftsByTcpDelta()
+    {
+        var manager = new CalibrationManager();
+        manager.LoadExtrinsic(new ExtrinsicProfile
+        {
+            StationId = "st1", CameraId = "cam1", Affine = [1, 0, 0, 0, 1, 0],
+            MountType = "OnArm", ComposeMode = "Translate",
+            TeachTcpX = 10, TeachTcpY = 20, HasTeachPose = true,
+        });
+        var pose = manager.PixelToRobot("st1", new PixelPose(1, 2, 0, 1),
+            clientPose: new TcpClientPose(15, 24, 0));
+        Assert.Equal(6, pose.X, 6); // 1 + (15-10)
+        Assert.Equal(6, pose.Y, 6); // 2 + (24-20)
+    }
+
+    [Fact]
+    public void LoadPolynomialAndExtrinsic_SameStation_AddsQualityWarning()
+    {
+        var manager = new CalibrationManager();
+        manager.LoadExtrinsic(new ExtrinsicProfile
+        {
+            StationId = "st1", CameraId = "cam1", Affine = [1, 0, 0, 0, 1, 0],
+        });
+        manager.LoadPolynomial(new PolynomialProfile
+        {
+            StationId = "st1", CameraId = "cam1", Order = 2,
+            CoefX = [0, 1, 0, 0, 0, 0], CoefY = [0, 0, 1, 0, 0, 0],
+            Width = 100, Height = 100, PointCount = 10,
+        });
+        Assert.Contains(manager.QualityWarnings, w => w.Contains("同时存在多项式与外参"));
+    }
+
     // ---- 第四轮复审修复的回归测试 ----
 
     [Fact]

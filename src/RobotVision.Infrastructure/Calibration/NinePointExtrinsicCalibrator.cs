@@ -12,18 +12,34 @@ namespace RobotVision.Infrastructure.Calibration;
 public static class NinePointExtrinsicCalibrator
 {
     public static ExtrinsicProfile Calibrate(
-        string stationId, string cameraId, Point2f[] pixelPoints, Point2f[] robotPoints)
+        string stationId, string cameraId, Point2f[] pixelPoints, Point2f[] robotPoints,
+        int width = 0, int height = 0)
     {
         if (pixelPoints.Length != robotPoints.Length || pixelPoints.Length < 3)
             throw new VisionException(VisionErrorCode.NotCalibrated,
                 $"外参标定至少需要 3 组对应点（推荐 9 点），当前 {Math.Min(pixelPoints.Length, robotPoints.Length)} 组");
 
         // 共线/重合防护：三点最大面积过小说明点集退化（共线/重合），仿射解病态。
+        // 像素点与机器人点都要查：机器人坐标抄错/全同时同样病态。
         // 建议点位覆盖工作视场四角与中心；只做绝对退化拒绝，不误伤小分布。
-        var maxTriArea = MaxTriangleArea(pixelPoints);
-        if (maxTriArea < 1e-3)
+        if (MaxTriangleArea(pixelPoints) < 1e-3)
             throw new VisionException(VisionErrorCode.NotCalibrated,
                 "像素点近似共线或重合，仿射估计会病态：请让 9 点覆盖视场四角与中心，避免共线");
+        if (MaxTriangleArea(robotPoints) < 1e-3)
+            throw new VisionException(VisionErrorCode.NotCalibrated,
+                "机器人点近似共线或重合，仿射估计会病态：请核对示教坐标是否抄错/重复，9 点应覆盖工作视场");
+
+        // 分布尺度检查（需图像尺寸，旧调用不传时跳过）：9 个点挤在画面小角落时
+        // 局部拟合残差好看，但对视场其他位置是灾难性外推——要求最大三角形 ≥ 图像面积 1%
+        if (width > 0 && height > 0)
+        {
+            var minArea = 0.01 * width * height;
+            var actualArea = MaxTriangleArea(pixelPoints);
+            if (actualArea < minArea)
+                throw new VisionException(VisionErrorCode.NotCalibrated,
+                    $"标定点分布过小: 最大三角形面积 {actualArea:0} px² 低于下限 {minArea:0} px²（图像 {width}x{height} 的 1%）——" +
+                    "角落小范围拟合对视场其他位置是外推，请让 9 点覆盖视场大部分区域");
+        }
 
         using var src = Mat.FromArray(pixelPoints);
         using var dst = Mat.FromArray(robotPoints);
@@ -92,6 +108,9 @@ public static class NinePointExtrinsicCalibrator
             MaxResidual = maxResidual,
             PointResiduals = residuals,
             LeaveOneOutMax = leaveOneOutMax,
+            // 标定时分辨率入档案：换相机/改分辨率后与内参比对，不一致即拒绝使用
+            Width = width,
+            Height = height,
             CalibratedAt = DateTime.Now,
         };
     }

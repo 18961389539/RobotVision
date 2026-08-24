@@ -41,8 +41,8 @@ public sealed class TcpServerManager : IDisposable
     /// <summary>启停/热重启互斥锁：Start/Stop/Restart 串行化，防止并发启停把监听状态弄乱。</summary>
     private readonly object _lifecycleLock = new();
 
-    /// <summary>读侧空闲超时下限（ms）：避免 UI 把 TimeoutMs 调得过小时误断正常的慢客户端。</summary>
-    private const int MinIdleTimeoutMs = 5000;
+    /// <summary>30 天空闲超时（ms），设置页快捷填入。int 装不下，用 long。</summary>
+    public const long IdleTimeoutThirtyDaysMs = 30L * 24 * 60 * 60 * 1000;
 
     private volatile TcpListener? _listener;
     private volatile CancellationTokenSource? _cts;
@@ -71,13 +71,24 @@ public sealed class TcpServerManager : IDisposable
     public string ListenEndPoint => $"{_address}:{_port}";
 
     /// <summary>单请求处理超时（ms）。热属性：管理界面可直接修改。
-    /// volatile 保证套接字线程能即时读到 UI 改动；≤0 按 1ms clamp（CancelAfter(0) 会立即超时）。</summary>
+    /// volatile 保证套接字线程能即时读到 UI 改动；≤0 按 1ms clamp（CancelAfter(0) 会立即超时）。
+    /// 只约束 TRIGGER 处理，不用于空闲断线。</summary>
     private volatile int _timeoutMs;
 
     public int TimeoutMs
     {
         get => _timeoutMs;
         set => _timeoutMs = Math.Max(1, value);
+    }
+
+    /// <summary>读侧空闲超时（ms）。0 = 永不因空闲断开（默认，PLC 节拍间隙不断线）。
+    /// 半开连接仍由 TCP KeepAlive 探测。热属性。</summary>
+    private long _idleTimeoutMs;
+
+    public long IdleTimeoutMs
+    {
+        get => Interlocked.Read(ref _idleTimeoutMs);
+        set => Interlocked.Exchange(ref _idleTimeoutMs, Math.Max(0, value));
     }
 
     /// <summary>监听 backlog（内核排队待 accept 的连接数）。</summary>
@@ -429,26 +440,29 @@ public sealed class TcpServerManager : IDisposable
             while (!ct.IsCancellationRequested)
             {
                 string? line;
-                using (var idleCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                var idleMs = IdleTimeoutMs;
+                try
                 {
-                    // 读侧空闲超时：死连接（客户端挂起、不发送也不关闭）不再无限占用连接名额。
-                    // 取 TimeoutMs 与固定下限的较大者，避免 UI 把超时调得过小时误断正常慢客户端
-                    var idleMs = Math.Max(TimeoutMs, MinIdleTimeoutMs);
-                    idleCts.CancelAfter(idleMs);
-                    try
+                    if (idleMs > 0)
                     {
+                        using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        idleCts.CancelAfter(TimeSpan.FromMilliseconds(idleMs));
                         line = await reader.ReadLineAsync(idleCts.Token);
                     }
-                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    else
                     {
-                        // 空闲超时（非服务停止的取消）：断开该客户端并记日志
-                        _log.LogWarning("客户端 #{Id} 读空闲超时（{Timeout}ms 无数据），断开", id, idleMs);
-                        break;
+                        // 0 = 永久：不设读超时。停服/踢连接靠 StopCore 关闭套接字（ReadLine 抛 IOException）。
+                        line = await reader.ReadLineAsync();
                     }
-                    catch (IOException)
-                    {
-                        break;
-                    }
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    _log.LogWarning("客户端 #{Id} 读空闲超时（{Timeout}ms 无数据），断开", id, idleMs);
+                    break;
+                }
+                catch (IOException)
+                {
+                    break;
                 }
 
                 if (line is null)

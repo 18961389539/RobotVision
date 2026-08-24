@@ -41,6 +41,7 @@ public partial class CalibrationWizardPage : Page
         {
             if (_vm is not null)
                 _vm.Points.CollectionChanged -= _pointsChanged;
+            _vm?.ResetSession();
         };
     }
 

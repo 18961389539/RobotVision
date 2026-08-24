@@ -81,7 +81,9 @@ public partial class SystemViewModel : ObservableObject
     private void RebuildSettings()
     {
         var digest = string.Join("|",
-            _cfg.IpAddress, _cfg.TcpPort, _cfg.TimeoutMs, _cfg.MaxQueueDepth, _cfg.MaxConcurrent,
+            _cfg.IpAddress, _cfg.TcpPort, _cfg.TimeoutMs, _cfg.IdleTimeoutMs,
+            _cfg.PoseCheck.Enabled, _cfg.PoseCheck.XyToleranceMm, _cfg.PoseCheck.RzToleranceDeg,
+            _cfg.MaxQueueDepth, _cfg.MaxConcurrent,
             _cfg.TcpBacklog, _cfg.MaxConnections, string.Join(",", _cfg.IpWhitelist),
             _cfg.FileLogging.Enabled, _cfg.FileLogging.RetainedDays,
             _failures.Enabled, _cfg.FailureImage.RetainedCount);
@@ -92,6 +94,10 @@ public partial class SystemViewModel : ObservableObject
         Settings.Clear();
         Settings.Add(new("TCP 监听", $"{_cfg.IpAddress}:{_cfg.TcpPort}（重启生效）"));
         Settings.Add(new("请求超时", $"{_cfg.TimeoutMs} ms"));
+        Settings.Add(new("连接空闲超时", _cfg.IdleTimeoutMs <= 0 ? "永久" : $"{_cfg.IdleTimeoutMs} ms"));
+        Settings.Add(new("位姿校验", _cfg.PoseCheck.Enabled
+            ? $"开 · XY {_cfg.PoseCheck.XyToleranceMm:0.###}mm · RZ {_cfg.PoseCheck.RzToleranceDeg:0.###}°"
+            : "关"));
         Settings.Add(new("最大排队深度", $"{_cfg.MaxQueueDepth}"));
         Settings.Add(new("并发推理槽位", $"{_cfg.MaxConcurrent}"));
         Settings.Add(new("TCP backlog", $"{_cfg.TcpBacklog}"));

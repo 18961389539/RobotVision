@@ -590,7 +590,8 @@
                 VerticalAlignment="Top"
                 Margin="16"
                 Panel.ZIndex="100"
-                Style="{StaticResource ViewerFloatingPanelStyle}">
+                Style="{StaticResource ViewerFloatingPanelStyle}"
+                Visibility="{Binding IsToolbarVisible, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BooleanToVisibilityConverter}}">
             <StackPanel Width="Auto">
                 <TextBlock Text="{localization:UiText MenuFileAndProjects}" Style="{StaticResource ViewerSectionTitleStyle}" />
                 <WrapPanel>

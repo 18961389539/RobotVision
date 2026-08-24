@@ -40,6 +40,22 @@ public partial class CalibPointItem : ObservableObject
     [ObservableProperty]
     private double _robotY;
 
+    /// <summary>用户已抄录机器人坐标（含原点 0,0）。默认可避免把未填写的 (0,0) 当有效点。</summary>
+    [ObservableProperty]
+    private bool _robotEntered;
+
+    partial void OnRobotXChanged(double value)
+    {
+        if (value != 0 || RobotY != 0)
+            RobotEntered = true;
+    }
+
+    partial void OnRobotYChanged(double value)
+    {
+        if (value != 0 || RobotX != 0)
+            RobotEntered = true;
+    }
+
     /// <summary>旋转中心模式：取该点时第 4 轴角度（可选；填 ≥3 个即自动做方向自检）。</summary>
     [ObservableProperty]
     private double? _robotRzDeg;
@@ -307,6 +323,11 @@ public partial class CalibrationWizardViewModel : ObservableObject
             return;
         }
 
+        if ((Mode is WizardMode.Extrinsic or WizardMode.Polynomial) && Points.Count > 0 &&
+            MessageBox.Show("重新取图将清空已录入的参考点。继续？", "重新取图",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
         IsBusy = true;
         try
         {
@@ -375,7 +396,9 @@ public partial class CalibrationWizardViewModel : ObservableObject
             // Polynomial：保存角点供点选吸附（原图坐标系，无去畸变——与推理一致）
             _chessboardCorners = found ? corners : [];
             var polyInfo = found
-                ? $"棋盘检测成功（{Cols}×{Rows}，{corners.Length} 角点）。请在图上点选同一行的 2 个参考角点（自动吸附），并抄录其机器人坐标"
+                ? PolynomialImageSpace
+                    ? $"棋盘检测成功（{Cols}×{Rows}，{corners.Length} 角点）。棋盘毫米系免示教，直接点「计算」即可"
+                    : $"棋盘检测成功（{Cols}×{Rows}，{corners.Length} 角点）。请在图上点选同一行的 2 个参考角点（自动吸附），并抄录其机器人坐标"
                 : "未检测到棋盘：调整角度/对焦或核对内角点数（多项式标定不依赖内参，直接用原图）";
             return new GrabResult(preview, null, polyInfo);
         }
@@ -570,9 +593,9 @@ public partial class CalibrationWizardViewModel : ObservableObject
                         break;
                     }
 
-                    if (Points.Count < 2 || Points.Any(p => p.RobotX == 0 && p.RobotY == 0))
+                    if (Points.Count < 2 || Points.Any(p => !p.RobotEntered))
                     {
-                        Message = "请先点选 2 个参考角点并抄录其机器人坐标（或改用「棋盘毫米系」免示教）";
+                        Message = "请先点选 2 个参考角点并抄录其机器人坐标（原点 0,0 请勾选「已抄录」；或改用「棋盘毫米系」免示教）";
                         return;
                     }
                     var polyRef1 = new Point2f((float)Points[0].PixelX, (float)Points[0].PixelY);
@@ -702,10 +725,15 @@ public partial class CalibrationWizardViewModel : ObservableObject
                     }
                     if (!ConfirmOverwrite($"{StationId.Trim()}.extrinsic.json"))
                         return;
+                    if (_calibration.HasPolynomial(StationId.Trim()) &&
+                        MessageBox.Show("该工位已有多项式档案，生产将优先使用多项式（本外参会被忽略）。仍要保存外参？",
+                            "双档案并存", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                        return;
                     // 保存时取 UI 当前值（计算后仍可调整安装模式/位姿/平面 Z）
                     _pendingExtrinsic = _pendingExtrinsic with
                     {
                         MountType = SelectedMount,
+                        ComposeMode = SelectedMount == CameraMountType.OnArm ? SelectedCompose : PoseComposeMode.Check,
                         TeachTcpX = TeachTcpX,
                         TeachTcpY = TeachTcpY,
                         TeachRzDeg = TeachRzDeg,
@@ -734,6 +762,10 @@ public partial class CalibrationWizardViewModel : ObservableObject
                         return;
                     }
                     if (!ConfirmOverwrite($"{StationId.Trim()}.polynomial.json"))
+                        return;
+                    if (_calibration.HasExtrinsic(StationId.Trim()) &&
+                        MessageBox.Show("该工位已有外参档案，保存多项式后生产将走多项式（外参被忽略）。继续？",
+                            "双档案并存", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                         return;
                     // 保存时取 UI 当前值（坐标空间/安装模式/位姿合成模式/平面 Z 可在计算后调整）。
                     // Image 毫米系无机器人系概念：MountType 强制 Fixed、位姿不记录
@@ -830,7 +862,7 @@ public partial class CalibrationWizardViewModel : ObservableObject
             : "") +
         (p.MaxResidual > 0.1 ? "\n警告: 残差偏大，请核对点对（像素点与机器人点须一一对应）" : "") +
         (p.MountType == CameraMountType.OnArm
-            ? $"\n安装模式: OnArm（档案仅在标定拍照位姿 {p.TeachTcpX:0.000}/{p.TeachTcpY:0.000} RZ {p.TeachRzDeg:0.0}° 下有效）"
+            ? $"\n安装模式: OnArm · {p.ComposeMode}（档案仅在标定拍照位姿 {p.TeachTcpX:0.000}/{p.TeachTcpY:0.000} RZ {p.TeachRzDeg:0.0}° 下有效）"
             : "") +
         (p.CalibrationPlaneZ != 0 ? $"\n标定平面 Z: {p.CalibrationPlaneZ:0.000}" : "");
 
@@ -862,5 +894,15 @@ public partial class CalibrationWizardViewModel : ObservableObject
         if (Math.Abs(p.ToolOffsetDeg) > 1e-9)
             text += $"\n工具零位偏角: {p.ToolOffsetDeg:0.00}°（输出第 4 轴角 = 零件角 − {p.ToolOffsetDeg:0.00}°）";
         return text;
+    }
+
+    /// <summary>离开向导页时释放 OpenCV 帧，避免单例 VM 长期占用原生缓冲。</summary>
+    public void ResetSession()
+    {
+        _lastRawFrame?.Dispose();
+        _lastRawFrame = null;
+        _currentFrame?.Dispose();
+        _currentFrame = null;
+        FrameImage = null;
     }
 }

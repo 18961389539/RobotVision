@@ -86,6 +86,10 @@ namespace ImageViewer.Controls
             DependencyProperty.Register(nameof(EnableGpuRendering), typeof(bool), typeof(ImageViewer),
                 new PropertyMetadata(false, OnEnableGpuRenderingChanged));
 
+        public static readonly DependencyProperty IsToolbarVisibleProperty =
+            DependencyProperty.Register(nameof(IsToolbarVisible), typeof(bool), typeof(ImageViewer),
+                new PropertyMetadata(true));
+
         public static readonly DependencyProperty PseudoColorPaletteProperty =
             DependencyProperty.Register(nameof(PseudoColorPalette), typeof(PseudoColorPalette), typeof(ImageViewer),
                 new PropertyMetadata(PseudoColorPalette.None, OnPseudoColorPaletteChanged));
@@ -116,6 +120,13 @@ namespace ImageViewer.Controls
         {
             get => (bool)GetValue(IsImageLoadingProperty);
             set => SetValue(IsImageLoadingProperty, value);
+        }
+
+        /// <summary>是否显示左上角浮动工具栏（文件与项目 / 视图操作 / 显示选项）。默认 true。</summary>
+        public bool IsToolbarVisible
+        {
+            get => (bool)GetValue(IsToolbarVisibleProperty);
+            set => SetValue(IsToolbarVisibleProperty, value);
         }
 
         public double ImageLoadProgress

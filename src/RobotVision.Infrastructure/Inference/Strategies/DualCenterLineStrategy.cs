@@ -52,7 +52,7 @@ public sealed class DualCenterLineStrategy(ModelManager models) : IAngleStrategy
                 }
             }
 
-            if (bestIndex < 0 || bestDistance > recipe.PairingMaxDistancePx)
+            if (bestIndex < 0 || bestDistance > recipe.DualModel.PairingMaxDistancePx)
                 continue;
 
             usedB.Add(bestIndex);

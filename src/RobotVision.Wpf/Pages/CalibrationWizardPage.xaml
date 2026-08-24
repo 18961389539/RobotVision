@@ -409,6 +409,7 @@
                                             <DataGridTextColumn Header="像素Y" Binding="{Binding PixelY, StringFormat=0.0}" IsReadOnly="True" Width="58" />
                                             <DataGridTextColumn Header="机器人X" Binding="{Binding RobotX, UpdateSourceTrigger=PropertyChanged}" Width="76" />
                                             <DataGridTextColumn Header="机器人Y" Binding="{Binding RobotY, UpdateSourceTrigger=PropertyChanged}" Width="76" />
+                                            <DataGridCheckBoxColumn Header="已抄录" Binding="{Binding RobotEntered}" Width="56" />
                                             <DataGridTextColumn Header="第4轴角" Binding="{Binding RobotRzDeg, UpdateSourceTrigger=PropertyChanged}" Width="60" />
                                         </DataGrid.Columns>
                                     </DataGrid>

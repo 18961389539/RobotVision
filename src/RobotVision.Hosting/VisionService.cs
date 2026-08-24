@@ -94,7 +94,7 @@ public sealed class VisionService(
     /// 带拍照位姿的触发（TRIGGER,配方名,X,Y,RZ）：OnArm（相机装末端）工位在取图前
     /// 校验上报位姿与外参档案标定位姿的一致性（容差 appsettings PoseCheck），
     /// 不一致抛 1012——位姿漂移后旧外参映射已失效，静默执行会输出错位坐标。
-    /// pose=null（旧格式 PLC/UI 手动触发）跳过校验。
+    /// pose=null 时：OnArm 已记录示教位姿则 1014；否则跳过校验（Fixed / 旧档案）。
     /// </summary>
     public Task<VisionResult> RunAsync(string recipeName, TcpClientPose? pose, CancellationToken ct) =>
         Scheduler.RunAsync(recipeName,
@@ -116,8 +116,8 @@ public sealed class VisionService(
             if (!recipe.Enabled)
                 throw new InvalidRecipeException(recipeName, "配方已停用（Enabled=false）");
 
-            // OnArm 位姿一致性（取图前拦截，无现场图可留）：不一致抛 1012 PoseMismatch。
-            // 多项式工位走各自的位姿校验（Translate 模式仅校验 RZ，平移用于合成）
+            // OnArm 位姿：缺位姿直接 1014；有位姿再做 1012 一致性（多项式 Translate 仅校 RZ）。
+            calibration.RequireClientPose(recipe.StationId, pose);
             if (pose is not null)
             {
                 if (calibration.HasPolynomial(recipe.StationId))
@@ -186,7 +186,7 @@ public sealed class VisionService(
             var robotPoses = pixelPoses
                 .Select(p => usePolynomial
                     ? calibration.PixelToRobotPolynomial(recipe.StationId!, p, recipe.CameraId, pose)
-                    : calibration.PixelToRobot(recipe.StationId, p, recipe.DebugPassthrough, recipe.CameraId))
+                    : calibration.PixelToRobot(recipe.StationId, p, recipe.DebugPassthrough, recipe.CameraId, pose))
                 .Select(r => calibration.CompensateRotation(recipe.StationId, recipe.RotationCompensation, r))
                 .ToList();
 
@@ -272,7 +272,7 @@ public sealed class VisionService(
             catch (Exception ex)
             {
                 log.LogWarning(ex, "快照克隆失败");
-                return;
+                continue;
             }
 
             // 订阅者回调（绘制叠加/位图转换等重活）移到线程池，管线尽快释放
