@@ -38,9 +38,17 @@ jobs:
     - name: Build (Release)
       run: dotnet build RobotVision.sln -c Release --no-restore --nologo
 
-    - name: Test (Release)
+    - name: Test (Release, with coverage)
       # 全量单元 + 集成测试;UI/硬件冒烟因环境变量未设置自动跳过
-      run: dotnet test RobotVision.sln -c Release --no-build --no-restore --nologo
+      # --collect 生成 coverage.cobertura.xml(coverlet),上传到 Artifacts 供查看
+      run: dotnet test RobotVision.sln -c Release --no-build --no-restore --nologo --collect:"XPlat Code Coverage"
+
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: TestResults
+        if-no-files-found: warn
 
   publish:
     # 普通 push 产出自包含包(Artifacts 下载);打 tag 的发布走 release job

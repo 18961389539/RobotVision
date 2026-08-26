@@ -1,0 +1,38 @@
+# 错误码总表
+
+RobotVision TCP 协议错误应答格式:`ERR,<错误码>,<说明>`。
+按错误码定位问题方向;详细协议见 [PLC-TRIGGER-Protocol](./PLC-TRIGGER-Protocol.md)。
+
+| 错误码 | 名称 | 含义 | 触发场景 | 处置 |
+|---|---|---|---|---|
+| 1000 | UnknownCommand | 未知命令 | 发送了非 PING/STATUS/配方名的命令 | 核对协议命令;非命令输入一律按配方名解析 |
+| 1001 | UnknownRecipe | 配方不存在 | 配方名错误 / 配方文件缺失 | 核对配方名;检查 recipes/ 目录文件 |
+| 1002 | CameraNotRegistered | 相机未注册 | 配方引用未注册的相机 Id | 检查 appsettings.json 相机配置;确认相机 Id 拼写 |
+| 1003 | CameraGrabFailed | 相机取图失败 | 回放图读取失败 / 相机断流 | 检查回放目录、网线、相机状态 |
+| 1004 | NotCalibrated | 未标定或标定不一致 | 缺内参/外参;或外参/旋转中心分辨率与内参不一致 | 完成对应标定;换相机/改分辨率后重新标定 |
+| 1005 | ModelNotAvailable | 模型不可用 | 模型文件缺失 / 模型与任务不匹配 / 会话被卸载 | 检查 models/ 目录;核对模型类型与推理任务 |
+| 1006 | LightNotRegistered | 光源未注册 | 配方引用未注册的光源控制器 | 检查 appsettings.json 光源配置 |
+| 1007 | NoTargetFound | 未检出目标 | 推理完成但零目标 / 双BLOB 无配对 | 检查来料、光源、阈值;查看失败现场图(failures/) |
+| 1008 | Timeout | 处理超时 | 取图/推理超过 TCP 超时;执行阶段取消 | 检查慢相机/慢推理;调大 TimeoutMs |
+| 1009 | Busy | 排队超限 | 提交数超过 MaxQueueDepth(排队+执行) | 稍后重试;降低并发触发频率 |
+| 1010 | QueueTimeout | 排队超时 | 排队阶段取消/超时(未进入处理) | 稍后重试;检查是否长时间 busy |
+| 1011 | CameraInitFailed | 相机初始化失败 | pylon 运行库缺失 / 设备打开失败 | 安装 pylon 运行库;检查相机供电与网络 |
+| 1012 | PoseMismatch | 拍照位姿不一致 | OnArm 工位:上报位姿与标定位姿超容差 | PLC 核对拍照点;或重新标定该工位外参 |
+| 1013 | InvalidTriggerArgument | 触发参数格式错误 | TRIGGER 段数非 1/4;或 X/Y/RZ 非有限数字 | 按协议发送 `TRIGGER,配方名` 或 `TRIGGER,配方名,X,Y,RZ` |
+| 1014 | PoseRequired | 缺少拍照位姿 | OnArm 工位已记录示教位姿但未上报 X/Y/RZ | TRIGGER 补上位姿段;或界面补位姿 |
+| 1015 | RecipeDisabled | 配方已停用 | 触发 Enabled=false 的配方 | 界面启用配方后重试 |
+| 1016 | InvalidRecipeConfig | 配方参数校验失败 | cameraId 空 / 模型缺失 / 阈值越界等 | 打开配方页修正配置 |
+| 1017 | AssetMismatch | 资产哈希不一致 | 模型/标定档案与配方钉扎的 SHA-256 不符 | 核对文件后,在配方页重新「钉死当前哈希」 |
+| 1018 | ProcessUnhealthy | 过程联锁 | 连续失败达阈值(未检出/取图失败等) | 排除光源/来料/相机后,解除联锁(CLEARINHIBIT) |
+| 1099 | InternalError | 内部错误 | 未预期异常(应答统一为 INTERNAL_ERROR) | 查看服务端日志;联系开发 |
+
+## 快速排查路径
+
+1. **1001/1015/1016** → 配方文件问题:名字 / 停用 / 参数
+2. **1002/1003/1011** → 相机链路:注册 / 取图 / 初始化
+3. **1004/1012/1017** → 标定与档案:未标定 / 位姿漂移 / 文件被替换
+4. **1005** → 模型问题:文件 / 类型 / 会话
+5. **1007/1018** → 检测质量:来料 / 光源 / 联锁
+6. **1008/1009/1010** → 并发与超时:负载 / 耗时 / 排队
+
+> 内部错误(1099)不暴露异常原文(防路径/堆栈泄漏),详情一律看 Serilog 日志。
