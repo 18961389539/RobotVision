@@ -4,7 +4,12 @@
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:ivc="clr-namespace:ImageViewer.Controls;assembly=ImageViewerControl"
       xmlns:vm="clr-namespace:RobotVision.WpfHost"
+      xmlns:host="clr-namespace:RobotVision.WpfHost"
       Title="标定向导"
+      VerticalAlignment="Stretch"
+      host:ViewportPageLayout.FillViewport="True"
+      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
       Background="{DynamicResource ApplicationBackgroundBrush}">
 
     <Page.InputBindings>
@@ -46,7 +51,7 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
     </Page.Resources>
 
-    <Grid Margin="8">
+    <Grid Margin="8" VerticalAlignment="Stretch">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -55,20 +60,9 @@
         <!-- 工具栏 -->
         <ui:Card Grid.Row="0" Margin="0,0,0,8" Padding="10">
             <StackPanel>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="300" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="140" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="110" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="标定类型" VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <ComboBox Grid.Column="1" ItemsSource="{Binding ModeOptions}"
+                <StackPanel Margin="0,0,0,10">
+                    <TextBlock Text="标定类型" Margin="0,0,0,4" FontSize="12" />
+                    <ComboBox ItemsSource="{Binding ModeOptions}"
                               SelectedItem="{Binding SelectedModeOption}">
                         <ComboBox.ItemTemplate>
                             <DataTemplate>
@@ -84,11 +78,36 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <TextBlock Grid.Column="2" Text="相机" VerticalAlignment="Center" Margin="16,0,8,0" />
-                    <ComboBox Grid.Column="3" ItemsSource="{Binding CameraIds}" SelectedItem="{Binding SelectedCamera}" ToolTip="选择参与标定的相机" />
-                    <TextBlock Grid.Column="4" Text="工位 Id" VerticalAlignment="Center" Margin="16,0,8,0">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
+                </StackPanel>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Margin="0,0,10,0">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Grid.ColumnSpan" Value="1" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ShowStationIdField}" Value="False">
+                                        <Setter Property="Grid.ColumnSpan" Value="2" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="相机" Margin="0,0,0,4" FontSize="12" />
+                        <ComboBox ItemsSource="{Binding CameraOptions}"
+                                  DisplayMemberPath="Label"
+                                  SelectedValuePath="Id"
+                                  SelectedValue="{Binding SelectedCamera}"
+                                  ToolTip="选择参与标定的相机" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="0,0,10,0">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
                                 <Setter Property="Visibility" Value="Visible" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding ShowStationIdField}" Value="False">
@@ -96,26 +115,20 @@
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                    <TextBox Grid.Column="5" Text="{Binding StationId, UpdateSourceTrigger=PropertyChanged}">
-                        <TextBox.Style>
-                            <Style TargetType="TextBox">
-                                <Setter Property="Visibility" Value="Visible" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding ShowStationIdField}" Value="False">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBox.Style>
-                    </TextBox>
-                    <ui:Button Grid.Column="7" Content="取图" Appearance="Primary"
-                               Command="{Binding GrabCommand}" />
-                    <ui:Button Grid.Column="8" Content="清空点" Margin="8,0,0,0"
+                        </StackPanel.Style>
+                        <TextBlock Text="工位 Id" Margin="0,0,0,4" FontSize="12" />
+                        <ComboBox ItemsSource="{Binding StationIds}"
+                                  SelectedItem="{Binding StationId, UpdateSourceTrigger=PropertyChanged}"
+                                  IsEditable="True"
+                                  ToolTip="标定档案文件名前缀（可手输新工位）" />
+                    </StackPanel>
+                    <ui:Button Grid.Column="2" Content="取图" Appearance="Primary" VerticalAlignment="Bottom"
+                               Margin="0,0,8,0" Command="{Binding GrabCommand}" />
+                    <ui:Button Grid.Column="3" Content="清空点" VerticalAlignment="Bottom"
                                Command="{Binding ClearPointsCommand}" />
                 </Grid>
-                <TextBlock Text="{Binding Message}" Margin="0,6,0,0" TextWrapping="Wrap"
+
+                <TextBlock Text="{Binding Message}" Margin="0,8,0,0" TextWrapping="Wrap"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
         </ui:Card>
@@ -163,7 +176,7 @@
 
             <!-- 参数浮动面板（右侧，可折叠）：分模式参数 / 点表 / 计算保存 -->
             <Border HorizontalAlignment="Right" VerticalAlignment="Stretch"
-                    Width="384" Margin="12" Panel.ZIndex="20"
+                    Width="428" Margin="12" Panel.ZIndex="20" ClipToBounds="True"
                     Background="#F01E2836"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8"
@@ -186,7 +199,8 @@
                                 Command="{Binding ToggleParamPanelCommand}" />
                     </Grid>
 
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12">
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12"
+                                  host:ViewportPageLayout.IsolateWheel="True">
                         <StackPanel>
                             <!-- 内参参数 -->
                             <StackPanel Style="{StaticResource PanelIntrinsic}" Margin="0,0,0,10">

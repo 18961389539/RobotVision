@@ -36,6 +36,7 @@ public sealed record RecipeAngleModeItem(string Value, string Label);
 public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
     private readonly RecipeLoader _loader;
+    private readonly AppConfig _cfg;
     private readonly CameraManager _cameras;
     private readonly ModelManager _models;
     private readonly CalibrationManager _calibration;
@@ -90,9 +91,34 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
     [ObservableProperty]
     private System.Windows.Media.ImageSource? _testImage;
 
-    /// <summary>ROI 预览图（当前相机取一帧 + 检测区域矩形叠加）。</summary>
+    /// <summary>ROI 预览图（参考帧原图；检测区域矩形由 ImageViewer 内的活 ROI 渲染，可框选/拖拽）。</summary>
     [ObservableProperty]
     private System.Windows.Media.ImageSource? _roiPreviewImage;
+
+    /// <summary>ROI 像素换算参考帧（『预览区域』取的一帧，无叠加）。换配方即失效；换相机需重新预览。</summary>
+    private string? _roiFrameCameraId;
+
+    /// <summary>参考帧宽（px，0 = 尚未取帧）。像素 ↔ 比例换算基准。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRoiRefFrame))]
+    [NotifyPropertyChangedFor(nameof(RoiPxX), nameof(RoiPxY), nameof(RoiPxWidth), nameof(RoiPxHeight))]
+    [NotifyPropertyChangedFor(nameof(RoiRefFrameHint), nameof(RoiRatioHint))]
+    private int _roiRefWidth;
+
+    /// <summary>参考帧高（px，0 = 尚未取帧）。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRoiRefFrame))]
+    [NotifyPropertyChangedFor(nameof(RoiPxX), nameof(RoiPxY), nameof(RoiPxWidth), nameof(RoiPxHeight))]
+    [NotifyPropertyChangedFor(nameof(RoiRefFrameHint), nameof(RoiRatioHint))]
+    private int _roiRefHeight;
+
+    /// <summary>已有像素参考帧：ROI 数值框切换为像素单位（操作工按像素思考），比例值降为只读回显。</summary>
+    public bool HasRoiRefFrame => RoiRefWidth > 0 && RoiRefHeight > 0;
+
+    /// <summary>像素模式状态行：参考帧尺寸与来源相机。</summary>
+    public string RoiRefFrameHint => HasRoiRefFrame
+        ? $"参考帧 {RoiRefWidth}×{RoiRefHeight}px（{_roiFrameCameraId}）"
+        : "";
 
     /// <summary>配方列表浮动面板可见性（与右侧参数栏同构，图像主导布局）。</summary>
     [ObservableProperty]
@@ -116,17 +142,29 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
     /// <summary>图像区是否有任一图片（控制视图切换标签的显隐）。</summary>
     public bool HasAnyImage => TestImage is not null || RoiPreviewImage is not null;
 
+    public bool ShowTestImageViewer => ShowTestImage && (TestImage is not null || IsBusy);
+
+    public bool ShowRoiImageViewer => !ShowTestImage && RoiPreviewImage is not null;
+
     [RelayCommand]
     private void ShowTestImageView() => ShowTestImage = true;
 
     [RelayCommand]
     private void ShowRoiPreviewView() => ShowTestImage = false;
 
+    partial void OnShowTestImageChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowTestImageViewer));
+        OnPropertyChanged(nameof(ShowRoiImageViewer));
+    }
+
     partial void OnTestImageChanged(System.Windows.Media.ImageSource? value)
     {
         if (value is not null)
             ShowTestImage = true; // 新结果到达：自动切到结果视图
         OnPropertyChanged(nameof(HasAnyImage));
+        OnPropertyChanged(nameof(ShowTestImageViewer));
+        OnPropertyChanged(nameof(ShowRoiImageViewer));
     }
 
     partial void OnRoiPreviewImageChanged(System.Windows.Media.ImageSource? value)
@@ -134,6 +172,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         if (value is not null)
             ShowTestImage = false; // 新 ROI 预览到达：自动切到 ROI 视图
         OnPropertyChanged(nameof(HasAnyImage));
+        OnPropertyChanged(nameof(ShowTestImageViewer));
+        OnPropertyChanged(nameof(ShowRoiImageViewer));
     }
 
     [ObservableProperty]
@@ -156,6 +196,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
 
     public RecipeViewModel(
         RecipeLoader loader,
+        AppConfig cfg,
         CameraManager cameras,
         ModelManager models,
         CalibrationManager calibration,
@@ -165,6 +206,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         TcpServerManager tcp)
     {
         _loader = loader;
+        _cfg = cfg;
         _cameras = cameras;
         _models = models;
         _calibration = calibration;
@@ -215,8 +257,18 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         _vision.FrameProcessed -= OnTestFrameProcessed;
     }
 
-    /// <summary>ROI 预览：当前相机取一帧，按配方 ROI（比例）叠加检测区域矩形。
-    /// 四个裸数字框（X/Y/W/H 比例值）无图像对照时现场无从判断对应画面哪块。</summary>
+    /// <summary>等待测试快照回调消费标志（推理完成后快照可能晚于 RunAsync 返回）。</summary>
+    private async Task AwaitTestSnapshotAsync(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (Volatile.Read(ref _awaitSnapshotFor) is not null && DateTime.UtcNow < deadline)
+            await Task.Delay(30);
+        if (Volatile.Read(ref _awaitSnapshotFor) is not null)
+            EndSnapshotAwait();
+    }
+
+    /// <summary>ROI 预览：当前相机取一帧作为像素参考帧，数值框切换为像素单位；
+    /// 检测区域矩形由图像区的活 ROI 呈现（可框选/拖拽/数值联动），此处只出原图。</summary>
     [RelayCommand]
     private async Task PreviewRoiAsync()
     {
@@ -233,24 +285,21 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         {
             var roi = Editor.Roi;
             Message = $"ROI 预览取图中 · {cameraId} …";
-            var source = await Task.Run(() =>
+            var (frame, width, height) = await Task.Run(() =>
             {
                 using var grabbed = _cameras.Grab(cameraId);
-                using var preview = grabbed.Image.Clone();
-                using var mat = VisionImageCv.AsMat(preview);
-                var r = roi ?? new Roi(0, 0, 1, 1);
-                var rect = new OpenCvSharp.Rect(
-                    (int)(r.X * preview.Width), (int)(r.Y * preview.Height),
-                    (int)(r.Width * preview.Width), (int)(r.Height * preview.Height));
-                Cv2.Rectangle(mat, rect, new OpenCvSharp.Scalar(0, 200, 255), 2);
-                Cv2.PutText(mat, "ROI", new OpenCvSharp.Point(rect.X + 6, Math.Max(rect.Y + 22, 22)),
-                    OpenCvSharp.HersheyFonts.HersheySimplex, 0.6, new OpenCvSharp.Scalar(0, 200, 255), 2);
-                return ImageConverter.ToBitmapSource(preview);
+                return (Frame: ImageConverter.ToBitmapSource(grabbed.Image),
+                    grabbed.Image.Width, grabbed.Image.Height);
             });
-            RoiPreviewImage = source;
+            _roiFrameCameraId = cameraId;
+            RoiRefWidth = width;
+            RoiRefHeight = height;
+            RoiPreviewImage = frame;
             Message = roi is null
-                ? $"ROI 预览（{cameraId}）：当前为全图推理"
-                : $"ROI 预览（{cameraId}）：检测区域 = ({roi.X:0.00},{roi.Y:0.00}) ~ ({roi.X + roi.Width:0.00},{roi.Y + roi.Height:0.00})（比例）";
+                ? $"ROI 预览（{cameraId}）：当前为全图推理，可直接框选区域"
+                : $"ROI 预览（{cameraId}）：({roi.X * width:0},{roi.Y * height:0}) ~ " +
+                  $"({(roi.X + roi.Width) * width:0},{(roi.Y + roi.Height) * height:0}) px · " +
+                  $"{roi.Width * width:0}×{roi.Height * height:0}px（存储比例 {roi.X:0.000},{roi.Y:0.000},{roi.Width:0.000},{roi.Height:0.000}）";
         }
         catch (Exception ex)
         {
@@ -282,7 +331,6 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         OnPropertyChanged(nameof(IsDualBlobMode));
         OnPropertyChanged(nameof(IsTemplateMethod));
         OnPropertyChanged(nameof(HasTemplate));
-        OnPropertyChanged(nameof(ShowRotationCompensation));
         OnPropertyChanged(nameof(ShowBlobFixedThreshold));
         OnPropertyChanged(nameof(PrimaryModel));
         OnPropertyChanged(nameof(SecondaryModel));
@@ -384,22 +432,34 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
     }
 
     /// <summary>相机增删后通知下拉重新求值（页面 Loaded 时调用）。</summary>
-    public void RefreshCameras() => OnPropertyChanged(nameof(CameraIds));
+    public void RefreshCameras()
+    {
+        OnPropertyChanged(nameof(CameraIds));
+        OnPropertyChanged(nameof(CameraOptions));
+    }
+
+    /// <summary>刷新工位下拉（标定档案页/向导保存后再次进入配方页时调用）。</summary>
+    public void RefreshStationIds() => OnPropertyChanged(nameof(StationIds));
 
     public IReadOnlyList<string> CameraIds => _cameras.CameraIds.ToList();
+
+    public IReadOnlyList<CameraOption> CameraOptions =>
+        CameraOption.FromRegistered(_cfg.Cameras, _cameras.CameraIds);
 
     /// <summary>models 目录 .onnx 文件列表（下拉选择，避免手填拼错）。</summary>
     public IReadOnlyList<string> ModelFiles => _models.ModelFileNames;
 
-    /// <summary>已标定工位列表（外参档案 + 多项式档案去重，下拉选择避免手填触发 1004）。
-    /// 多项式工位（快换标定/机器人坐标标定）同样可被配方引用。</summary>
-    public IReadOnlyList<string> StationIds => _calibration.ExtrinsicProfiles
-        .Select(p => p.StationId)
-        .Concat(_calibration.PolynomialProfiles.Select(p => p.StationId))
-        .Where(s => !string.IsNullOrWhiteSpace(s))
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-        .ToList();
+    /// <summary>已标定工位列表（外参 + 多项式 + 比例档案去重，下拉选择避免手填触发 1004）。
+    /// 无对应档案时仍可手输工位 Id（IsEditable）。</summary>
+    public IReadOnlyList<string> StationIds =>
+        _calibration.ExtrinsicProfiles
+            .Select(p => p.StationId)
+            .Concat(_calibration.PolynomialProfiles.Select(p => p.StationId))
+            .Concat(_calibration.ScaleProfiles.Select(p => p.StationId))
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     /// <summary>偏心补偿预警：开启补偿但工位缺旋转中心档案（保存/触发都会失败，表单阶段提示）。</summary>
     public string RotationCenterHint =>
@@ -416,9 +476,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         get
         {
             if (string.IsNullOrWhiteSpace(Editor.StationId))
-                return Editor.DebugPassthrough
-                    ? "台架直通已开启：TRIGGER 返回像素坐标，禁止对接 PLC"
-                    : "";
+                return "未选工位：检出目标后将返回 1004，请选外参/多项式/比例标定档案";
             var station = Editor.StationId!;
             var poly = _calibration.PolynomialProfiles.FirstOrDefault(p =>
                 string.Equals(p.StationId, station, StringComparison.OrdinalIgnoreCase));
@@ -438,6 +496,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
                 string.Equals(ext.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase) &&
                 ext.HasTeachPose)
                 return $"工位 {station} 为末端相机：触发行必须带 X,Y,RZ，否则 1014";
+            if (_calibration.GetScale(station) is not null && poly is null && !hasExt)
+                return $"工位 {station} 为比例标定（图像平面 mm，非机器人基座标），PLC 不能直接当 TCP 坐标使用";
             return "";
         }
     }
@@ -565,7 +625,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         return lighting.Channels[0];
     }
 
-    // ---- 检测区域 ROI（相对比例 0~1；null = 全图推理）----
+    // ---- 检测区域 ROI（相对比例 0~1 存储；null = 全图推理）----
+    // 操作工按像素思考、配方按比例存储：预览取一帧后以参考帧尺寸做双单位换算。
+    // 像素/比例 setter 都在输入端收敛组合约束（X+W ≤ 1），越界组合当场钳制而不是保存时才报错。
 
     /// <summary>是否启用检测区域（裁剪后推理，大图局部检测显著降低 CPU 耗时）。</summary>
     public bool UseRoi
@@ -579,43 +641,158 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
                 Editor.Roi = null;
             OnPropertyChanged();
             OnPropertyChanged(nameof(HasUnsavedChanges));
-        OnPropertyChanged(nameof(UnsavedHint));
+            OnPropertyChanged(nameof(UnsavedHint));
+            OnPropertyChanged(nameof(RoiRatioHint));
         }
     }
+
+    /// <summary>左上角 X（像素，参考帧坐标系）。setter 换算成比例并按当前宽收敛右边界。</summary>
+    public double RoiPxX
+    {
+        get => Editor.Roi is { } r && RoiRefWidth > 0 ? Math.Round(r.X * RoiRefWidth) : 0;
+        set
+        {
+            if (RoiRefWidth <= 0 || Editor.Roi is not { } r)
+                return;
+            var w = Math.Max(1, (int)Math.Round(r.Width * RoiRefWidth));
+            var px = Math.Clamp((int)Math.Round(value), 0, Math.Max(0, RoiRefWidth - w));
+            SetRoi(nameof(RoiPxX), x => x with { X = px / (double)RoiRefWidth });
+        }
+    }
+
+    /// <summary>左上角 Y（像素，参考帧坐标系）。</summary>
+    public double RoiPxY
+    {
+        get => Editor.Roi is { } r && RoiRefHeight > 0 ? Math.Round(r.Y * RoiRefHeight) : 0;
+        set
+        {
+            if (RoiRefHeight <= 0 || Editor.Roi is not { } r)
+                return;
+            var h = Math.Max(1, (int)Math.Round(r.Height * RoiRefHeight));
+            var px = Math.Clamp((int)Math.Round(value), 0, Math.Max(0, RoiRefHeight - h));
+            SetRoi(nameof(RoiPxY), v => v with { Y = px / (double)RoiRefHeight });
+        }
+    }
+
+    /// <summary>宽（像素）。钳制到 [1, 参考帧宽 - X]，右缘不越界。</summary>
+    public double RoiPxWidth
+    {
+        get => Editor.Roi is { } r && RoiRefWidth > 0 ? Math.Round(r.Width * RoiRefWidth) : 0;
+        set
+        {
+            if (RoiRefWidth <= 0 || Editor.Roi is not { } r)
+                return;
+            var x = (int)Math.Round(r.X * RoiRefWidth);
+            var px = Math.Clamp((int)Math.Round(value), 1, Math.Max(1, RoiRefWidth - x));
+            SetRoi(nameof(RoiPxWidth), v => v with { Width = px / (double)RoiRefWidth });
+        }
+    }
+
+    /// <summary>高（像素）。钳制到 [1, 参考帧高 - Y]，下缘不越界。</summary>
+    public double RoiPxHeight
+    {
+        get => Editor.Roi is { } r && RoiRefHeight > 0 ? Math.Round(r.Height * RoiRefHeight) : 0;
+        set
+        {
+            if (RoiRefHeight <= 0 || Editor.Roi is not { } r)
+                return;
+            var y = (int)Math.Round(r.Y * RoiRefHeight);
+            var px = Math.Clamp((int)Math.Round(value), 1, Math.Max(1, RoiRefHeight - y));
+            SetRoi(nameof(RoiPxHeight), v => v with { Height = px / (double)RoiRefHeight });
+        }
+    }
+
+    /// <summary>存储比例只读回显 + 边缘校验（像素模式状态行）。</summary>
+    public string RoiRatioHint
+    {
+        get
+        {
+            if (Editor.Roi is not { } r)
+                return "";
+            var edge = HasRoiRefFrame
+                ? $" · 右缘 {(r.X + r.Width) * RoiRefWidth:0}/{RoiRefWidth}px · 下缘 {(r.Y + r.Height) * RoiRefHeight:0}/{RoiRefHeight}px"
+                : "";
+            return $"存储比例 ({r.X:0.000}, {r.Y:0.000}, {r.Width:0.000}, {r.Height:0.000}){edge}";
+        }
+    }
+
+    // 比例输入（未取参考帧时的回退单位）：单值域 [0,1]，组合约束同样在输入端钳制
 
     public double RoiX
     {
         get => Editor.Roi?.X ?? 0;
-        set => SetRoi(r => r with { X = Math.Clamp(value, 0, 1) });
+        set => SetRoi(nameof(RoiX), r => r with { X = Math.Clamp(value, 0, Math.Max(0, 1 - r.Width)) });
     }
 
     public double RoiY
     {
         get => Editor.Roi?.Y ?? 0;
-        set => SetRoi(r => r with { Y = Math.Clamp(value, 0, 1) });
+        set => SetRoi(nameof(RoiY), r => r with { Y = Math.Clamp(value, 0, Math.Max(0, 1 - r.Height)) });
     }
 
     public double RoiWidth
     {
         get => Editor.Roi?.Width ?? 1;
-        set => SetRoi(r => r with { Width = Math.Clamp(value, 0, 1) });
+        set => SetRoi(nameof(RoiWidth), r =>
+        {
+            var max = Math.Max(0, 1 - r.X);
+            return r with { Width = Math.Clamp(value, Math.Min(0.01, max), max) };
+        });
     }
 
     public double RoiHeight
     {
         get => Editor.Roi?.Height ?? 1;
-        set => SetRoi(r => r with { Height = Math.Clamp(value, 0, 1) });
+        set => SetRoi(nameof(RoiHeight), r =>
+        {
+            var max = Math.Max(0, 1 - r.Y);
+            return r with { Height = Math.Clamp(value, Math.Min(0.01, max), max) };
+        });
     }
 
-    private void SetRoi(Func<Roi, Roi> update)
+    /// <summary>框选/拖拽回写（图像像素坐标，中心点 + 宽高）：换算成比例、组合约束钳制后写入 Editor.Roi。
+    /// Editor.Roi 为 null（未启用）时视为框选即启用。图像坐标由页面层从 ImageViewer 的活 ROI 提供。</summary>
+    public void ApplyRoiFromRect(double centerXPx, double centerYPx, double widthPx, double heightPx)
+    {
+        if (RoiRefWidth <= 0 || RoiRefHeight <= 0)
+            return;
+        var w = Math.Clamp(widthPx, 1, RoiRefWidth) / RoiRefWidth;
+        var h = Math.Clamp(heightPx, 1, RoiRefHeight) / RoiRefHeight;
+        var x = Math.Clamp((centerXPx - widthPx / 2) / RoiRefWidth, 0, 1 - w);
+        var y = Math.Clamp((centerYPx - heightPx / 2) / RoiRefHeight, 0, 1 - h);
+        Editor.Roi = new Roi(x, y, w, h);
+        NotifyRoiChanged();
+    }
+
+    /// <summary>ROI 变更统一入口：写回 Editor、通知调用属性与派生状态。
+    /// 属性名必须显式传入——方法内无参 OnPropertyChanged 的 CallerMemberName 是 "SetRoi"，绑定收不到。</summary>
+    private void SetRoi(string propertyName, Func<Roi, Roi> update)
     {
         if (Editor.Roi is { } roi)
         {
             Editor.Roi = update(roi);
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(HasUnsavedChanges));
-        OnPropertyChanged(nameof(UnsavedHint));
+            NotifyRoiChanged(propertyName);
         }
+    }
+
+    /// <summary>通知全部 ROI 绑定属性（像素/比例双单位 + 派生提示）与脏状态。
+    /// 数值框、页面层矩形同步都监听这组通知，全量通知避免遗漏联动。</summary>
+    private void NotifyRoiChanged(string? callerProperty = null)
+    {
+        OnPropertyChanged(nameof(UseRoi));
+        OnPropertyChanged(nameof(RoiX));
+        OnPropertyChanged(nameof(RoiY));
+        OnPropertyChanged(nameof(RoiWidth));
+        OnPropertyChanged(nameof(RoiHeight));
+        OnPropertyChanged(nameof(RoiPxX));
+        OnPropertyChanged(nameof(RoiPxY));
+        OnPropertyChanged(nameof(RoiPxWidth));
+        OnPropertyChanged(nameof(RoiPxHeight));
+        OnPropertyChanged(nameof(RoiRatioHint));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(UnsavedHint));
+        if (callerProperty != null)
+            OnPropertyChanged(callerProperty);
     }
 
     /// <summary>按名称/描述过滤后的列表（搜索框驱动）。</summary>
@@ -683,7 +860,13 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
 
     partial void OnSearchTextChanged(string value) => OnPropertyChanged(nameof(VisibleRecipes));
 
-    partial void OnEditorChanged(RecipeConfig value) => NotifyEditorMutated();
+    partial void OnEditorChanged(RecipeConfig value)
+    {
+        NotifyEditorMutated();
+        _roiFrameCameraId = null;  // 换配方：像素参考帧失效（相机/分辨率可能不同），退回比例输入
+        RoiRefWidth = 0;
+        RoiRefHeight = 0;
+    }
 
     /// <summary>角度模式联动显隐：次模型/配对距离仅双模型；关键点参数仅关键点；掩码置信度仅分割；
     /// 模板参数仅分割+模板匹配。Editor 属性级绑定不触发 OnEditorChanged，AngleMode 的编辑器联动见 NotifyEditorBindings。</summary>
@@ -694,9 +877,6 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
 
     /// <summary>双BLOB模式：纯图像处理，隐藏模型选择与置信度/IoU，显示 BLOB 参数。</summary>
     public bool IsDualBlobMode => Editor.AngleMode == AngleMode.DualBlobCenterLine;
-
-    /// <summary>台架直通时不显示旋转补偿（返回像素，不涉及机器人坐标）。</summary>
-    public bool ShowRotationCompensation => !Editor.DebugPassthrough;
 
     /// <summary>BLOB 固定阈值：Otsu 开启时隐藏。</summary>
     public bool ShowBlobFixedThreshold => IsDualBlobMode && !Editor.Blob.UseOtsu;
@@ -720,11 +900,19 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
     public void NotifyAngleModeChanged() => NotifyEditorMutated();
 
     [RelayCommand]
-    public void Refresh()
+    public void Refresh() => Refresh(preferName: null, reloadEditor: true);
+
+    /// <param name="preferName">刷新后优先选中的配方名；空则尽量保持当前选中。</param>
+    /// <param name="reloadEditor">true 时从磁盘重载编辑器（F5）；保存后为 false，避免冲掉刚写入的编辑态。</param>
+    /// <param name="ignoreUnsaved">保存成功后刷新列表时跳过未保存确认（基线已对齐，避免误弹框中断刷新）。</param>
+    public void Refresh(string? preferName, bool reloadEditor, bool ignoreUnsaved = false)
     {
         // 未保存修改：确认后才丢弃（与相机页一致）
-        if (HasUnsavedChanges && !ConfirmDiscard("刷新列表"))
+        if (!ignoreUnsaved && HasUnsavedChanges && !ConfirmDiscard("刷新列表"))
             return;
+
+        // ListBox 双向绑定：Recipes.Clear() 会把 Selected 置 null，必须先记下名称
+        var keepName = preferName ?? Selected?.Name ?? Editor.Name;
 
         Recipes.Clear();
         foreach (var name in _loader.ListNames())
@@ -736,9 +924,13 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         OnPropertyChanged(nameof(LightControllerIds));
 
         _switching = true;
-        Selected = Recipes.FirstOrDefault(r => r.Name == Selected?.Name) ?? Recipes.FirstOrDefault();
+        Selected = string.IsNullOrWhiteSpace(keepName)
+            ? Recipes.FirstOrDefault()
+            : Recipes.FirstOrDefault(r => string.Equals(r.Name, keepName, StringComparison.OrdinalIgnoreCase));
         _switching = false;
         _lastConfirmed = Selected;
+        if (reloadEditor && Selected is not null)
+            LoadIntoEditor(Selected.Name);
         Message = $"共 {Recipes.Count} 个配方";
         OnPropertyChanged(nameof(VisibleRecipes));
         OnPropertyChanged(nameof(CanTestTrigger));
@@ -808,8 +1000,13 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
                 return;
             }
 
+            // 磁盘原名：优先用加载时记下的文件；若已过期（例如内部原名被写成了新名），改用列表项名。
+            // 新建/复制 IsNew=true，不得把仍选中的源配方当成「要删的旧名」。
+            var previousName = ResolvePreviousDiskName();
+
             // 重名覆盖确认：新建/改名后目标名已存在且非当前原名时提示
-            var isRename = IsNew || !string.Equals(Editor.Name, _originalName, StringComparison.OrdinalIgnoreCase);
+            var isRename = IsNew ||
+                !string.Equals(Editor.Name, previousName, StringComparison.OrdinalIgnoreCase);
             if (isRename && _loader.FileExists(Editor.Name) &&
                 MessageBox.Show($"配方 {Editor.Name} 已存在，保存将覆盖现有内容。继续？",
                     "覆盖确认", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
@@ -829,27 +1026,21 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
                 return;
             }
 
-            _loader.Save(Editor);
+            // previousName 必须在写盘前解析：写成功后新名已存在，不能再靠 FileExists 区分新旧。
+            // 新建/复制传空，避免把列表里仍选中的源配方删掉。
+            _loader.Save(Editor, IsNew ? null : previousName);
 
-            // 改名 = 移动语义：删除旧名文件，避免双配方同名异体（PLC 触发旧名走旧参数）
-            string savedMessage;
-            if (isRename && _originalName.Length > 0 &&
-                !string.Equals(Editor.Name, _originalName, StringComparison.OrdinalIgnoreCase))
-            {
-                _loader.Delete(_originalName);
-                savedMessage = $"已保存 {Editor.Name}（原 {_originalName} 已重命名，旧文件已删除）";
-            }
-            else
-            {
-                savedMessage = $"已保存 {Editor.Name}";
-            }
+            var savedMessage = isRename && !string.IsNullOrEmpty(previousName) &&
+                !string.Equals(Editor.Name, previousName, StringComparison.OrdinalIgnoreCase)
+                ? $"已保存 {Editor.Name}（原 {previousName} 已重命名）"
+                : $"已保存 {Editor.Name}";
 
             IsNew = false;
             _originalName = Editor.Name;
             _baseline = Editor.Clone();
             OnPropertyChanged(nameof(HasUnsavedChanges));
-        OnPropertyChanged(nameof(UnsavedHint));
-            Refresh();
+            OnPropertyChanged(nameof(UnsavedHint));
+            Refresh(Editor.Name, reloadEditor: false, ignoreUnsaved: true);
             Message = savedMessage;
         }
         catch (Exception ex)
@@ -895,7 +1086,12 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
     /// <summary>测试触发：用磁盘上的配方跑一次完整链路（取图→去畸变→推理→外参）。</summary>
     private bool CanOperate => !IsBusy && CanTestTrigger;
 
-    partial void OnIsBusyChanged(bool value) => TestTriggerCommand.NotifyCanExecuteChanged();
+    partial void OnIsBusyChanged(bool value)
+    {
+        TestTriggerCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(ShowTestImageViewer));
+        OnPropertyChanged(nameof(ShowRoiImageViewer));
+    }
 
     [RelayCommand(CanExecute = nameof(CanOperate))]
     private async Task TestTriggerAsync()
@@ -910,7 +1106,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
             return;
 
         IsBusy = true;
-        TestImage = null; // 清上一轮结果图（失败时不显示旧画面误导）
+        ShowTestImage = true; // 与监控页一致：触发期间不切空图，有旧结果则冻住直到新快照到达
         _awaitSnapshotFor = _originalName; // 置位一次性捕获标志（见字段注释）
         _vision.FrameProcessed += OnTestFrameProcessed; // 仅测试期间订阅，避免常驻克隆开销
         try
@@ -923,18 +1119,12 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
             var result = pose is null
                 ? await _vision.RunAsync(_originalName, cts.Token)
                 : await _vision.RunAsync(_originalName, pose, cts.Token);
+            // 推理完成后快照异步投递；失败（如 1007）也会发图，须等待回调而非立即退订
+            await AwaitTestSnapshotAsync(TimeSpan.FromSeconds(3));
             if (result.Ok)
-            {
-                // 成功：保持标志置位——快照回调可能在 RunAsync 返回后才执行，
-                // 由回调一次性消费并退订；finally 清除会重现"测试通过但无图"竞态
                 Message = $"测试通过：{result.RecipeName} · {result.Poses.Count} 个目标 · {result.ElapsedMs:0}ms";
-            }
             else
-            {
-                // 失败：清标志退订，防之后 TCP 触发的同配方快照被误当作测试结果显示
-                EndSnapshotAwait();
                 Message = $"测试失败：ERR {result.ErrorCode} · {result.Message}";
-            }
         }
         catch (Exception ex)
         {
@@ -968,6 +1158,24 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
 
         LoadIntoEditor(value.Name);
         _lastConfirmed = value;
+    }
+
+    /// <summary>
+    /// 当前编辑对应的磁盘文件名。新建/复制返回空（保存时不得删除源配方）。
+    /// 内部原名若已变成新名（文件还不存在），回退到列表选中项——那才是用户正在改的那份文件。
+    /// </summary>
+    private string ResolvePreviousDiskName()
+    {
+        if (IsNew)
+            return "";
+
+        if (!string.IsNullOrEmpty(_originalName) && _loader.FileExists(_originalName))
+            return _originalName;
+
+        if (Selected is not null && _loader.FileExists(Selected.Name))
+            return Selected.Name;
+
+        return _originalName;
     }
 
     /// <summary>把磁盘配方载入编辑器并设置脏标记基线。</summary>
@@ -1015,6 +1223,13 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         OnPropertyChanged(nameof(RoiY));
         OnPropertyChanged(nameof(RoiWidth));
         OnPropertyChanged(nameof(RoiHeight));
+        OnPropertyChanged(nameof(HasRoiRefFrame));
+        OnPropertyChanged(nameof(RoiPxX));
+        OnPropertyChanged(nameof(RoiPxY));
+        OnPropertyChanged(nameof(RoiPxWidth));
+        OnPropertyChanged(nameof(RoiPxHeight));
+        OnPropertyChanged(nameof(RoiRefFrameHint));
+        OnPropertyChanged(nameof(RoiRatioHint));
         OnPropertyChanged(nameof(RotationCenterHint));
         OnPropertyChanged(nameof(IsDualMode));
         OnPropertyChanged(nameof(IsKeyPointMode));
@@ -1047,8 +1262,6 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
                 tags.Add("ROI");
             if (r.Lighting is not null)
                 tags.Add($"光:{r.LightControllerId}");
-            if (r.DebugPassthrough)
-                tags.Add("直通");
             return new RecipeListItem(name, string.Join(" · ", tags), true, r.Enabled, r.Description);
         }
         catch (Exception ex)

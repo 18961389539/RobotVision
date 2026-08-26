@@ -130,25 +130,6 @@ public sealed class RecipeLoaderGuardTests : IDisposable
     }
 
     [Fact]
-    public void Get_ParsesDebugPassthrough()
-    {
-        Write("DBG.json", """
-            {
-              "cameraId": "cam_file",
-              "debugPassthrough": true,
-              "angleMode": "KeyPointLine",
-              "models": [ "m.onnx" ]
-            }
-            """);
-        var loader = new RecipeLoader(_folder);
-
-        var recipe = loader.Get("DBG");
-
-        Assert.True(recipe.DebugPassthrough);
-        Assert.Null(recipe.StationId);
-    }
-
-    [Fact]
     public void Validate_MaskTemplate_RequiresExactlyOneModel()
     {
         var recipe = new RecipeConfig

@@ -108,4 +108,87 @@ public class UiAutomationSmokeTests(ITestOutputHelper output)
             app.Dispose();
         }
     }
+
+    /// <summary>
+    /// 全导航页可达性冒烟：逐个点击 6 个导航项，断言对应页面（ContentControl）出现。
+    /// 原用例只点到配方页；相机/模型/设置/系统页如果导航崩掉（XAML 绑定异常/页面构造失败）
+    /// 只有全部点击才能暴露。
+    /// </summary>
+    [Fact]
+    public void AllNavigationPages_AreReachable()
+    {
+        if (!Enabled)
+            return;
+
+        var exe = Path.GetFullPath(ExePath);
+        if (!File.Exists(exe))
+        {
+            output.WriteLine($"WPF 宿主未构建: {exe}（跳过）");
+            return;
+        }
+
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        using var app = Application.Launch(exe, repoRoot);
+        try
+        {
+            using var automation = new UIA3Automation();
+            var window = app.GetMainWindow(automation, TimeSpan.FromSeconds(30));
+
+            var navItems = new[] { "运行监控", "相机管理", "配方管理", "模型管理", "服务设置", "系统信息" };
+            foreach (var name in navItems)
+            {
+                var item = window.FindFirstDescendant(cf => cf.ByName(name));
+                item.Should().NotBeNull($"导航项 {name} 应存在");
+                item!.Click();
+                Thread.Sleep(400);
+                var page = window.FindFirstDescendant(cf =>
+                    cf.ByClassName("ContentControl").And(cf.ByName(name)));
+                page.Should().NotBeNull($"点击 {name} 后应出现对应页面（页面构造失败?）");
+                output.WriteLine($"页面可达: {name}");
+            }
+        }
+        finally
+        {
+            try { app.Close(); } catch { }
+            app.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 配方页内容冒烟：进入配方页后配方列表（DataGrid）应存在且可加载。
+    /// 配方页是产线最常操作的页面，列表空/加载失败（配方目录损坏）应被冒烟拦截。
+    /// </summary>
+    [Fact]
+    public void RecipePage_ShowsRecipeList()
+    {
+        if (!Enabled)
+            return;
+
+        var exe = Path.GetFullPath(ExePath);
+        if (!File.Exists(exe))
+        {
+            output.WriteLine($"WPF 宿主未构建: {exe}（跳过）");
+            return;
+        }
+
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        using var app = Application.Launch(exe, repoRoot);
+        try
+        {
+            using var automation = new UIA3Automation();
+            var window = app.GetMainWindow(automation, TimeSpan.FromSeconds(30));
+
+            window.FindFirstDescendant(cf => cf.ByName("配方管理"))!.Click();
+            Thread.Sleep(600);
+
+            var grid = window.FindFirstDescendant(cf => cf.ByClassName("DataGrid"));
+            grid.Should().NotBeNull("配方页应有配方列表（DataGrid）");
+            output.WriteLine($"配方列表控件: {grid?.Name ?? "（未命名）"}");
+        }
+        finally
+        {
+            try { app.Close(); } catch { }
+            app.Dispose();
+        }
+    }
 }

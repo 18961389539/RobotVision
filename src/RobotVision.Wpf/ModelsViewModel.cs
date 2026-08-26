@@ -297,7 +297,9 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
             }
         }
 
-        SelectedFile = Files.FirstOrDefault(f => f.Name == selectedName) ?? Files.FirstOrDefault();
+        SelectedFile = string.IsNullOrWhiteSpace(selectedName)
+            ? Files.FirstOrDefault()
+            : Files.FirstOrDefault(f => string.Equals(f.Name, selectedName, StringComparison.OrdinalIgnoreCase));
 
         // 同一文件被多个任务打开时各占一份会话内存（缓存键含任务），提示用户代价
         var multiTask = groups.Count(g => g.Count() > 1);

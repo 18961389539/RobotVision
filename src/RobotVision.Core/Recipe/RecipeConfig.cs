@@ -233,14 +233,8 @@ public sealed class RecipeConfig
     /// <summary>相机 Id（对应 appsettings 中注册的相机）。</summary>
     public string CameraId { get; set; } = "";
 
-    /// <summary>工位 Id（外参档案）。必需；台架调试需像素直通时设置 DebugPassthrough。</summary>
+    /// <summary>工位 Id（外参/多项式/比例标定档案）。TRIGGER 须映射到机器人或图像平面毫米坐标。</summary>
     public string? StationId { get; set; }
-
-    /// <summary>
-    /// 台架调试模式：显式开启后允许 stationId 为空，返回像素坐标。
-    /// 关闭（默认）时缺 stationId 直接报错，防止像素坐标被误当成机器人坐标。
-    /// </summary>
-    public bool DebugPassthrough { get; set; }
 
     public AngleMode AngleMode { get; set; }
 
@@ -306,7 +300,6 @@ public sealed class RecipeConfig
         SerialNumber = SerialNumber,
         CameraId = CameraId,
         StationId = StationId,
-        DebugPassthrough = DebugPassthrough,
         AngleMode = AngleMode,
         Models = [.. Models],
         Confidence = Confidence,

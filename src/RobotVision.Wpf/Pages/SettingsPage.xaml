@@ -64,12 +64,6 @@
                     </ui:CardExpander.Header>
                     <StackPanel Margin="0,10,0,0">
                         <UniformGrid Columns="2">
-                            <StackPanel Margin="0,0,10,8">
-                                <TextBlock Text="请求超时（ms，建议 3000~5000）" Margin="0,0,0,4" />
-                                <ui:NumberBox Value="{Binding TimeoutMs}" Minimum="500" Maximum="60000"
-                                              SmallChange="500" SpinButtonPlacementMode="Inline"
-                                              ToolTip="单次 TRIGGER 处理超时；与 TCP 空闲断线无关" />
-                            </StackPanel>
                             <StackPanel Margin="0,0,0,8">
                                 <TextBlock Text="连接空闲超时（ms，0 = 永久）" Margin="0,0,0,4" />
                                 <ui:NumberBox Value="{Binding IdleTimeoutMs}" Minimum="0" Maximum="2592000000.0"
@@ -112,7 +106,7 @@
                             </StackPanel>
                         </UniformGrid>
                         <ui:TextBlock FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                      Text="总超时必须大于各 Basler 相机的 GrabTimeoutMs，否则相机取图超时将表现为 1008 而非 1003（保存时校验）；并发执行上限必须 ≤ 队列深度" />
+                                      Text="并发执行上限必须 ≤ 队列深度；采集超时 60s / 请求总超时 90s 为内置固定值（appsettings.json 可改）" />
                     </StackPanel>
                 </ui:CardExpander>
 

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -16,7 +17,14 @@ using RobotVision.Infrastructure.Cameras;
 namespace RobotVision.WpfHost;
 
 public sealed record CameraListItem(
-    string Id, string Type, string Summary, string Status, bool Registered, string? UnregisteredReason = null);
+    string Id,
+    string Title,
+    string? Subtitle,
+    string Type,
+    string Summary,
+    string Status,
+    bool Registered,
+    string? UnregisteredReason = null);
 
 /// <summary>
 /// 相机管理：配置增删改（CameraConfigStore 写回 appsettings.json）、
@@ -43,6 +51,12 @@ public partial class CamerasViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUnsavedChanges))]
     [NotifyPropertyChangedFor(nameof(UnsavedHint))]
     private string _editId = "";
+
+    /// <summary>可选显示名；留空时列表与下拉仅显示 Id。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUnsavedChanges))]
+    [NotifyPropertyChangedFor(nameof(UnsavedHint))]
+    private string _editName = "";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUnsavedChanges))]
@@ -72,11 +86,6 @@ public partial class CamerasViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUnsavedChanges))]
     [NotifyPropertyChangedFor(nameof(UnsavedHint))]
     private string _editGain = "";
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasUnsavedChanges))]
-    [NotifyPropertyChangedFor(nameof(UnsavedHint))]
-    private int _editGrabTimeoutMs = 3000;
 
     [ObservableProperty]
     private string? _selectedBaslerDevice;
@@ -137,6 +146,10 @@ public partial class CamerasViewModel : ObservableObject
 
     partial void OnPreviewCaptionChanged(string value) => OnPropertyChanged(nameof(PreviewVisible));
 
+    /// <summary>预览角标 ToolTip：采集时刻等次要信息。</summary>
+    [ObservableProperty]
+    private string _previewToolTip = "";
+
     /// <summary>取图/调光操作进行中（按钮防抖，防止并发临时实例）。</summary>
     [ObservableProperty]
     private bool _isBusy;
@@ -177,6 +190,11 @@ public partial class CamerasViewModel : ObservableObject
     /// <summary>预览帧在途标记（防 Tick 重入：取帧耗时超过间隔时跳过后续 Tick）。</summary>
     private bool _previewTickBusy;
 
+    private const int PreviewFpsSampleCount = 10;
+
+    /// <summary>实时预览帧完成时刻（TickCount64），用于滑动 FPS / 平均帧间隔。</summary>
+    private readonly Queue<long> _previewFrameTicks = new();
+
     /// <summary>编辑内容相对保存态是否有差异（切换/刷新/删除前据此弹确认）。</summary>
     public bool HasUnsavedChanges
     {
@@ -204,12 +222,12 @@ public partial class CamerasViewModel : ObservableObject
     /// <summary>编辑字段与磁盘配置逐字段比较（脏标记用）。</summary>
     private static bool SameCamera(CameraConfig a, CameraConfig b) =>
         string.Equals(a.Id, b.Id, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(a.Name.Trim(), b.Name.Trim(), StringComparison.Ordinal) &&
         string.Equals(a.Type, b.Type, StringComparison.OrdinalIgnoreCase) &&
         a.Folder == b.Folder &&
         a.DeviceId == b.DeviceId &&
         a.ExposureTimeUs == b.ExposureTimeUs &&
         a.Gain == b.Gain &&
-        a.GrabTimeoutMs == b.GrabTimeoutMs &&
         a.Width == b.Width &&
         a.Height == b.Height &&
         string.Equals(a.Pattern, b.Pattern, StringComparison.OrdinalIgnoreCase) &&
@@ -380,7 +398,6 @@ public partial class CamerasViewModel : ObservableObject
             EditDeviceId = "";
             EditExposureUs = "";
             EditGain = "";
-            EditGrabTimeoutMs = 3000;
         }
         if (!IsVirtual)
         {
@@ -401,28 +418,49 @@ public partial class CamerasViewModel : ObservableObject
     partial void OnGainChanged(double value) => OnPropertyChanged(nameof(GainText));
 
     [RelayCommand]
-    public void Refresh()
+    public void Refresh() => Refresh(preferId: null);
+
+    /// <param name="preferId">刷新后优先选中的 Id；空则尽量保持当前选中。</param>
+    /// <param name="resetPreview">
+    /// true：同步编辑区时清掉预览图（F5 / 进页 / 删除后换机）。
+    /// false：保存后刷新列表时保留当前预览——图仍是这台相机的，清掉只增加再取一次的成本。
+    /// </param>
+    public void Refresh(string? preferId, bool resetPreview = true)
     {
         // 未保存修改：确认后才丢弃（页面 Loaded 自动刷新同样生效）
         if (HasUnsavedChanges && !ConfirmDiscard("刷新列表"))
             return;
 
-        Items.Clear();
-        foreach (var camera in _cfg.Cameras)
-        {
-            var registered = _cameras.IsRegistered(camera.Id);
-            Items.Add(new CameraListItem(
-                camera.Id, camera.Type, Summarize(camera),
-                registered ? "已注册" : "未注册", registered,
-                registered ? null : UnregisterReason(camera)));
-        }
+        // ListBox 双向绑定：Items.Clear() 会把 Selected 置 null，必须先记下要恢复的 Id
+        var keepId = preferId ?? Selected?.Id ?? EditId.Trim();
 
         _switching = true;
-        Selected = Items.FirstOrDefault(i => i.Id == Selected?.Id) ?? Items.FirstOrDefault();
-        _switching = false;
+        try
+        {
+            Items.Clear();
+            foreach (var camera in _cfg.Cameras)
+            {
+                var registered = _cameras.IsRegistered(camera.Id);
+                var title = CameraLabels.ListTitle(camera);
+                var subtitle = string.IsNullOrWhiteSpace(camera.Name) ? null : camera.Id;
+                Items.Add(new CameraListItem(
+                    camera.Id, title, subtitle, camera.Type, Summarize(camera),
+                    registered ? "已注册" : "未注册", registered,
+                    registered ? null : UnregisterReason(camera)));
+            }
+
+            Selected = string.IsNullOrWhiteSpace(keepId)
+                ? Items.FirstOrDefault()
+                : Items.FirstOrDefault(i => string.Equals(i.Id, keepId, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            _switching = false;
+        }
+
         // Refresh 在 _switching 内改 Selected 会跳过 OnSelectedChanged，须显式同步编辑区与调光面板
         if (Selected is not null)
-            ApplySelectedItem(Selected);
+            ApplySelectedItem(Selected, resetPreview);
         Message = $"共 {Items.Count} 台相机";
     }
 
@@ -471,12 +509,12 @@ public partial class CamerasViewModel : ObservableObject
         IsNew = true;
         _baseline = null;
         EditId = "";
+        EditName = "";
         EditType = "File";
         EditFolder = "";
         EditDeviceId = "";
         EditExposureUs = "";
         EditGain = "";
-        EditGrabTimeoutMs = 3000;
         EditWidth = 1280;
         EditHeight = 960;
         EditPattern = "Chessboard";
@@ -485,6 +523,7 @@ public partial class CamerasViewModel : ObservableObject
         EditNoiseSigma = "0";
         PreviewImage = null;
         PreviewCaption = "";
+        PreviewToolTip = "";
         Message = "新建相机：选择类型并填写参数后保存";
     }
 
@@ -500,6 +539,7 @@ public partial class CamerasViewModel : ObservableObject
         EditId = id.Length > 0 ? id + "_copy" : "";
         PreviewImage = null;
         PreviewCaption = "";
+        PreviewToolTip = "";
         Message = "已复制：改 Id 后保存即新相机";
     }
 
@@ -529,27 +569,25 @@ public partial class CamerasViewModel : ObservableObject
             return;
         }
 
-        // 超时预算校验：GrabTimeoutMs 必须小于总超时 TimeoutMs，且为正数
+        // 超时预算校验：硬件相机采集超时固定为 DefaultGrabTimeoutMs，须小于总超时
         if (IsHardwareType(entry.Type))
         {
-            if (entry.GrabTimeoutMs <= 0)
-            {
-                Message = "保存失败: 采集超时 GrabTimeoutMs 必须大于 0";
-                return;
-            }
+            entry.GrabTimeoutMs = AppConfig.DefaultGrabTimeoutMs;
             if (entry.GrabTimeoutMs >= _cfg.TimeoutMs)
             {
-                Message = $"保存失败: 采集超时 {entry.GrabTimeoutMs}ms 不小于总超时 {_cfg.TimeoutMs}ms，取图超时将表现为 1008 而非 1003";
+                Message = $"保存失败: 服务总超时 {_cfg.TimeoutMs}ms 不足（采集固定 {AppConfig.DefaultGrabTimeoutMs}ms），请在 appsettings.json 调大 TimeoutMs";
                 return;
             }
         }
 
         try
         {
-            var list = _cfg.Cameras
-                .Where(c => !string.Equals(c.Id, id, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            list.Add(entry);
+            var list = _cfg.Cameras.ToList();
+            var index = list.FindIndex(c => string.Equals(c.Id, id, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0)
+                list[index] = entry;
+            else
+                list.Add(entry);
 
             _store.Save(list);
 
@@ -557,11 +595,8 @@ public partial class CamerasViewModel : ObservableObject
             var error = TryRegister(entry);
             IsNew = false;
             _baseline = entry; // 保存后的配置即新基线（Refresh 的脏检查不会误弹）
+            Refresh(id, resetPreview: false);
             Message = error is null ? $"已保存 {id}（运行时已注册）" : $"已保存 {id}（运行时注册失败: {error}）";
-            Refresh();
-            _switching = true;
-            Selected = Items.FirstOrDefault(i => string.Equals(i.Id, id, StringComparison.OrdinalIgnoreCase));
-            _switching = false;
         }
         catch (Exception ex)
         {
@@ -573,6 +608,7 @@ public partial class CamerasViewModel : ObservableObject
     /// 未知类型（外部工厂注册、无内置编辑面板）：保留磁盘已有字段（克隆），仅应用 Id/Type。</summary>
     private CameraConfig BuildConfig(string id)
     {
+        CameraConfig entry;
         if (!_registry.IsKnown(EditType))
         {
             var existing = _cfg.Cameras.FirstOrDefault(
@@ -583,34 +619,39 @@ public partial class CamerasViewModel : ObservableObject
                     JsonSerializer.Serialize(existing))!;
                 clone.Id = id;
                 clone.Type = EditType;
-                return clone;
+                entry = clone;
             }
-            return new CameraConfig { Id = id, Type = EditType };
+            else
+                entry = new CameraConfig { Id = id, Type = EditType };
+        }
+        else
+        {
+            entry = new CameraConfig { Id = id, Type = EditType };
+            switch (EditType)
+            {
+                case "Basler":
+                case "GigEVision":
+                    entry.DeviceId = EditDeviceId.Trim();
+                    entry.ExposureTimeUs = ParseOptional(EditExposureUs, "曝光时间");
+                    entry.Gain = ParseOptional(EditGain, "增益");
+                    entry.GrabTimeoutMs = AppConfig.DefaultGrabTimeoutMs;
+                    break;
+                case "Virtual":
+                    entry.Width = EditWidth;
+                    entry.Height = EditHeight;
+                    entry.Pattern = EditPattern;
+                    entry.ChessCellPx = EditCellPx;
+                    entry.IntervalMs = EditIntervalMs;
+                    entry.NoiseSigma = ParseDouble(EditNoiseSigma, "噪声");
+                    break;
+                default:
+                    entry.Folder = EditFolder.Trim();
+                    entry.IntervalMs = EditIntervalMs;
+                    break;
+            }
         }
 
-        var entry = new CameraConfig { Id = id, Type = EditType };
-        switch (EditType)
-        {
-            case "Basler":
-            case "GigEVision":
-                entry.DeviceId = EditDeviceId.Trim();
-                entry.ExposureTimeUs = ParseOptional(EditExposureUs, "曝光时间");
-                entry.Gain = ParseOptional(EditGain, "增益");
-                entry.GrabTimeoutMs = EditGrabTimeoutMs;
-                break;
-            case "Virtual":
-                entry.Width = EditWidth;
-                entry.Height = EditHeight;
-                entry.Pattern = EditPattern;
-                entry.ChessCellPx = EditCellPx;
-                entry.IntervalMs = EditIntervalMs;
-                entry.NoiseSigma = ParseDouble(EditNoiseSigma, "噪声");
-                break;
-            default:
-                entry.Folder = EditFolder.Trim();
-                entry.IntervalMs = EditIntervalMs;
-                break;
-        }
+        entry.Name = EditName.Trim();
         return entry;
     }
 
@@ -703,33 +744,15 @@ public partial class CamerasViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            Message = $"取图中 · {id}（{EditType}）";
-            BitmapSource source;
-            if (_cameras.TryGet(id, out var existing) && existing is not null)
-            {
-                source = await Task.Run(() =>
-                {
-                    using var frame = _cameras.Grab(id);
-                    return ImageConverter.ToBitmapSource(frame.Image);
-                });
-            }
-            else
-            {
-                source = await Task.Run(() =>
-                {
-                    using var camera = CreateCamera(entry);
-                    using var frame = _cameras.Grab(camera);
-                    return ImageConverter.ToBitmapSource(frame.Image);
-                });
-            }
-            PreviewImage = source;
-            PreviewCaption = $"测试取图 · {id}（{EditType}）";
-            Message = $"取图成功 · {id}（{source.PixelWidth}×{source.PixelHeight}）";
+            var label = PreviewCameraLabel();
+            Message = $"取图中 · {label}";
+            var snap = await Task.Run(() => GrabFrameSnapshot(entry, id));
+            ApplyPreviewSnapshot("测试取图", label, snap);
+            Message = $"取图成功 · {label} · {snap.Width}×{snap.Height} · {snap.ElapsedMs:0} ms";
         }
         catch (Exception ex)
         {
-            PreviewImage = null;
-            PreviewCaption = "";
+            ClearPreview();
             Message = $"取图失败: {ex.Message}";
         }
         finally
@@ -756,7 +779,8 @@ public partial class CamerasViewModel : ObservableObject
             return;
         }
         IsPreviewing = true;
-        Message = $"实时预览中 · {id}（{EditType}）";
+        _previewFrameTicks.Clear();
+        Message = $"实时预览中 · {PreviewCameraLabel()}";
         _previewTimer.Start();
     }
 
@@ -766,6 +790,7 @@ public partial class CamerasViewModel : ObservableObject
     {
         _previewTimer.Stop();
         _previewTickBusy = false;
+        _previewFrameTicks.Clear();
         if (IsPreviewing)
         {
             IsPreviewing = false;
@@ -802,38 +827,44 @@ public partial class CamerasViewModel : ObservableObject
                 return;
             }
 
-            BitmapSource source;
-            if (_cameras.TryGet(id, out var existing) && existing is not null)
-            {
-                source = await Task.Run(() =>
-                {
-                    using var frame = _cameras.Grab(id);
-                    return ImageConverter.ToBitmapSource(frame.Image);
-                });
-            }
-            else
-            {
-                source = await Task.Run(() =>
-                {
-                    using var camera = CreateCamera(entry);
-                    using var frame = _cameras.Grab(camera);
-                    return ImageConverter.ToBitmapSource(frame.Image);
-                });
-            }
-            PreviewImage = source;
-            PreviewCaption = $"实时预览 · {id}（{EditType}）";
+            var label = PreviewCameraLabel();
+            var snap = await Task.Run(() => GrabFrameSnapshot(entry, id));
+            RecordPreviewFrameTiming();
+            var (fps, avgMs) = ComputePreviewRates();
+            ApplyPreview(
+                snap,
+                FormatLivePreviewCaption(label, snap.Width, snap.Height, snap.ElapsedMs, fps, avgMs));
         }
         catch (Exception ex)
         {
+            ClearPreview();
             StopPreview();
-            PreviewImage = null;
-            PreviewCaption = "";
             Message = $"实时预览失败: {ex.Message}";
         }
         finally
         {
             _previewTickBusy = false;
         }
+    }
+
+    private void RecordPreviewFrameTiming()
+    {
+        _previewFrameTicks.Enqueue(Environment.TickCount64);
+        while (_previewFrameTicks.Count > PreviewFpsSampleCount)
+            _previewFrameTicks.Dequeue();
+    }
+
+    private (double? Fps, double? AvgMs) ComputePreviewRates()
+    {
+        if (_previewFrameTicks.Count < 2)
+            return (null, null);
+
+        var span = _previewFrameTicks.Last() - _previewFrameTicks.First();
+        if (span <= 0)
+            return (null, null);
+
+        var intervals = _previewFrameTicks.Count - 1;
+        return (intervals * 1000.0 / span, span / intervals);
     }
 
     [RelayCommand]
@@ -938,7 +969,7 @@ public partial class CamerasViewModel : ObservableObject
             ExposureUs = exposure ?? ExposureUs;
             Gain = gain ?? Gain;
             Message = exposure is null && gain is null
-                ? "读取相机参数失败（相机可能已断开）"
+                ? "读取相机参数失败（无法连接相机或机型不支持读回曝光/增益，可先点「测试取图」确认在线）"
                 : $"当前曝光 {ExposureUs:0} µs · 增益 {Gain:0.00} dB";
         }
         catch (Exception ex)
@@ -959,17 +990,18 @@ public partial class CamerasViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            Message = $"下发光度参数并取图中 · {id}";
-            var source = await Task.Run(() =>
+            var label = PreviewCameraLabel();
+            Message = $"下发光度参数并取图中 · {label}";
+            var entry = _cfg.Cameras.FirstOrDefault(c => string.Equals(c.Id, id, StringComparison.OrdinalIgnoreCase))
+                ?? BuildConfig(id);
+            var snap = await Task.Run(() =>
             {
                 exposure.TrySetExposureTimeUs(ExposureUs);
                 exposure.TrySetGain(Gain);
-                using var frame = _cameras.Grab(id);
-                return ImageConverter.ToBitmapSource(frame.Image);
+                return GrabFrameSnapshot(entry, id);
             });
-            PreviewImage = source;
-            PreviewCaption = $"运行时调光预览 · {id}";
-            Message = $"取图成功 · 曝光 {ExposureUs:0} µs · 增益 {Gain:0.00} dB";
+            ApplyPreviewSnapshot("调光取图", label, snap);
+            Message = $"取图成功 · 曝光 {ExposureUs:0} µs · 增益 {Gain:0.00} dB · {snap.ElapsedMs:0} ms";
         }
         catch (Exception ex)
         {
@@ -1039,8 +1071,8 @@ public partial class CamerasViewModel : ObservableObject
         if (_switching || value is null)
             return;
 
-        StopPreview();
-        // 未保存修改：确认后才切换（拒绝时恢复原选中）
+        // 未保存修改：确认后才切换（拒绝时恢复原选中）。预览停在确认之后，
+        // 避免点了另一台又取消时把当前实时预览一并停掉。
         if (HasUnsavedChanges && !ConfirmDiscard("切换相机"))
         {
             _switching = true;
@@ -1049,15 +1081,18 @@ public partial class CamerasViewModel : ObservableObject
             return;
         }
 
-        ApplySelectedItem(value);
+        ApplySelectedItem(value, resetPreview: true);
     }
 
     /// <summary>选中项 → 编辑区 + 运行时调光面板（Refresh 与 OnSelectedChanged 共用）。</summary>
-    private void ApplySelectedItem(CameraListItem value)
+    private void ApplySelectedItem(CameraListItem value, bool resetPreview)
     {
         IsNew = false;
-        PreviewImage = null;
-        PreviewCaption = "";
+        if (resetPreview)
+        {
+            StopPreview();
+            ClearPreview();
+        }
 
         var config = _cfg.Cameras.FirstOrDefault(
             c => string.Equals(c.Id, value.Id, StringComparison.OrdinalIgnoreCase));
@@ -1066,12 +1101,12 @@ public partial class CamerasViewModel : ObservableObject
 
         _baseline = config;
         EditId = config.Id;
+        EditName = config.Name;
         EditType = config.Type;
         EditFolder = config.Folder;
         EditDeviceId = config.DeviceId;
         EditExposureUs = config.ExposureTimeUs?.ToString("0") ?? "";
         EditGain = config.Gain?.ToString("0.##") ?? "";
-        EditGrabTimeoutMs = config.GrabTimeoutMs;
         EditWidth = config.Width;
         EditHeight = config.Height;
         EditPattern = PatternOptions.Contains(config.Pattern, StringComparer.OrdinalIgnoreCase)
@@ -1095,6 +1130,91 @@ public partial class CamerasViewModel : ObservableObject
     private static bool IsHardwareType(string type) =>
         string.Equals(type, "Basler", StringComparison.OrdinalIgnoreCase)
         || string.Equals(type, "GigEVision", StringComparison.OrdinalIgnoreCase);
+
+    private sealed record GrabSnapshot(
+        BitmapSource Image,
+        int Width,
+        int Height,
+        double ElapsedMs,
+        DateTime CapturedAtLocal);
+
+    private string PreviewCameraLabel()
+    {
+        var id = EditId.Trim();
+        var name = EditName.Trim();
+        return name.Length > 0 ? $"{name} ({id})" : id;
+    }
+
+    private GrabSnapshot GrabFrameSnapshot(CameraConfig entry, string id)
+    {
+        var sw = Stopwatch.StartNew();
+        if (_cameras.TryGet(id, out var existing) && existing is not null)
+        {
+            using var registeredFrame = _cameras.Grab(id);
+            sw.Stop();
+            return ToGrabSnapshot(registeredFrame, sw.Elapsed.TotalMilliseconds);
+        }
+
+        using var camera = CreateCamera(entry);
+        using var tempFrame = _cameras.Grab(camera);
+        sw.Stop();
+        return ToGrabSnapshot(tempFrame, sw.Elapsed.TotalMilliseconds);
+    }
+
+    private static GrabSnapshot ToGrabSnapshot(CameraFrame frame, double elapsedMs)
+    {
+        var image = frame.Image;
+        var source = ImageConverter.ToBitmapSource(image);
+        return new GrabSnapshot(
+            source,
+            image.Width,
+            image.Height,
+            elapsedMs,
+            frame.CapturedAtUtc.ToLocalTime());
+    }
+
+    private void ApplyPreviewSnapshot(string mode, string label, GrabSnapshot snap) =>
+        ApplyPreview(snap, FormatSingleGrabCaption(mode, label, snap.Width, snap.Height, snap.ElapsedMs));
+
+    private void ApplyPreview(GrabSnapshot snap, string caption)
+    {
+        PreviewImage = snap.Image;
+        PreviewCaption = caption;
+        PreviewToolTip = FormatCaptureToolTip(snap.CapturedAtLocal);
+    }
+
+    private void ClearPreview()
+    {
+        PreviewImage = null;
+        PreviewCaption = "";
+        PreviewToolTip = "";
+    }
+
+    private static string FormatSingleGrabCaption(string mode, string label, int width, int height, double elapsedMs) =>
+        $"{mode} · {label} · {width}×{height} · {elapsedMs:0} ms";
+
+    private static string FormatLivePreviewCaption(
+        string label,
+        int width,
+        int height,
+        double elapsedMs,
+        double? fps,
+        double? avgMs)
+    {
+        var parts = new List<string> { "实时预览", label, $"{width}×{height}" };
+        if (fps is not null && avgMs is not null)
+        {
+            parts.Add($"{fps:0.#} fps");
+            parts.Add($"{avgMs:0} ms/帧");
+        }
+        else
+            parts.Add($"{elapsedMs:0} ms");
+
+        return string.Join(" · ", parts);
+    }
+
+    private static string FormatCaptureToolTip(DateTime capturedAtLocal) =>
+        $"采集时刻 {capturedAtLocal:yyyy-MM-dd HH:mm:ss.fff}";
 
     private static string UnregisteredHint(string type) => type switch
     {

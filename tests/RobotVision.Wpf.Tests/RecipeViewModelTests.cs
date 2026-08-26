@@ -17,6 +17,7 @@ public class RecipeViewModelTests : IDisposable
     private readonly TestInfra.TempDir _dir = new("rv_recipe");
     private readonly string _recipeFolder;
     private readonly RecipeLoader _loader;
+    private readonly AppConfig _cfg;
     private readonly CameraManager _cameras = new();
     private readonly VisionService _vision;
     private readonly TcpServerManager _tcp;
@@ -29,7 +30,7 @@ public class RecipeViewModelTests : IDisposable
     {
         _recipeFolder = _dir.CreateSub("recipes");
         File.WriteAllText(System.IO.Path.Combine(_recipeFolder, "A01.json"),
-            """{"cameraId": "cam_file", "stationId": "", "debugPassthrough": true, "angleMode": "KeyPointLine", "models": ["a.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}""");
+            """{"cameraId": "cam_file", "stationId": "", "angleMode": "KeyPointLine", "models": ["a.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}""");
         File.WriteAllText(System.IO.Path.Combine(_recipeFolder, "B02.json"),
             """{"cameraId": "cam_file", "stationId": "st1", "angleMode": "MaskMinAreaRect", "models": ["b.onnx"], "confidence": 0.4}""");
         File.WriteAllText(System.IO.Path.Combine(_recipeFolder, "BAD.json"),
@@ -39,6 +40,9 @@ public class RecipeViewModelTests : IDisposable
         using (var img = new OpenCvSharp.Mat(32, 32, OpenCvSharp.MatType.CV_8UC3, OpenCvSharp.Scalar.All(90)))
             OpenCvSharp.Cv2.ImWrite(System.IO.Path.Combine(replay, "f.bmp"), img);
         _cameras.Register(new FileCamera("cam_file", replay));
+
+        _cfg = TestInfra.CreateAppConfig(_dir.Path);
+        _cfg.Cameras.Add(new CameraConfig { Id = "cam_file", Type = "File", Folder = replay });
 
         _loader = new RecipeLoader(_recipeFolder);
         _models = new RobotVision.Infrastructure.Inference.ModelManager(_dir.Path);
@@ -53,7 +57,7 @@ public class RecipeViewModelTests : IDisposable
     }
 
     private RecipeViewModel CreateVm() =>
-        new(_loader, _cameras, _models, _calibration, _vision, _lighting, _angleRegistry, _tcp);
+        new(_loader, _cfg, _cameras, _models, _calibration, _vision, _lighting, _angleRegistry, _tcp);
 
     [Fact]
     public void Ctor_LoadsRecipeList_SelectsFirst()
@@ -199,6 +203,53 @@ public class RecipeViewModelTests : IDisposable
             vm.Message.Should().NotStartWith("保存失败");
             vm.Editor.SerialNumber.Should().Be(1);
             _loader.Get("A01", forceReload: true).SerialNumber.Should().Be(1);
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void Save_Rename_RemovesOldRecipe_AndKeepsNew()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "A01");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.Name.Should().Be("A01");
+
+            vm.Editor.Name = "A01b";
+            vm.SaveCommand.Execute(null);
+
+            vm.Message.Should().NotStartWith("保存失败");
+            File.Exists(Path.Combine(_recipeFolder, "A01.json")).Should().BeFalse();
+            File.Exists(Path.Combine(_recipeFolder, "A01b.json")).Should().BeTrue();
+            vm.Recipes.Select(r => r.Name).Should().NotContain("A01");
+            vm.Recipes.Select(r => r.Name).Should().Contain("A01b");
+            vm.Selected!.Name.Should().Be("A01b");
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void Copy_ThenSave_KeepsSourceRecipe()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "A01");
+            vm.Selected = null;
+            vm.Selected = target;
+
+            vm.CopyCommand.Execute(null);
+            vm.Editor.Name.Should().Be("A01_copy");
+            vm.SaveCommand.Execute(null);
+
+            vm.Message.Should().NotStartWith("保存失败");
+            File.Exists(Path.Combine(_recipeFolder, "A01.json")).Should().BeTrue();
+            File.Exists(Path.Combine(_recipeFolder, "A01_copy.json")).Should().BeTrue();
+            vm.Recipes.Select(r => r.Name).Should().Contain("A01");
+            vm.Recipes.Select(r => r.Name).Should().Contain("A01_copy");
         }
         finally { vm.Dispose(); }
     }

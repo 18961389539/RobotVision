@@ -15,6 +15,7 @@ namespace RobotVision.Wpf.Tests;
 public class MainViewModelTests : IDisposable
 {
     private readonly TestInfra.TempDir _dir = new("rv_main");
+    private readonly AppConfig _cfg;
     private readonly CameraManager _cameras = new();
     private readonly RecipeLoader _recipes;
     private readonly VisionService _vision;
@@ -25,7 +26,7 @@ public class MainViewModelTests : IDisposable
     {
         var recipeFolder = _dir.CreateSub("recipes");
         File.WriteAllText(System.IO.Path.Combine(recipeFolder, "A01.json"),
-            """{"cameraId": "cam_file", "debugPassthrough": true, "angleMode": "KeyPointLine", "models": ["no_such.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}""");
+            """{"cameraId": "cam_file", "angleMode": "KeyPointLine", "models": ["no_such.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}""");
 
         var replay = _dir.CreateSub("replay");
         using (var img = new OpenCvSharp.Mat(64, 64, OpenCvSharp.MatType.CV_8UC3, OpenCvSharp.Scalar.All(80)))
@@ -33,6 +34,13 @@ public class MainViewModelTests : IDisposable
 
         _cameras.Register(new VirtualCamera("cam_virtual", 64, 64, "Bars"));
         _cameras.Register(new FileCamera("cam_file", replay));
+
+        _cfg = TestInfra.CreateAppConfig(_dir.Path);
+        _cfg.Cameras =
+        [
+            new CameraConfig { Id = "cam_virtual", Type = "Virtual" },
+            new CameraConfig { Id = "cam_file", Type = "File", Folder = replay },
+        ];
 
         _recipes = new RecipeLoader(recipeFolder);
         _vision = TestInfra.CreateVisionService(recipeFolder, _cameras);
@@ -48,7 +56,7 @@ public class MainViewModelTests : IDisposable
     }
 
     private MainViewModel CreateVm() =>
-        new(_vision, _cameras, new RobotVision.Infrastructure.Calibration.CalibrationManager(),
+        new(_vision, _cfg, _cameras, new RobotVision.Infrastructure.Calibration.CalibrationManager(),
             _recipes, _tcp, _sink);
 
     [Fact]
@@ -57,7 +65,7 @@ public class MainViewModelTests : IDisposable
         var vm = CreateVm();
         try
         {
-            vm.Cameras.Should().Equal("cam_virtual", "cam_file");
+            vm.CameraOptions.Select(o => o.Id).Should().Equal("cam_virtual", "cam_file");
             // 默认相机优先 Virtual（无硬件时不默认 Basler）
             vm.SelectedCamera.Should().Be("cam_virtual");
             vm.Recipes.Should().Equal("A01");

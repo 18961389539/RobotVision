@@ -28,6 +28,8 @@ public static class ServiceCollectionExtensions
         // 启动值域校验：TimeoutMs/MaxQueueDepth/MaxConcurrent/TcpPort/白名单/相机取图超时联动等
         // 非法值直接启动失败（抛出清晰异常），避免 TimeoutMs=100 之类的配置静默生效带病运行
         // （与 AppSettingsStore.Validate 保存时校验同规则，保存能过、启动就能过）
+        // 固定超时策略（采集 60s / 请求总 90s）：启动前对齐，再跑值域校验
+        cfg.NormalizeVisionTiming();
         AppSettingsStore.ValidateConfig(cfg);
 
         // 目录缺失等启动告警：组装阶段宿主日志尚未可用（自建 LoggerFactory 只输出控制台、
@@ -324,10 +326,10 @@ public static class ServiceCollectionExtensions
         }
 
         if (!string.IsNullOrEmpty(recipe.StationId) &&
-            !calibration.ExtrinsicProfiles.Any(p =>
-                string.Equals(p.StationId, recipe.StationId, StringComparison.OrdinalIgnoreCase)) &&
-            !calibration.HasPolynomial(recipe.StationId))
-            return new RecipeReferenceError($"工位未做外参/多项式标定: {recipe.StationId}", VisionErrorCode.NotCalibrated);
+            calibration.GetMappingMode(recipe.StationId) == StationMappingMode.None)
+            return new RecipeReferenceError(
+                $"工位未做外参/多项式/比例标定: {recipe.StationId}",
+                VisionErrorCode.NotCalibrated);
 
         if (recipe.RotationCompensation == RotationCompensationMode.EccentricTool &&
             !string.IsNullOrEmpty(recipe.StationId) &&

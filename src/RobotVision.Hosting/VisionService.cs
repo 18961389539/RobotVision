@@ -128,17 +128,25 @@ public sealed class VisionService(
             if (lightingScope.StabilizeDelayMs > 0)
                 await Task.Delay(lightingScope.StabilizeDelayMs, ct).ConfigureAwait(false);
 
-            // 多项式工位（单图模式）：跳过内参去畸变，推理直接用原图（多项式吸收畸变）
-            var usePolynomial = calibration.HasPolynomial(recipe.StationId);
+            // 映射模式：多项式 > 外参 > 比例（无标定板工位的回退：图像平面毫米输出）。
+            // 多项式/比例均为单图模式：跳过内参去畸变，推理直接用原图
+            // （多项式吸收畸变；比例以原图为测量基准，去畸变反而使像素错位）。
+            var mappingMode = calibration.GetMappingMode(recipe.StationId);
 
             // 取图走 CameraManager 按 Id 串行门闩（与 UI 预览共用，SDK 非线程安全）。
             // 去畸变在锁外：预览可与 CPU 去畸变重叠，不必再占相机。
             using var frame = await cameras.GrabAsync(recipe.CameraId, ct).ConfigureAwait(false);
             grabMs = stopwatch.Elapsed.TotalMilliseconds;
-            if (usePolynomial)
+            if (mappingMode == StationMappingMode.Polynomial)
             {
                 // 分辨率必须与标定档案一致（归一化坐标错位 = 映射整体失效）
                 calibration.VerifyPolynomialResolution(recipe.StationId!, frame.Image.Width, frame.Image.Height);
+                undistorted = frame.Image.Clone();
+            }
+            else if (mappingMode == StationMappingMode.Scale)
+            {
+                // 比例档案记录了分辨率时校验一致（换分辨率 mm/px 失效）
+                calibration.VerifyScaleResolution(recipe.StationId!, frame.Image.Width, frame.Image.Height);
                 undistorted = frame.Image.Clone();
             }
             else
@@ -173,9 +181,14 @@ public sealed class VisionService(
             }
 
             var robotPoses = pixelPoses
-                .Select(p => usePolynomial
-                    ? calibration.PixelToRobotPolynomial(recipe.StationId!, p, recipe.CameraId, pose)
-                    : calibration.PixelToRobot(recipe.StationId, p, recipe.DebugPassthrough, recipe.CameraId, pose))
+                .Select(p => mappingMode switch
+                {
+                    StationMappingMode.Polynomial =>
+                        calibration.PixelToRobotPolynomial(recipe.StationId!, p, recipe.CameraId, pose),
+                    StationMappingMode.Scale =>
+                        calibration.PixelToRobotScale(recipe.StationId!, p, recipe.CameraId),
+                    _ => calibration.PixelToRobot(recipe.StationId, p, recipe.CameraId, pose),
+                })
                 .Select(r => calibration.CompensateRotation(recipe.StationId, recipe.RotationCompensation, r))
                 .ToList();
 

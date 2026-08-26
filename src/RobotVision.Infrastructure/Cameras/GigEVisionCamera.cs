@@ -50,13 +50,13 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     public string FriendlyName => _friendlyName;
 
     public GigEVisionCamera(string id, string? deviceId = null, double? exposureTimeUs = null,
-        double? gain = null, int grabTimeoutMs = 3000, ILogger? log = null)
+        double? gain = null, int grabTimeoutMs = 60_000, ILogger? log = null)
     {
         Id = id;
         _deviceId = deviceId?.Trim() ?? "";
         _exposureTimeUs = exposureTimeUs;
         _gain = gain;
-        _grabTimeoutMs = grabTimeoutMs > 0 ? grabTimeoutMs : 3000;
+        _grabTimeoutMs = grabTimeoutMs > 0 ? grabTimeoutMs : 60_000;
         _log = log;
     }
 
@@ -152,19 +152,19 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     public bool TrySetExposureTimeUs(double value)
     {
         lock (_grabLock)
-            return _connected && TrySetExposureCore(value);
+            return EnsureConnected() && TrySetExposureCore(value);
     }
 
     public bool TrySetGain(double value)
     {
         lock (_grabLock)
-            return _connected && TrySetGainCore(value);
+            return EnsureConnected() && TrySetGainCore(value);
     }
 
     public double? GetExposureTimeUs()
     {
         lock (_grabLock)
-            return _connected
+            return EnsureConnected()
                 ? TryGetFloat("ExposureTime") ?? TryGetFloat("ExposureTimeAbs") ?? TryGetInteger("ExposureTime")
                 : null;
     }
@@ -172,13 +172,13 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     public double? GetGain()
     {
         lock (_grabLock)
-            return _connected ? TryGetFloat("Gain") ?? TryGetInteger("GainRaw") : null;
+            return EnsureConnected() ? TryGetFloat("Gain") ?? TryGetInteger("GainRaw") : null;
     }
 
     public (double Min, double Max)? GetExposureRange()
     {
         lock (_grabLock)
-            return _connected
+            return EnsureConnected()
                 ? GetFloatRange("ExposureTime") ?? GetFloatRange("ExposureTimeAbs") ?? GetIntegerRange("ExposureTime")
                 : null;
     }
@@ -186,7 +186,17 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     public (double Min, double Max)? GetGainRange()
     {
         lock (_grabLock)
-            return _connected ? GetFloatRange("Gain") ?? GetIntegerRange("GainRaw") : null;
+            return EnsureConnected() ? GetFloatRange("Gain") ?? GetIntegerRange("GainRaw") : null;
+    }
+
+    /// <summary>读/写光度参数前按需连接（注册阶段不连相机，与 Grab 一致）。</summary>
+    private bool EnsureConnected()
+    {
+        if (_disposed)
+            return false;
+        if (_connected && _session is not null && _stream is not null)
+            return true;
+        return ConnectCore();
     }
 
     private bool ConnectCore()

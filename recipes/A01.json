@@ -3,7 +3,6 @@
   // 默认相机 cam_basler（Basler 实拍）；无相机环境联调可切回 cam_file 回放
   "cameraId": "cam_basler",
   "stationId": "",
-  "debugPassthrough": false,
   "angleMode": "KeyPointLine",
   "models": [ "a01_kpt.onnx" ],
   "confidence": 0.5,

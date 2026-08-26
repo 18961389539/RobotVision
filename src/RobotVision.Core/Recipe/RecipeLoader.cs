@@ -224,7 +224,8 @@ public sealed class RecipeLoader(string folder)
             if (roi.X is < 0 or > 1 || roi.Y is < 0 or > 1 ||
                 roi.Width is <= 0 or > 1 || roi.Height is <= 0 or > 1)
                 throw new InvalidRecipeException(name, "roi 的 X/Y 必须在 [0,1]，Width/Height 必须在 (0,1]");
-            if (roi.X + roi.Width > 1 || roi.Y + roi.Height > 1)
+            // 1e-9 容差：像素↔比例往返换算可能产生 1.0000000000000002 这类浮点毛刺
+            if (roi.X + roi.Width > 1 + 1e-9 || roi.Y + roi.Height > 1 + 1e-9)
                 throw new InvalidRecipeException(name, "roi 超出图像范围（X+Width/Y+Height 不能超过 1）");
         }
 
@@ -363,14 +364,18 @@ public sealed class RecipeLoader(string folder)
     /// 原子落盘（临时文件 + File.Replace）：写一半崩溃不留截断 JSON，
     /// 且 TCP 线程并发 Get 不会读到半写文件（替换对读者近似原子）。
     /// </summary>
-    public void Save(RecipeConfig recipe)
+    /// <param name="previousName">
+    /// 改名前的磁盘文件名。与 <paramref name="recipe"/> 的 Name 不同时，写入成功后删除旧文件
+    ///（移动语义，避免列表出现「旧名 + 新名」两条）。新建/复制传 null 或空，不删任何已有配方。
+    /// </param>
+    public void Save(RecipeConfig recipe, string? previousName = null)
     {
         if (!IsValidRecipeName(recipe.Name))
             throw new InvalidRecipeException(recipe.Name, "名称只允许字母、数字、下划线、中划线");
 
         Validate(recipe);
         ValidateReferences(recipe);
-        EnsureUniqueSerialNumber(recipe);
+        EnsureUniqueSerialNumber(recipe, previousName);
 
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, recipe.Name + ".json");
@@ -378,16 +383,31 @@ public sealed class RecipeLoader(string folder)
 
         var info = new FileInfo(path);
         _cache[recipe.Name] = new CachedRecipe(recipe.Clone(), info.LastWriteTimeUtc, info.Length);
+
+        // 先写新文件再删旧文件：写失败时旧配方仍在。复制/新建不要传 previousName。
+        if (string.IsNullOrEmpty(previousName) ||
+            string.Equals(previousName, recipe.Name, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!IsValidRecipeName(previousName))
+            throw new InvalidRecipeException(recipe.Name, $"已写入 {recipe.Name}，但旧名 {previousName} 非法，未删除");
+
+        if (FileExists(previousName) && !Delete(previousName))
+            throw new InvalidRecipeException(recipe.Name,
+                $"已写入 {recipe.Name}，但删除旧配方 {previousName} 失败");
     }
 
-    private void EnsureUniqueSerialNumber(RecipeConfig recipe)
+    private void EnsureUniqueSerialNumber(RecipeConfig recipe, string? previousName)
     {
         if (recipe.SerialNumber <= 0)
             return;
 
         foreach (var other in ListNames())
         {
-            if (string.Equals(other, recipe.Name, StringComparison.OrdinalIgnoreCase))
+            // 自身文件名、以及即将被替换删除的旧名，都不占序列号
+            if (string.Equals(other, recipe.Name, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrEmpty(previousName) &&
+                 string.Equals(other, previousName, StringComparison.OrdinalIgnoreCase)))
                 continue;
             RecipeConfig loaded;
             try

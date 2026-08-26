@@ -395,6 +395,56 @@ public sealed class RecipeLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Save_Rename_RemovesPreviousFile()
+    {
+        File.WriteAllText(Path.Combine(_folder, "A01.json"), """
+            { "cameraId": "cam", "models": ["m.onnx"], "angleMode": "KeyPointLine", "keypointIndexA": 0, "keypointIndexB": 1 }
+            """);
+        var loader = new RecipeLoader(_folder);
+        var recipe = loader.Get("A01");
+        recipe.Name = "A01b";
+
+        loader.Save(recipe, previousName: "A01");
+
+        Assert.False(File.Exists(Path.Combine(_folder, "A01.json")));
+        Assert.True(File.Exists(Path.Combine(_folder, "A01b.json")));
+        Assert.Equal(new[] { "A01b" }, loader.ListNames());
+        Assert.Equal("cam", loader.Get("A01b", forceReload: true).CameraId);
+    }
+
+    [Fact]
+    public void Save_Rename_KeepsSameSerialNumber()
+    {
+        File.WriteAllText(Path.Combine(_folder, "A01.json"), """
+            { "serialNumber": 1, "cameraId": "cam", "models": ["m.onnx"], "angleMode": "KeyPointLine", "keypointIndexA": 0, "keypointIndexB": 1 }
+            """);
+        var loader = new RecipeLoader(_folder);
+        var recipe = loader.Get("A01");
+        recipe.Name = "A01b";
+
+        loader.Save(recipe, previousName: "A01");
+
+        Assert.False(File.Exists(Path.Combine(_folder, "A01.json")));
+        Assert.Equal(1, loader.Get("A01b", forceReload: true).SerialNumber);
+    }
+
+    [Fact]
+    public void Save_Copy_WithoutPreviousName_LeavesSource()
+    {
+        File.WriteAllText(Path.Combine(_folder, "A01.json"), """
+            { "cameraId": "cam", "models": ["m.onnx"], "angleMode": "KeyPointLine", "keypointIndexA": 0, "keypointIndexB": 1 }
+            """);
+        var loader = new RecipeLoader(_folder);
+        var copy = loader.Get("A01");
+        copy.Name = "A01_copy";
+
+        loader.Save(copy);
+
+        Assert.True(File.Exists(Path.Combine(_folder, "A01.json")));
+        Assert.True(File.Exists(Path.Combine(_folder, "A01_copy.json")));
+    }
+
+    [Fact]
     public void Delete_RemovesFileAndListEntry()
     {
         File.WriteAllText(Path.Combine(_folder, "A02.json"), """

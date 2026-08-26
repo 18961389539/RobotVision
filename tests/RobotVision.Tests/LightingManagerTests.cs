@@ -324,7 +324,6 @@ public class LightingManagerTests
         var (service, light) = CreatePipeline("""
             {
               "cameraId": "cam1",
-              "debugPassthrough": true,
               "angleMode": "MaskMinAreaRect",
               "models": [ "no_such_model.onnx" ]
             }
@@ -343,7 +342,6 @@ public class LightingManagerTests
         var (service, light) = CreatePipeline("""
             {
               "cameraId": "cam1",
-              "debugPassthrough": true,
               "angleMode": "MaskMinAreaRect",
               "models": [ "no_such_model.onnx" ],
               "lightControllerId": "light1",
@@ -369,7 +367,6 @@ public class LightingManagerTests
         var (service, _) = CreatePipeline("""
             {
               "cameraId": "cam1",
-              "debugPassthrough": true,
               "angleMode": "MaskMinAreaRect",
               "models": [ "no_such_model.onnx" ],
               "lightControllerId": "missing_light",

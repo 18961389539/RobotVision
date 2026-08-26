@@ -124,6 +124,18 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
 
     public IReadOnlyList<string> CameraIds => _cameras.CameraIds.ToList();
 
+    public IReadOnlyList<CameraOption> CameraOptions =>
+        CameraOption.FromRegistered(_cfg.Cameras, _cameras.CameraIds);
+
+    /// <summary>已有标定档案的工位 Id（下拉可选，亦可手输新建）。</summary>
+    public IReadOnlyList<string> StationIds => _calibration.ExtrinsicProfiles
+        .Select(p => p.StationId)
+        .Concat(_calibration.PolynomialProfiles.Select(p => p.StationId))
+        .Where(s => !string.IsNullOrWhiteSpace(s))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
     public ObservableCollection<CalibPointItem> Points { get; } = [];
 
     [ObservableProperty]
@@ -263,7 +275,12 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
     }
 
     /// <summary>页面再次进入时刷新相机下拉。</summary>
-    public void RefreshCameras() => OnPropertyChanged(nameof(CameraIds));
+    public void RefreshCameras()
+    {
+        OnPropertyChanged(nameof(CameraIds));
+        OnPropertyChanged(nameof(CameraOptions));
+        OnPropertyChanged(nameof(StationIds));
+    }
 
     /// <summary>参数浮动面板可见性（参照相机管理页：图像主导、参数可折叠）。</summary>
     [ObservableProperty]

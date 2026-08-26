@@ -73,9 +73,9 @@ public partial class FailuresViewModel : ObservableObject
         _loadCts?.Dispose();
         var cts = _loadCts = new CancellationTokenSource();
         var token = cts.Token;
+        var keepPath = Selected?.PngPath;
 
         PreviewImage = null;
-        Selected = null;
 
         if (!Directory.Exists(_store.Folder))
         {
@@ -83,6 +83,7 @@ public partial class FailuresViewModel : ObservableObject
             Items.Clear();
             RecipeFilters.Clear();
             ErrorCodeFilters.Clear();
+            Selected = null;
             Message = "暂无失败留存（目录未创建）";
             FilterSummary = "";
             return;
@@ -126,7 +127,7 @@ public partial class FailuresViewModel : ObservableObject
             ErrorCodeFilters.Add(code);
         ErrorCodeFilter = ErrorCodeFilters.Contains(ErrorCodeFilter) ? ErrorCodeFilter : AllFilter;
 
-        ApplyFilter();
+        ApplyFilter(keepPath);
 
         Message = _allItems.Count > 0
             ? $"共 {_allItems.Count} 条失败现场（时间倒序）"
@@ -140,8 +141,11 @@ public partial class FailuresViewModel : ObservableObject
 
     partial void OnErrorCodeFilterChanged(string value) => ApplyFilter();
 
-    private void ApplyFilter()
+    private void ApplyFilter() => ApplyFilter(Selected?.PngPath);
+
+    private void ApplyFilter(string? preferPath)
     {
+        var keepPath = preferPath;
         var byRecipe = _allItems
             .Where(i => RecipeFilter == AllFilter || i.Recipe == RecipeFilter);
         var byCode = ErrorCodeFilter == AllFilter
@@ -152,7 +156,9 @@ public partial class FailuresViewModel : ObservableObject
         Items.Clear();
         foreach (var item in filtered)
             Items.Add(item);
-        Selected = Items.FirstOrDefault();
+        Selected = string.IsNullOrWhiteSpace(keepPath)
+            ? Items.FirstOrDefault()
+            : Items.FirstOrDefault(i => string.Equals(i.PngPath, keepPath, StringComparison.OrdinalIgnoreCase));
 
         var hasFilter = RecipeFilter != AllFilter || ErrorCodeFilter != AllFilter;
         FilterSummary = hasFilter

@@ -37,17 +37,7 @@ public class CalibrationManagerTests
         var ex = Assert.Throws<VisionException>(
             () => manager.PixelToRobot(null, new PixelPose(12.5, -3.25, 45, 1.0)));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains("debugPassthrough", ex.Message);
-    }
-
-    [Fact]
-    public void PixelToRobot_EmptyStation_WithExplicitPassthrough_PassesThroughPixelPose()
-    {
-        var manager = new CalibrationManager();
-        var pose = manager.PixelToRobot(null, new PixelPose(12.5, -3.25, 45, 1.0), allowPassthrough: true);
-        Assert.Equal(12.5, pose.X, 1e-9);
-        Assert.Equal(-3.25, pose.Y, 1e-9);
-        Assert.Equal(45, pose.AngleDeg, 1e-9);
+        Assert.Contains("stationId", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

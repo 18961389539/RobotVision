@@ -25,6 +25,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
     private static readonly TimeSpan PreviewInterval = TimeSpan.FromMilliseconds(500);
 
     private readonly VisionService _vision;
+    private readonly AppConfig _cfg;
     private readonly CameraManager _cameras;
     private readonly CalibrationManager _calibration;
     private readonly RecipeLoader _recipes;
@@ -125,7 +126,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
 
     public ObservableCollection<string> Recipes { get; } = [];
 
-    public ObservableCollection<string> Cameras { get; } = [];
+    public ObservableCollection<CameraOption> CameraOptions { get; } = [];
 
     public ObservableCollection<PoseRow> Poses { get; } = [];
 
@@ -133,6 +134,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
 
     public MainViewModel(
         VisionService vision,
+        AppConfig cfg,
         CameraManager cameras,
         CalibrationManager calibration,
         RecipeLoader recipes,
@@ -140,14 +142,15 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         LogSink sink)
     {
         _vision = vision;
+        _cfg = cfg;
         _cameras = cameras;
         _calibration = calibration;
         _recipes = recipes;
         _tcp = tcp;
         _sink = sink;
 
-        foreach (var camera in cameras.CameraIds)
-            Cameras.Add(camera);
+        foreach (var option in BuildCameraOptions())
+            CameraOptions.Add(option);
         SelectedCamera = ResolveDefaultMonitorCamera(null);
 
         RefreshRecipes();
@@ -174,43 +177,55 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
     public void RefreshCameras()
     {
         var current = SelectedCamera;
-        Cameras.Clear();
-        foreach (var camera in _cameras.CameraIds)
-            Cameras.Add(camera);
-        SelectedCamera = current is not null && Cameras.Contains(current)
+        CameraOptions.Clear();
+        foreach (var option in BuildCameraOptions())
+            CameraOptions.Add(option);
+        SelectedCamera = current is not null && CameraOptions.Any(o =>
+                string.Equals(o.Id, current, StringComparison.OrdinalIgnoreCase))
             ? current
-            : ResolveDefaultMonitorCamera(null);
+            : current is null
+                ? ResolveDefaultMonitorCamera(null)
+                : null;
     }
+
+    private IReadOnlyList<CameraOption> BuildCameraOptions() =>
+        CameraOption.FromRegistered(_cfg.Cameras, _cameras.CameraIds);
 
     /// <summary>监控页默认相机：优先 Virtual，其次 File，最后列表首项（无硬件时不默认 Basler）。</summary>
     private string? ResolveDefaultMonitorCamera(string? preferred)
     {
-        if (!string.IsNullOrEmpty(preferred) && Cameras.Contains(preferred))
+        if (!string.IsNullOrEmpty(preferred) && CameraOptions.Any(o =>
+                string.Equals(o.Id, preferred, StringComparison.OrdinalIgnoreCase)))
             return preferred;
 
-        foreach (var id in Cameras)
+        foreach (var option in CameraOptions)
         {
-            if (_cameras.TryGet(id, out var camera) && camera.Kind == CameraKind.Virtual)
-                return id;
+            if (_cameras.TryGet(option.Id, out var camera) && camera.Kind == CameraKind.Virtual)
+                return option.Id;
         }
 
-        foreach (var id in Cameras)
+        foreach (var option in CameraOptions)
         {
-            if (_cameras.TryGet(id, out var camera) && camera.Kind == CameraKind.File)
-                return id;
+            if (_cameras.TryGet(option.Id, out var camera) && camera.Kind == CameraKind.File)
+                return option.Id;
         }
 
-        return Cameras.FirstOrDefault();
+        return CameraOptions.FirstOrDefault()?.Id;
     }
 
     [RelayCommand]
     private void RefreshRecipes()
     {
+        var current = SelectedRecipe;
         Recipes.Clear();
         foreach (var name in _recipes.ListNames())
             Recipes.Add(name);
-        if (SelectedRecipe is null || !Recipes.Contains(SelectedRecipe))
+        if (!string.IsNullOrEmpty(current) && Recipes.Contains(current))
+            SelectedRecipe = current;
+        else if (string.IsNullOrEmpty(current))
             SelectedRecipe = Recipes.FirstOrDefault();
+        else
+            SelectedRecipe = null;
     }
 
     [RelayCommand]

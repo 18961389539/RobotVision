@@ -2,7 +2,6 @@
   // 示例配方二：双检测模型连线模式（A→B 方向唯一）
   "cameraId": "cam_file",
   "stationId": "",
-  "debugPassthrough": false,
   "angleMode": "DualCenterLine",
   "models": [ "a02_feat_a.onnx", "a02_feat_b.onnx" ],
   "confidence": 0.5,

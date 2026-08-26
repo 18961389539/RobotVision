@@ -3,7 +3,12 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:ivc="clr-namespace:ImageViewer.Controls;assembly=ImageViewerControl"
+      xmlns:host="clr-namespace:RobotVision.WpfHost"
       Title="配方管理"
+      VerticalAlignment="Stretch"
+      host:ViewportPageLayout.FillViewport="True"
+      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
       Background="{DynamicResource ApplicationBackgroundBrush}">
     <Page.InputBindings>
         <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
@@ -11,6 +16,7 @@
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <vm:StringToVisibilityConverter x:Key="NonEmptyToVisibilityConverter" xmlns:vm="clr-namespace:RobotVision.WpfHost" />
+        <vm:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter" xmlns:vm="clr-namespace:RobotVision.WpfHost" />
         <vm:NullToCollapsedConverter x:Key="NullToCollapsedConverter" xmlns:vm="clr-namespace:RobotVision.WpfHost" />
 
         <!-- 原生 TextBlock 默认前景为黑色（WPF-UI 主题只作用于 ui:TextBlock），
@@ -28,37 +34,31 @@
         </Style>
     </Page.Resources>
 
-    <Grid Margin="8">
+    <Grid Margin="8" VerticalAlignment="Stretch">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
         <!-- 主导图像区：完整 ImageViewer；结果图与 ROI 预览切换 -->
         <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
             <Grid>
                 <!-- 结果图视图 -->
-                <ivc:ImageViewer ImageSource="{Binding TestImage}">
-                    <ivc:ImageViewer.Style>
-                        <Style TargetType="ivc:ImageViewer">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding ShowTestImage}" Value="True">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </ivc:ImageViewer.Style>
-                </ivc:ImageViewer>
+                <ivc:ImageViewer x:Name="TestViewer" ImageSource="{Binding TestImage}"
+                                 ShowEmptyStatePanel="False"
+                                 Visibility="{Binding ShowTestImageViewer, Converter={StaticResource BoolToVisibilityConverter}}" />
                 <!-- ROI 预览视图 -->
-                <ivc:ImageViewer ImageSource="{Binding RoiPreviewImage}">
-                    <ivc:ImageViewer.Style>
-                        <Style TargetType="ivc:ImageViewer">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding ShowTestImage}" Value="False">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </ivc:ImageViewer.Style>
-                </ivc:ImageViewer>
+                <ivc:ImageViewer x:Name="RoiViewer" ImageSource="{Binding RoiPreviewImage}"
+                                 ShowEmptyStatePanel="False"
+                                 Visibility="{Binding ShowRoiImageViewer, Converter={StaticResource BoolToVisibilityConverter}}" />
+                <!-- 无图占位：首次取图/测试前；触发中由旧结果图或深色底 + Message 顶住空白 -->
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420"
+                            Visibility="{Binding HasAnyImage, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                    <TextBlock Text="尚未有图像" FontSize="15" HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Margin="0,8,0,0" FontSize="12" TextWrapping="Wrap" TextAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                               Text="测试触发或「预览区域」取图后在此显示。推理完成（含未检出目标 1007）会显示叠加结果；取图/标定/模型失败则无图。" />
+                </StackPanel>
 
 
                 <!-- 左上：视图切换标签（结果图/ROI 预览） -->
@@ -143,7 +143,7 @@
                 </Grid>
                 <TextBox Grid.Row="1" Margin="10,0,10,6" Padding="5,3" FontSize="11"
                          Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                         ToolTip="按名称或描述过滤（F5 刷新）" />
+                         ToolTip="按名称或备注过滤（F5 刷新）" />
                 <ListBox Grid.Row="2" Margin="4,0,4,4" ItemsSource="{Binding VisibleRecipes}"
                          SelectedItem="{Binding Selected}"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -218,7 +218,7 @@
 
         <!-- 右：参数浮动面板（可折叠，图像主导布局核心区） -->
         <Border HorizontalAlignment="Right" VerticalAlignment="Stretch"
-                Width="384" Margin="12" Panel.ZIndex="20"
+                Width="428" Margin="12" Panel.ZIndex="20" ClipToBounds="True"
                 Background="#F01E2836"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                 BorderThickness="1" CornerRadius="8"
@@ -247,7 +247,8 @@
                             Command="{Binding ToggleParamPanelCommand}" />
                 </Grid>
 
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12">
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12"
+                              host:ViewportPageLayout.IsolateWheel="True">
                     <StackPanel>
 
                         <!-- 基本信息 -->
@@ -267,8 +268,11 @@
                                 </StackPanel>
                                 <StackPanel Margin="0,0,8,8">
                                     <TextBlock Text="相机" Margin="0,0,0,4" FontSize="12" />
-                                    <ComboBox ItemsSource="{Binding CameraIds}" ToolTip="选择本配方使用的相机 Id"
-                                              SelectedItem="{Binding Editor.CameraId}" />
+                                    <ComboBox ItemsSource="{Binding CameraOptions}"
+                                              DisplayMemberPath="Label"
+                                              SelectedValuePath="Id"
+                                              ToolTip="选择本配方使用的相机"
+                                              SelectedValue="{Binding Editor.CameraId}" />
                                 </StackPanel>
                                 <StackPanel Margin="0,0,8,8">
                                     <TextBlock Text="工位 Id（标定档案）" Margin="0,0,0,4" FontSize="12" />
@@ -277,19 +281,16 @@
                                               IsEditable="True" />
                                 </StackPanel>
                             </UniformGrid>
-                            <!-- 半宽 UniformGrid 内长文本会截断，直通开关独占一行显示 -->
-                            <CheckBox Content="台架调试直通（无标定返回像素，禁止对接 PLC）"
-                                      FontSize="11" Margin="0,0,0,4"
-                                      IsChecked="{Binding Editor.DebugPassthrough}" />
                             <TextBlock Text="{Binding MappingHint}" FontSize="11" TextWrapping="Wrap"
                                        Foreground="{DynamicResource SystemFillColorCautionBrush}"
                                        Margin="0,0,0,6"
                                        Visibility="{Binding MappingHint,
                                            Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+                            <TextBlock Text="备注" Margin="0,0,0,4" FontSize="12" />
                             <ui:TextBox Text="{Binding Editor.Description, UpdateSourceTrigger=PropertyChanged}"
                                         FontSize="11" MinHeight="38" TextWrapping="Wrap"
-                                        PlaceholderText="描述（备注，不参与推理）"
-                                        ToolTip="描述（备注，不参与推理）" />
+                                        PlaceholderText="可选：产线、用途、维护说明等"
+                                        ToolTip="仅用于备忘与左侧搜索，不影响 TRIGGER 与 TCP 输出" />
                             <CheckBox Content="启用该配方（停用触发返回 1015，文件保留）" FontSize="11"
                                       Margin="0,8,0,0" IsChecked="{Binding Editor.Enabled}" />
                             </StackPanel>
@@ -313,16 +314,6 @@
                                               SelectionChanged="AngleMode_SelectionChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,0,0,8">
-                                    <StackPanel.Style>
-                                        <Style TargetType="StackPanel">
-                                            <Setter Property="Visibility" Value="Visible" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding ShowRotationCompensation}" Value="False">
-                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </StackPanel.Style>
                                     <TextBlock Text="旋转中心补偿" Margin="0,0,0,4" FontSize="12" />
                                     <ComboBox ItemsSource="{Binding RotationOptions}" ToolTip="旋转中心补偿策略"
                                               DisplayMemberPath="Label" SelectedValuePath="Value"
@@ -363,43 +354,31 @@
                                           SelectedItem="{Binding SecondaryModel, UpdateSourceTrigger=PropertyChanged}"
                                           IsEditable="True" />
                             </StackPanel>
-                            <!-- 按角度模式动态显隐：WrapPanel 保证隐藏后其余项自动补位不留空洞 -->
-                            <WrapPanel>
-                                <!-- 置信度/IoU 仅模型推理用，双BLOB模式隐藏（WrapPanel 自动补位） -->
-                                <StackPanel Margin="0,0,8,8" Width="118">
-                                    <StackPanel.Style>
-                                        <Style TargetType="StackPanel">
-                                            <Setter Property="Visibility" Value="Visible" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsDualBlobMode}" Value="True">
-                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </StackPanel.Style>
+                            <!-- 检测置信度 / IoU / 掩码置信度：三列同一行（分割模式第三列显示） -->
+                            <UniformGrid Columns="3" Margin="0,0,0,8">
+                                <UniformGrid.Style>
+                                    <Style TargetType="UniformGrid">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsDualBlobMode}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </UniformGrid.Style>
+                                <StackPanel Margin="0,0,8,0">
                                     <TextBlock Text="检测置信度" Margin="0,0,0,4" FontSize="11" />
                                     <ui:NumberBox Value="{Binding Editor.Confidence}"
                                                   Minimum="0" Maximum="1" SmallChange="0.05"
                                                   SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
-                                <StackPanel Margin="0,0,8,8" Width="118">
-                                    <StackPanel.Style>
-                                        <Style TargetType="StackPanel">
-                                            <Setter Property="Visibility" Value="Visible" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsDualBlobMode}" Value="True">
-                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </StackPanel.Style>
+                                <StackPanel Margin="0,0,8,0">
                                     <TextBlock Text="IoU" Margin="0,0,0,4" FontSize="11" />
                                     <ui:NumberBox Value="{Binding Editor.Iou}"
                                                   Minimum="0" Maximum="1" SmallChange="0.05"
                                                   SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
-                                <!-- 掩码像素置信度：分割 / 分割+模板匹配模式 -->
-                                <StackPanel Margin="0,0,8,8" Width="118">
+                                <StackPanel>
                                     <StackPanel.Style>
                                         <Style TargetType="StackPanel">
                                             <Setter Property="Visibility" Value="Collapsed" />
@@ -413,11 +392,14 @@
                                             </Style.Triggers>
                                         </Style>
                                     </StackPanel.Style>
-                                    <TextBlock Text="掩码像素置信度" Margin="0,0,0,4" FontSize="11" />
+                                    <TextBlock Text="掩码置信度" Margin="0,0,0,4" FontSize="11" />
                                     <ui:NumberBox Value="{Binding Editor.Segmentation.PixelConfidence}"
                                                   Minimum="0" Maximum="1" SmallChange="0.05"
                                                   SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
+                            </UniformGrid>
+                            <!-- 按角度模式动态显隐：WrapPanel 保证隐藏后其余项自动补位不留空洞 -->
+                            <WrapPanel>
                                 <!-- 关键点置信度/A/B 索引：仅关键点模式 -->
                                 <StackPanel Margin="0,0,8,8" Width="118">
                                     <StackPanel.Style>
@@ -731,40 +713,86 @@
                             <StackPanel
                                 Visibility="{Binding UseRoi,
                                     Converter={StaticResource BoolToVisibilityConverter}}">
-                            <UniformGrid Columns="4">
+                            <!-- 像素输入（主输入）：预览取一帧后启用，操作工按画面像素思考 -->
+                            <UniformGrid Columns="4" Visibility="{Binding HasRoiRefFrame,
+                                    Converter={StaticResource BoolToVisibilityConverter}}">
                                 <StackPanel Margin="0,0,8,8">
-                                    <TextBlock Text="X" Margin="0,0,0,4" FontSize="11" ToolTip="左上角 X（0~1 相对比例）" />
-                                    <ui:NumberBox Value="{Binding RoiX}" Minimum="0" Maximum="1"
-                                                  SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                                    <TextBlock Text="X (px)" Margin="0,0,0,4" FontSize="11" ToolTip="左上角 X（参考帧像素，自动换算成比例存储）" />
+                                    <ui:NumberBox Value="{Binding RoiPxX}" Minimum="0" Maximum="{Binding RoiRefWidth}"
+                                                  SmallChange="1" LargeChange="10" SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
                                 <StackPanel Margin="0,0,8,8">
-                                    <TextBlock Text="Y" Margin="0,0,0,4" FontSize="11" ToolTip="左上角 Y（0~1 相对比例）" />
-                                    <ui:NumberBox Value="{Binding RoiY}" Minimum="0" Maximum="1"
-                                                  SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                                    <TextBlock Text="Y (px)" Margin="0,0,0,4" FontSize="11" ToolTip="左上角 Y（参考帧像素）" />
+                                    <ui:NumberBox Value="{Binding RoiPxY}" Minimum="0" Maximum="{Binding RoiRefHeight}"
+                                                  SmallChange="1" LargeChange="10" SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
                                 <StackPanel Margin="0,0,8,8">
-                                    <TextBlock Text="宽" Margin="0,0,0,4" FontSize="11" ToolTip="宽度（0~1 相对比例）" />
-                                    <ui:NumberBox Value="{Binding RoiWidth}" Minimum="0.01" Maximum="1"
-                                                  SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                                    <TextBlock Text="宽 (px)" Margin="0,0,0,4" FontSize="11" ToolTip="宽度（参考帧像素；与 X 联动钳制，右缘不越界）" />
+                                    <ui:NumberBox Value="{Binding RoiPxWidth}" Minimum="1" Maximum="{Binding RoiRefWidth}"
+                                                  SmallChange="1" LargeChange="10" SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
                                 <StackPanel Margin="0,0,0,8">
-                                    <TextBlock Text="高" Margin="0,0,0,4" FontSize="11" ToolTip="高度（0~1 相对比例）" />
-                                    <ui:NumberBox Value="{Binding RoiHeight}" Minimum="0.01" Maximum="1"
-                                                  SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                                    <TextBlock Text="高 (px)" Margin="0,0,0,4" FontSize="11" ToolTip="高度（参考帧像素；与 Y 联动钳制，下缘不越界）" />
+                                    <ui:NumberBox Value="{Binding RoiPxHeight}" Minimum="1" Maximum="{Binding RoiRefHeight}"
+                                                  SmallChange="1" LargeChange="10" SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
                             </UniformGrid>
+                            <!-- 像素模式状态行：参考帧来源 + 存储比例回显 + 边缘校验 -->
+                            <TextBlock Text="{Binding RoiRefFrameHint}" FontSize="10" Margin="0,0,0,2"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Visibility="{Binding HasRoiRefFrame,
+                                           Converter={StaticResource BoolToVisibilityConverter}}" />
+                            <TextBlock Text="{Binding RoiRatioHint}" FontSize="10" Margin="0,0,0,8"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Visibility="{Binding HasRoiRefFrame,
+                                           Converter={StaticResource BoolToVisibilityConverter}}" />
+                            <!-- 比例输入（回退）：无参考帧时显示；取一帧后自动切到像素模式 -->
+                            <StackPanel Visibility="{Binding HasRoiRefFrame,
+                                    Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                                <UniformGrid Columns="4">
+                                    <StackPanel Margin="0,0,8,8">
+                                        <TextBlock Text="X" Margin="0,0,0,4" FontSize="11" ToolTip="左上角 X（0~1 相对比例）" />
+                                        <ui:NumberBox Value="{Binding RoiX}" Minimum="0" Maximum="1"
+                                                      SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8">
+                                        <TextBlock Text="Y" Margin="0,0,0,4" FontSize="11" ToolTip="左上角 Y（0~1 相对比例）" />
+                                        <ui:NumberBox Value="{Binding RoiY}" Minimum="0" Maximum="1"
+                                                      SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8">
+                                        <TextBlock Text="宽" Margin="0,0,0,4" FontSize="11" ToolTip="宽度（0~1 相对比例）" />
+                                        <ui:NumberBox Value="{Binding RoiWidth}" Minimum="0.01" Maximum="1"
+                                                      SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Text="高" Margin="0,0,0,4" FontSize="11" ToolTip="高度（0~1 相对比例）" />
+                                        <ui:NumberBox Value="{Binding RoiHeight}" Minimum="0.01" Maximum="1"
+                                                      SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                </UniformGrid>
+                                <TextBlock Text="取一帧后可按像素输入，或直接『框选区域』图上拖拽"
+                                           FontSize="10" Margin="0,0,0,8" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            </StackPanel>
                             <Grid>
                                 <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <ui:Button Content="预览区域" FontSize="11" Padding="10,4"
                                            Command="{Binding PreviewRoiCommand}"
-                                           ToolTip="当前相机取一帧，ROI 矩形叠加显示在主图像区" />
-                                <TextBlock Grid.Column="1" FontSize="10" Margin="8,0,0,0"
+                                           ToolTip="当前相机取一帧作为像素参考帧，显示在主图像区" />
+                                <ui:Button Grid.Column="1" Content="框选区域" FontSize="11" Padding="10,4" Margin="6,0,0,0"
+                                           Click="OnDrawRoiRegionClick"
+                                           ToolTip="在图像上拖拽画出检测区域（无参考帧时先自动取一帧）；画完可拖动/缩放矩形微调" />
+                                <TextBlock Grid.Column="2" FontSize="10" Margin="8,0,0,0"
                                            VerticalAlignment="Center" TextWrapping="Wrap"
                                            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                           Text="预览显示在主图像区（ROI 预览标签）；结果坐标自动偏移回全图" />
+                                           Text="图上拖拽或改数值均可，双向联动；结果坐标自动偏移回全图" />
                             </Grid>
                             </StackPanel>
                             </StackPanel>

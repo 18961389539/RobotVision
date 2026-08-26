@@ -48,7 +48,7 @@ public class SegmentationContourCoordinateTests
     /// 像素位姿整体偏移 (box.X, box.Y)，机器人坐标随之错误。
     /// </summary>
     [Fact]
-    public void WrongGlobalContourAsLocal_ShiftsPixelPose_AndRobotPassthrough()
+    public void WrongGlobalContourAsLocal_ShiftsPixelPose()
     {
         var box = new PixelBox(100, 80, 200, 150);
         // 目标在全图 (120,100)-(180,160) 附近
@@ -62,15 +62,6 @@ public class SegmentationContourCoordinateTests
 
         Assert.Equal(box.X, wrongCenter.X - correctCenter.X, 1);
         Assert.Equal(box.Y, wrongCenter.Y - correctCenter.Y, 1);
-
-        var manager = new CalibrationManager();
-        var correctRobot = manager.PixelToRobot(null, new PixelPose(correctCenter.X, correctCenter.Y, 0, 1),
-            allowPassthrough: true);
-        var wrongRobot = manager.PixelToRobot(null, new PixelPose(wrongCenter.X, wrongCenter.Y, 0, 1),
-            allowPassthrough: true);
-
-        Assert.Equal(box.X, wrongRobot.X - correctRobot.X, 1);
-        Assert.Equal(box.Y, wrongRobot.Y - correctRobot.Y, 1);
     }
 
     private static ImagePoint PoseCenterFromContour(PixelBox box, IReadOnlyList<ImagePoint> contourLocal)

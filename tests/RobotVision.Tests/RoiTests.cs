@@ -24,6 +24,21 @@ public class RoiTests
         RecipeLoader.Validate(recipe); // 不抛
     }
 
+    [Fact]
+    public void Validate_BoundaryFloatNoise_WithinTolerance_Passes()
+    {
+        // X+W = 1.0000000000000002（像素↔比例往返的 ULP 级毛刺）：容差内放行，不误杀贴边 ROI
+        var w = Math.BitIncrement(1.0) - 0.5;
+        var recipe = new RecipeConfig
+        {
+            Name = "r",
+            CameraId = "cam",
+            Models = ["m.onnx"],
+            Roi = new Roi(0.5, 0.5, w, 0.5),
+        };
+        RecipeLoader.Validate(recipe); // 不抛
+    }
+
     [Theory]
     [InlineData(-0.1, 0, 0.5, 0.5)]
     [InlineData(0, 0, 1.1, 0.5)]

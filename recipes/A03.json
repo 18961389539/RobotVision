@@ -3,7 +3,6 @@
   // 生产机 Basler 相机可用时用 A01；开发机无 pylon/相机时用本配方验证全链路。
   "cameraId": "cam_file",
   "stationId": "",
-  "debugPassthrough": false,
   "angleMode": "KeyPointLine",
   "models": [ "a01_kpt.onnx" ],
   "confidence": 0.5,

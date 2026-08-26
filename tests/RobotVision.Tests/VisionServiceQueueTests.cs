@@ -34,7 +34,6 @@ public class VisionServiceQueueTests : IDisposable
         WriteRecipe("SLOW", """
             {
               "cameraId": "cam1",
-              "debugPassthrough": true,
               "angleMode": "MaskMinAreaRect",
               "models": [ "no_such_model.onnx" ]
             }
@@ -42,7 +41,6 @@ public class VisionServiceQueueTests : IDisposable
         WriteRecipe("REAL", $$"""
             {
               "cameraId": "cam1",
-              "debugPassthrough": true,
               "angleMode": "KeyPointLine",
               "models": [ "{{RealModel.Replace("\\", "\\\\")}}" ],
               "keypointIndexA": 0,

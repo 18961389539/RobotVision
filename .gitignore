@@ -19,3 +19,7 @@ models/*.onnx
 
 # CodeGraph 本地索引数据库（工具数据，不入库）
 .codegraph/
+
+# 本地构建输出（--artifacts-path 重定向目录）与测试诊断日志，不入库
+.build-*/
+crash_diag*.txt

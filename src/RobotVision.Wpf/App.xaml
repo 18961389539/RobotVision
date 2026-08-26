@@ -10,11 +10,13 @@
                 <ui:ControlsDictionary />
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+            <local:InverseBoolConverter x:Key="InverseBoolConverter"
+                                        xmlns:local="clr-namespace:RobotVision.WpfHost" />
 
-            <!-- WPF-UI NavigationViewContentPresenter 默认 IsDynamicScrollViewerEnabled=true，
-                 会用 DynamicScrollViewer 包裹 Page，导致 Page 高度=内容不撑满可视区。
-                 这里把全局 Page.ScrollViewer.CanContentScroll 设为 False，
-                 导航后自动切到无 ScrollViewer 的 ContentPresenter 模板，Page 真正撑满内容区。 -->
+            <!-- WPF-UI NavigationView 会在 Page 外包一层 DynamicScrollViewer。
+                 全屏图像页（相机/配方/监控等）须同时禁用外层滚动，否则参数栏内容过高时整页（含 ImageViewer）会一起滚。
+                 CanContentScroll=False 关闭动态滚动；VerticalScrollBarVisibility=Disabled 禁止外层滚动条与滚轮链式传递。
+                 设置/关于等表单页不要设 Disabled，保留整页滚动。 -->
             <Style TargetType="Page">
                 <Setter Property="ScrollViewer.CanContentScroll" Value="False" />
             </Style>

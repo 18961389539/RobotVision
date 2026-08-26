@@ -170,6 +170,33 @@ public sealed record RotationCenterProfile
     public DateTime CalibratedAt { get; init; } = DateTime.Now;
 }
 
+/// <summary>比例标定档案（按工位存储）：像素 → 图像平面毫米的线性比例（mm/px）。
+/// 手动录入（现场用量具/产品特征/机器人示教测算后填入），不建模畸变/透视/安装角——
+/// 视场边缘精度受镜头畸变限制，X/Y 比例差异大（各向异性）或精度要求高时应改用多项式标定。
+/// 分辨率锁：换相机/改分辨率后比例失效，须重新录入。</summary>
+public sealed record ScaleProfile
+{
+    public string StationId { get; init; } = "";
+
+    public string CameraId { get; init; } = "";
+
+    /// <summary>X 方向比例（mm/px）= 物长 mm / 图上像素数。</summary>
+    public double ScaleX { get; init; }
+
+    /// <summary>Y 方向比例（mm/px）。</summary>
+    public double ScaleY { get; init; }
+
+    /// <summary>录入时图像分辨率（比例的像素基准；0 = 未记录，跳过一致性校验）。</summary>
+    public int Width { get; init; }
+
+    public int Height { get; init; }
+
+    /// <summary>录入方式备注（Manual / 量具 / 产品特征 / 机器人两点…），追溯精度可信度用。</summary>
+    public string Method { get; init; } = "Manual";
+
+    public DateTime CalibratedAt { get; init; } = DateTime.Now;
+}
+
 /// <summary>
 /// 多项式标定档案（按工位存储，VisionPro 式单图模式）：像素 → 机器人平面坐标的经验多项式映射，
 /// 一个模型整体吸收镜头畸变 / 透视 / 安装角 / 像素当量——替代"内参去畸变 + 外参仿射"两步。

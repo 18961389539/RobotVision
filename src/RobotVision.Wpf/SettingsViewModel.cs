@@ -15,7 +15,6 @@ namespace RobotVision.WpfHost;
 public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
 {
     // 出厂默认值（与 appsettings.json 初始一致）
-    private const int DefaultTimeoutMs = 5000;
     private const long DefaultIdleTimeoutMs = 0;
     private const int DefaultMaxQueueDepth = 4;
     private const int DefaultMaxConcurrent = 2;
@@ -37,9 +36,6 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     private ServiceSettingsValues? _baseline;
 
     public Action? FlushPendingEdits { get; set; }
-
-    [ObservableProperty]
-    private int _timeoutMs;
 
     /// <summary>0 = 永久保持连接；2592000000 = 30 天。</summary>
     [ObservableProperty]
@@ -124,7 +120,6 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     /// <summary>从运行中的管理器读取当前值（再次进入页面时同步外部改动）。</summary>
     public void LoadFromRuntime()
     {
-        TimeoutMs = _tcp.TimeoutMs;
         IdleTimeoutMs = _tcp.IdleTimeoutMs;
         PoseCheckEnabled = _cfg.PoseCheck.Enabled;
         PoseXyToleranceMm = _cfg.PoseCheck.XyToleranceMm;
@@ -203,7 +198,6 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     [RelayCommand]
     private void RestoreDefaults()
     {
-        TimeoutMs = DefaultTimeoutMs;
         IdleTimeoutMs = DefaultIdleTimeoutMs;
         PoseCheckEnabled = true;
         PoseXyToleranceMm = 0.5;
@@ -243,7 +237,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
             .Where(l => l.Length > 0)
             .ToList();
         return new ServiceSettingsValues(
-            TimeoutMs, MaxQueueDepth, MaxConcurrent, TcpBacklog, MaxConnections,
+            _cfg.TimeoutMs, MaxQueueDepth, MaxConcurrent, TcpBacklog, MaxConnections,
             FailureEnabled, FailureRetainedCount,
             IpAddress.Trim(), TcpPort, whitelist,
             (long)Math.Round(IdleTimeoutMs),
@@ -251,7 +245,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     }
 
     private static bool Same(ServiceSettingsValues a, ServiceSettingsValues b) =>
-        a.TimeoutMs == b.TimeoutMs && a.MaxQueueDepth == b.MaxQueueDepth &&
+        a.MaxQueueDepth == b.MaxQueueDepth &&
         a.MaxConcurrent == b.MaxConcurrent && a.TcpBacklog == b.TcpBacklog &&
         a.MaxConnections == b.MaxConnections && a.FailureEnabled == b.FailureEnabled &&
         a.FailureRetainedCount == b.FailureRetainedCount &&

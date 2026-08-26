@@ -21,6 +21,17 @@ public sealed class FailedCameraTests
     }
 
     [Fact]
+    public void CameraManager_GetGrabErrorHint_FailedCamera_ReturnsFaultMessage()
+    {
+        using var manager = new CameraManager();
+        manager.Register(new FailedCamera("cam_file", CameraKind.File, "回放目录中没有图片: data/replay"));
+
+        Assert.Contains("回放目录中没有图片", manager.GetGrabErrorHint("cam_file"));
+        Assert.Contains("未注册", manager.GetGrabErrorHint("missing"));
+        Assert.Contains("请先选择相机", manager.GetGrabErrorHint(null));
+    }
+
+    [Fact]
     public void CameraManager_RegisteredFailedCamera_GrabReturns1011_Not1002()
     {
         using var manager = new CameraManager();

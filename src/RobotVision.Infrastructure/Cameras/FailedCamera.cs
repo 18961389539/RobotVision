@@ -18,6 +18,9 @@ public sealed class FailedCamera(string id, CameraKind kind, string message) : I
 
     public CameraKind Kind { get; } = kind;
 
+    /// <summary>初始化失败原因（取图前可在 UI 展示）。</summary>
+    public string FaultMessage => _message;
+
     public CameraFrame Grab(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();

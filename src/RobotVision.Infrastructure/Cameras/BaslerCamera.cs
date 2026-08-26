@@ -73,7 +73,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     public string FriendlyName => _friendlyName;
 
     public BaslerCamera(string id, string? deviceId = null, double? exposureTimeUs = null,
-        double? gain = null, int grabTimeoutMs = 3000, ILogger? log = null)
+        double? gain = null, int grabTimeoutMs = 60_000, ILogger? log = null)
     {
         Id = id;
         _deviceId = deviceId ?? "";
@@ -618,11 +618,21 @@ public sealed class BaslerCamera : ICamera, IExposureControl
 
     // ---- IExposureControl（供 UI 调光；未连接时返回 null/false） ----
 
+    /// <summary>读/写光度参数前按需 Open（注册阶段不连相机，与 Grab 一致）。</summary>
+    private bool EnsureConnected()
+    {
+        if (_disposed)
+            return false;
+        if (_connected && _camera is not null)
+            return true;
+        return ConnectCore();
+    }
+
     public bool TrySetExposureTimeUs(double value)
     {
         lock (_grabLock)
         {
-            if (_disposed || !_connected || _camera is null)
+            if (!EnsureConnected())
                 return false;
             return TrySetExposureCore(value);
         }
@@ -632,7 +642,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         lock (_grabLock)
         {
-            if (_disposed || !_connected || _camera is null)
+            if (!EnsureConnected())
                 return false;
             return TrySetGainCore(value);
         }
@@ -642,7 +652,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         lock (_grabLock)
         {
-            if (_disposed || !_connected || _camera is null)
+            if (!EnsureConnected())
                 return null;
             return TryGetFloat(PLCamera.ExposureTimeAbs) ?? TryGetFloat(PLCamera.ExposureTime);
         }
@@ -652,7 +662,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         lock (_grabLock)
         {
-            if (_disposed || !_connected || _camera is null)
+            if (!EnsureConnected())
                 return null;
             return TryGetFloat(PLCamera.Gain) ?? TryGetInteger(PLCamera.GainRaw);
         }
@@ -662,7 +672,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         lock (_grabLock)
         {
-            if (_disposed || !_connected || _camera is null)
+            if (!EnsureConnected())
                 return null;
             return GetFloatRange(PLCamera.ExposureTimeAbs) ?? GetFloatRange(PLCamera.ExposureTime);
         }
@@ -672,7 +682,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         lock (_grabLock)
         {
-            if (_disposed || !_connected || _camera is null)
+            if (!EnsureConnected())
                 return null;
             return GetFloatRange(PLCamera.Gain) ?? GetIntegerRange(PLCamera.GainRaw);
         }

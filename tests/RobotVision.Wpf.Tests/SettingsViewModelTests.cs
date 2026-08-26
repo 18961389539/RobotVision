@@ -44,13 +44,11 @@ public class SettingsViewModelTests : IDisposable
     [Fact]
     public void Ctor_LoadsRuntimeValues()
     {
-        _tcp.TimeoutMs = 7000;
         _tcp.MaxConnections = 5;
         _vision.MaxQueueDepth = 8;
 
         var vm = CreateVm();
 
-        vm.TimeoutMs.Should().Be(7000);
         vm.MaxConnections.Should().Be(5);
         vm.MaxQueueDepth.Should().Be(8);
         vm.HasUnsavedChanges.Should().BeFalse();
@@ -62,7 +60,7 @@ public class SettingsViewModelTests : IDisposable
         var vm = CreateVm();
         vm.HasUnsavedChanges.Should().BeFalse();
 
-        vm.TimeoutMs = 6000;
+        vm.MaxQueueDepth = 6;
         vm.HasUnsavedChanges.Should().BeTrue();
 
         SetValidPort(vm);
@@ -83,13 +81,11 @@ public class SettingsViewModelTests : IDisposable
     public void RestoreDefaults_FillsFactoryDefaults()
     {
         var vm = CreateVm();
-        vm.TimeoutMs = 12345;
         vm.MaxQueueDepth = 99;
         vm.TcpPort = 8888;
 
         vm.RestoreDefaultsCommand.Execute(null);
 
-        vm.TimeoutMs.Should().Be(5000);
         vm.MaxQueueDepth.Should().Be(4);
         vm.TcpPort.Should().Be(9999);
         vm.IpAddress.Should().Be("0.0.0.0");
@@ -165,12 +161,12 @@ public class SettingsViewModelTests : IDisposable
     public void Reload_ReappliesRuntimeState_ResetsUnsavedChanges()
     {
         var vm = CreateVm();
-        vm.TimeoutMs = 9999;
+        vm.MaxQueueDepth = 99;
         vm.HasUnsavedChanges.Should().BeTrue();
 
         vm.ReloadCommand.Execute(null);
 
-        vm.TimeoutMs.Should().Be(_tcp.TimeoutMs);
+        vm.MaxQueueDepth.Should().Be(_vision.MaxQueueDepth);
         vm.HasUnsavedChanges.Should().BeFalse();
     }
 

@@ -2,12 +2,18 @@ namespace RobotVision.Hosting;
 
 public sealed class AppConfig
 {
+    /// <summary>硬件相机单帧采集超时（ms）；UI 不暴露，保存相机时固定写入此值。</summary>
+    public const int DefaultGrabTimeoutMs = 60_000;
+
+    /// <summary>单次 TRIGGER 总超时（ms）；须大于采集超时，为推理/坐标变换留裕量。</summary>
+    public const int DefaultRequestTimeoutMs = 90_000;
+
     public string IpAddress { get; set; } = "0.0.0.0";
 
     public int TcpPort { get; set; } = 9999;
 
     /// <summary>单次 TRIGGER 的总超时（ms）。与空闲断线无关。</summary>
-    public int TimeoutMs { get; set; } = 5000;
+    public int TimeoutMs { get; set; } = DefaultRequestTimeoutMs;
 
     /// <summary>
     /// TCP 读侧空闲超时（ms）。0 = 永久保持连接（默认，适配 PLC 节拍间隙）；
@@ -105,6 +111,9 @@ public sealed class CameraConfig
 {
     public string Id { get; set; } = "";
 
+    /// <summary>可选显示名（界面展示用）；留空时各处回退为 <see cref="Id"/>。</summary>
+    public string Name { get; set; } = "";
+
     /// <summary>File = 文件夹回放；Basler = pylon；GigEVision = 开源 GigE Vision；Virtual = 程序生成。</summary>
     public string Type { get; set; } = "Basler";
 
@@ -123,8 +132,8 @@ public sealed class CameraConfig
     /// <summary>Basler / GigEVision：增益（dB 或机型原始单位）；null = 不下发。</summary>
     public double? Gain { get; set; }
 
-    /// <summary>Basler / GigEVision：单帧采集超时（ms），需小于配方总超时 TimeoutMs。</summary>
-    public int GrabTimeoutMs { get; set; } = 3000;
+    /// <summary>Basler / GigEVision：单帧采集超时（ms），固定为 <see cref="AppConfig.DefaultGrabTimeoutMs"/>。</summary>
+    public int GrabTimeoutMs { get; set; } = AppConfig.DefaultGrabTimeoutMs;
 
     /// <summary>Virtual 相机：生成图像宽（px）。</summary>
     public int Width { get; set; } = 1280;
@@ -234,6 +243,26 @@ public static class AppConfigExtensions
     public static string ResolveModelsFolder(this AppConfig cfg) => ResolveFolder(cfg.ModelsFolder);
 
     public static string ResolveCalibrationFolder(this AppConfig cfg) => ResolveFolder(cfg.CalibrationFolder);
+
+    /// <summary>
+    /// 启动时对齐固定超时策略：采集 60s、请求总超时 ≥90s（UI 不暴露，避免旧配置 3s/5s 带病运行）。
+    /// </summary>
+    public static void NormalizeVisionTiming(this AppConfig cfg)
+    {
+        if (cfg.TimeoutMs < AppConfig.DefaultRequestTimeoutMs)
+            cfg.TimeoutMs = AppConfig.DefaultRequestTimeoutMs;
+
+        foreach (var camera in cfg.Cameras)
+        {
+            if (!IsHardwareCameraType(camera.Type))
+                continue;
+            camera.GrabTimeoutMs = AppConfig.DefaultGrabTimeoutMs;
+        }
+    }
+
+    private static bool IsHardwareCameraType(string type) =>
+        string.Equals(type, "Basler", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, "GigEVision", StringComparison.OrdinalIgnoreCase);
 
     public static string ResolveCameraFolder(this CameraConfig cfg) => ResolveFolder(cfg.Folder);
 }

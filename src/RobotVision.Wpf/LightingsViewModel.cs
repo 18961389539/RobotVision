@@ -227,8 +227,13 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
     }
 
     [RelayCommand]
-    public void Refresh()
+    public void Refresh() => Refresh(preferId: null);
+
+    /// <param name="preferId">刷新后优先选中的 Id；空则尽量保持当前选中。</param>
+    public void Refresh(string? preferId)
     {
+        var keepId = preferId ?? Selected?.Id;
+
         Items.Clear();
         foreach (var light in _cfg.LightControllers)
         {
@@ -239,7 +244,9 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
                 string.Equals(light.Type, "None", StringComparison.OrdinalIgnoreCase),
                 Summarize(light)));
         }
-        Selected = Items.FirstOrDefault(i => i.Id == Selected?.Id) ?? Items.FirstOrDefault();
+        Selected = string.IsNullOrWhiteSpace(keepId)
+            ? Items.FirstOrDefault()
+            : Items.FirstOrDefault(i => string.Equals(i.Id, keepId, StringComparison.OrdinalIgnoreCase));
         Message = $"共 {Items.Count} 个光源控制器";
     }
 
@@ -353,7 +360,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
             _lighting.Unregister(id);
             if (_registry.Create(entry) is { } newInstance)
                 _lighting.Register(newInstance);
-            Refresh();
+            Refresh(id);
             Message = $"已保存 {id}（{entry.Type}）";
         }
         catch (Exception ex)
@@ -428,7 +435,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
             NewEndpoint = "";
             NewLocalEndpoint = "";
             NewPort = "";
-            Refresh();
+            Refresh(id);
             Message = $"已添加 {type} 控制器 {id}（运行时已注册）";
         }
         catch (Exception ex)

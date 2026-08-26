@@ -127,9 +127,11 @@ public partial class LogsViewModel : ObservableObject
     [RelayCommand]
     public void RefreshFiles()
     {
+        var keepPath = SelectedFile?.Path;
         Files.Clear();
         if (!Directory.Exists(_folder))
         {
+            SelectedFile = null;
             Status = $"日志目录不存在: {_folder}";
             return;
         }
@@ -143,7 +145,9 @@ public partial class LogsViewModel : ObservableObject
                 $"{file.Length / 1024.0:0.0} KB", file.FullName));
         }
 
-        SelectedFile = Files.FirstOrDefault(f => f.Path == SelectedFile?.Path) ?? Files.FirstOrDefault();
+        SelectedFile = string.IsNullOrWhiteSpace(keepPath)
+            ? Files.FirstOrDefault()
+            : Files.FirstOrDefault(f => f.Path == keepPath);
         Status = $"{Files.Count} 个日志文件";
     }
 

@@ -22,6 +22,23 @@ public enum CalibrationQuality
     Poor,
 }
 
+/// <summary>工位坐标映射模式（管线分发用），优先级：多项式 &gt; 外参 &gt; 比例。
+/// 见 <see cref="CalibrationManager.GetMappingMode"/>。</summary>
+public enum StationMappingMode
+{
+    /// <summary>无映射档案：外参路径报 1004。</summary>
+    None,
+
+    /// <summary>多项式标定（单图模式：原图推理，像素→机器人/棋盘毫米系）。</summary>
+    Polynomial,
+
+    /// <summary>外参仿射（去畸变图像推理，像素→机器人系）。</summary>
+    Extrinsic,
+
+    /// <summary>比例标定（单图模式：原图推理，像素→图像平面毫米；无标定板工位的回退路径）。</summary>
+    Scale,
+}
+
 /// <summary>
 /// 标定管理类：
 /// 1. 内参档案（按相机 Id）——去畸变 Remap，推理前强制要求已标定；
@@ -49,6 +66,7 @@ public sealed class CalibrationManager : IDisposable
     private readonly ConcurrentDictionary<string, ExtrinsicProfile> _extrinsics = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RotationCenterProfile> _rotationCenters = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, PolynomialProfile> _polynomials = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ScaleProfile> _scales = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<string> _qualityWarnings = new();
 
     /// <summary>质量警告保留上限：只保留最近 N 条，避免加载大量档案时无限累积。</summary>
@@ -67,6 +85,16 @@ public sealed class CalibrationManager : IDisposable
 
     public int PolynomialCount => _polynomials.Count;
 
+    public int ScaleCount => _scales.Count;
+
+    /// <summary>已加载的比例标定档案（供管理界面显示）。</summary>
+    public IReadOnlyList<ScaleProfile> ScaleProfiles =>
+        _scales.Values.OrderBy(p => p.StationId, StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// <summary>工位比例档案（像素→毫米换算，测量显示用）。无档案返回 null。</summary>
+    public ScaleProfile? GetScale(string? stationId) =>
+        string.IsNullOrEmpty(stationId) ? null : _scales.TryGetValue(stationId, out var p) ? p : null;
+
     /// <summary>已加载的多项式标定档案（供管理界面显示）。</summary>
     public IReadOnlyList<PolynomialProfile> PolynomialProfiles =>
         _polynomials.Values.OrderBy(p => p.StationId, StringComparer.OrdinalIgnoreCase).ToList();
@@ -78,6 +106,23 @@ public sealed class CalibrationManager : IDisposable
     /// <summary>工位是否已有外参档案。</summary>
     public bool HasExtrinsic(string? stationId) =>
         !string.IsNullOrEmpty(stationId) && _extrinsics.ContainsKey(stationId);
+
+    /// <summary>工位映射模式：管线据此选择坐标换算路径与图像预处理（去畸变与否）。
+    /// 优先级：多项式 &gt; 外参 &gt; 比例——外参/多项式输出机器人系坐标（生产首选），
+    /// 比例仅是无标定板工位的回退：输出图像平面毫米（原点=图像左上角，X 右 Y 下，与 UI 预览同向）。
+    /// None 时走外参路径（PixelToRobot 统一报 1004）。</summary>
+    public StationMappingMode GetMappingMode(string? stationId)
+    {
+        if (string.IsNullOrEmpty(stationId))
+            return StationMappingMode.None;
+        if (_polynomials.ContainsKey(stationId))
+            return StationMappingMode.Polynomial;
+        if (_extrinsics.ContainsKey(stationId))
+            return StationMappingMode.Extrinsic;
+        if (_scales.ContainsKey(stationId))
+            return StationMappingMode.Scale;
+        return StationMappingMode.None;
+    }
 
     /// <summary>加载时发现的质量超标警告（供启动日志/UI 展示）。</summary>
     public IReadOnlyList<string> QualityWarnings => _qualityWarnings.ToArray();
@@ -196,6 +241,30 @@ public sealed class CalibrationManager : IDisposable
                 LoadPolynomial(profile);
                 seenPolynomial[profile.StationId] = file;
                 WarnIfFileNameMismatch(file, "polynomial", profile.StationId);
+            }
+            catch (Exception ex)
+            {
+                errors.Add((Path.GetFileName(file), ex.Message));
+            }
+        }
+
+        var seenScale = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Directory.EnumerateFiles(folder, "*.scale.json")
+                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var profile = JsonSerializer.Deserialize<ScaleProfile>(File.ReadAllText(file))
+                    ?? throw new InvalidDataException("档案内容为空");
+                if (seenScale.TryGetValue(profile.StationId, out var firstFile))
+                {
+                    errors.Add((Path.GetFileName(file),
+                        $"档案 Id 重复: {profile.StationId} 已由 {Path.GetFileName(firstFile)} 加载（按文件名排序先者生效），请删除多余档案"));
+                    continue;
+                }
+                LoadScale(profile);
+                seenScale[profile.StationId] = file;
+                WarnIfFileNameMismatch(file, "scale", profile.StationId);
             }
             catch (Exception ex)
             {
@@ -417,11 +486,15 @@ public sealed class CalibrationManager : IDisposable
         WarnIfDualMapping(profile.StationId);
     }
 
-    /// <summary>同一工位多项式与外参并存时，生产只走多项式。必须警告，否则操作员以为外参仍生效。</summary>
+    /// <summary>同一工位映射档案并存警告：多项式+外参 → 管线只走多项式；
+    /// (多项式|外参)+比例 → 比例不参与管线（仅测量显示）。必须警告，否则操作员以为被忽略的那份仍生效。</summary>
     private void WarnIfDualMapping(string stationId)
     {
         if (_polynomials.ContainsKey(stationId) && _extrinsics.ContainsKey(stationId))
             AddQualityWarning($"工位 {stationId} 同时存在多项式与外参档案：生产优先使用多项式（原图+多项式映射），外参/去畸变被忽略。请删除不用的那份以免坐标系混淆");
+        if (_scales.ContainsKey(stationId) &&
+            (_polynomials.ContainsKey(stationId) || _extrinsics.ContainsKey(stationId)))
+            AddQualityWarning($"工位 {stationId} 同时存在比例与外参/多项式档案：管线优先使用外参/多项式（机器人系坐标），比例档案仅用于测量显示");
     }
 
     public void SavePolynomial(PolynomialProfile profile)
@@ -436,6 +509,52 @@ public sealed class CalibrationManager : IDisposable
     {
         _polynomials.TryRemove(stationId, out _);
         return DeleteProfileFile(stationId, "polynomial");
+    }
+
+    /// <summary>比例 X/Y 各向异性告警阈值：|kx/ky − 1| 超过 2% 说明存在旋转/透视/畸变，
+    /// 线性比例只能近似，建议改用多项式标定。</summary>
+    public const double ScaleAnisotropyWarnLimit = 0.02;
+
+    /// <summary>比例档案校验：Id/相机非空，比例 > 0 且有限（0 或负数无物理意义；非有限值 = 档案损坏），
+    /// 分辨率 ≥ 0（0 = 未记录，跳过一致性校验）。手动录入无法验证数值真伪，只能挡住明显笔误。</summary>
+    public static void ValidateScale(ScaleProfile profile)
+    {
+        if (string.IsNullOrWhiteSpace(profile.StationId))
+            throw new VisionException(VisionErrorCode.InternalError, "比例档案 StationId 为空（空串 Id 会导致档案互相覆盖）");
+        if (string.IsNullOrWhiteSpace(profile.CameraId))
+            throw new VisionException(VisionErrorCode.InternalError, $"比例档案 {profile.StationId} 的 CameraId 为空");
+        if (!double.IsFinite(profile.ScaleX) || profile.ScaleX <= 0 ||
+            !double.IsFinite(profile.ScaleY) || profile.ScaleY <= 0)
+            throw new VisionException(VisionErrorCode.InternalError,
+                $"比例档案 {profile.StationId} 的比例非法: {profile.ScaleX} / {profile.ScaleY} mm/px（须为正数）");
+        if (profile.Width < 0 || profile.Height < 0)
+            throw new VisionException(VisionErrorCode.InternalError,
+                $"比例档案 {profile.StationId} 的分辨率非法: {profile.Width}x{profile.Height}");
+    }
+
+    public void LoadScale(ScaleProfile profile)
+    {
+        ValidateScale(profile);
+        _scales[profile.StationId] = profile;
+        var ratio = Math.Max(profile.ScaleX, profile.ScaleY) / Math.Min(profile.ScaleX, profile.ScaleY) - 1;
+        if (ratio > ScaleAnisotropyWarnLimit)
+            AddQualityWarning($"比例标定 {profile.StationId} X/Y 各向异性 {ratio * 100:0.0}%（>{ScaleAnisotropyWarnLimit * 100:0}%）："
+                + "疑似存在旋转/透视/畸变，线性比例仅为近似值，建议改用多项式标定");
+        WarnIfDualMapping(profile.StationId);
+    }
+
+    public void SaveScale(ScaleProfile profile)
+    {
+        RequireFolder();
+        ValidateScale(profile);
+        WriteJson(ProfileFile("scale", profile.StationId), profile);
+        LoadScale(profile);
+    }
+
+    public bool DeleteScale(string stationId)
+    {
+        _scales.TryRemove(stationId, out _);
+        return DeleteProfileFile(stationId, "scale");
     }
 
     /// <summary>多项式工位的推理图像分辨率校验：换分辨率后归一化坐标错位，映射整体失效。</summary>
@@ -520,6 +639,42 @@ public sealed class CalibrationManager : IDisposable
         }
 
         return new RobotPose(x, y, AngleGeometry.NormalizeSignedDeg(angleDeg));
+    }
+
+    /// <summary>
+    /// 比例工位的像素位姿 → 图像平面毫米位姿（单图模式管线，无标定板工位的回退路径）：
+    /// 位置 = 像素 × 比例，坐标系为图像系（原点=左上角像素 0,0，X 向右 Y 向下，与 UI 预览同向）；
+    /// 角度 = 像素方向向量经各向异性缩放后重算（kx=ky 时即像素角不变）。
+    /// 无机器人系锚定：不参与 OnArm 位姿校验/平移合成，输出由上位机按图像系毫米解读。
+    /// </summary>
+    public RobotPose PixelToRobotScale(string stationId, PixelPose pose, string? cameraId = null)
+    {
+        if (!_scales.TryGetValue(stationId, out var profile))
+            throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未录入比例标定: {stationId}");
+
+        if (!string.IsNullOrEmpty(cameraId) &&
+            !string.Equals(profile.CameraId, cameraId, StringComparison.OrdinalIgnoreCase))
+            throw new VisionException(VisionErrorCode.NotCalibrated,
+                $"比例标定相机 {profile.CameraId} 与取图相机 {cameraId} 不一致，请重新录入");
+
+        var x = pose.Cx * profile.ScaleX;
+        var y = pose.Cy * profile.ScaleY;
+
+        var rad = pose.AngleDeg * Math.PI / 180.0;
+        var angleDeg = Math.Atan2(profile.ScaleY * Math.Sin(rad), profile.ScaleX * Math.Cos(rad)) * 180.0 / Math.PI;
+
+        return new RobotPose(x, y, AngleGeometry.NormalizeSignedDeg(angleDeg));
+    }
+
+    /// <summary>比例工位的推理图像分辨率校验：比例以像素为基准，换分辨率后 mm/px 整体失效。
+    /// 档案未记录分辨率（Width=0，旧档/手填遗漏）时跳过（无从比对）。</summary>
+    public void VerifyScaleResolution(string stationId, int width, int height)
+    {
+        if (!_scales.TryGetValue(stationId, out var profile))
+            throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未录入比例标定: {stationId}");
+        if (profile.Width > 0 && (profile.Width != width || profile.Height != height))
+            throw new VisionException(VisionErrorCode.NotCalibrated,
+                $"图像分辨率 {width}x{height} 与比例标定档案 {profile.Width}x{profile.Height} 不一致，请重新录入比例");
     }
 
     // ---- 保存：写回目录 + 立即热加载（无需重启）----
@@ -935,21 +1090,15 @@ public sealed class CalibrationManager : IDisposable
 
     /// <summary>
     /// 像素位姿转机器人位姿。
-    /// stationId 为空且 allowPassthrough=false 时抛 NotCalibrated——
-    /// 静默直通会让像素坐标（数值量级与机器人坐标相近）被误当成机器人坐标，属安全问题。
+    /// stationId 为空时抛 NotCalibrated——防止像素坐标被误当成机器人坐标。
     /// cameraId 非空时校验外参档案与取图相机一致（坐标系错配会让位姿完全错误且无感知）。
     /// 角度通过"中心点 + 方向前推点"两点映射后求 Atan2 得到，
     /// 自动处理 y 轴向下、镜像、非等比缩放等符号问题。
     /// </summary>
-    public RobotPose PixelToRobot(string? stationId, PixelPose pose, bool allowPassthrough = false, string? cameraId = null, TcpClientPose? clientPose = null)
+    public RobotPose PixelToRobot(string? stationId, PixelPose pose, string? cameraId = null, TcpClientPose? clientPose = null)
     {
         if (string.IsNullOrEmpty(stationId))
-        {
-            if (!allowPassthrough)
-                throw new VisionException(VisionErrorCode.NotCalibrated,
-                    "配方未设置 stationId（如需台架调试直通像素坐标，请显式设置 debugPassthrough=true）");
-            return new RobotPose(pose.Cx, pose.Cy, pose.AngleDeg);
-        }
+            throw new VisionException(VisionErrorCode.NotCalibrated, "配方未设置 stationId");
 
         if (!_extrinsics.TryGetValue(stationId, out var profile))
             throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未做外参标定: {stationId}");

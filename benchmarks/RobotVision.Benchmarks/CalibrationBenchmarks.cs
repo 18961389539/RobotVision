@@ -30,7 +30,7 @@ public class CalibrationBenchmarks
 
     [Benchmark]
     public RobotPose PixelToRobot() =>
-        _calibration.PixelToRobot("st1", _pixel, allowPassthrough: false, "cam1");
+        _calibration.PixelToRobot("st1", _pixel, "cam1");
 
     [Benchmark]
     public RobotPose CompensateRotation_None() =>

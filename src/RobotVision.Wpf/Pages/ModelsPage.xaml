@@ -3,14 +3,22 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:ivc="clr-namespace:ImageViewer.Controls;assembly=ImageViewerControl"
+      xmlns:host="clr-namespace:RobotVision.WpfHost"
       Title="模型管理"
+      VerticalAlignment="Stretch"
+      host:ViewportPageLayout.FillViewport="True"
+      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
       Background="{DynamicResource ApplicationBackgroundBrush}">
 
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
     </Page.Resources>
 
-    <Grid Margin="8">
+    <Grid Margin="8" VerticalAlignment="Stretch">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
         <!-- 主导图像区：完整 ImageViewer（ROI / 测量 / 分析工具栏） -->
         <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
@@ -183,7 +191,7 @@
 
         <!-- 右：参数浮动面板（可折叠） -->
         <Border HorizontalAlignment="Right" VerticalAlignment="Stretch"
-                Width="352" Margin="12" Panel.ZIndex="20"
+                Width="428" Margin="12" Panel.ZIndex="20" ClipToBounds="True"
                 Background="#F01E2836"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                 BorderThickness="1" CornerRadius="8"
@@ -206,7 +214,8 @@
                             Command="{Binding ToggleParamPanelCommand}" />
                 </Grid>
 
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12">
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12"
+                              host:ViewportPageLayout.IsolateWheel="True">
                     <StackPanel>
                         <!-- 模型与任务 -->
                         <ui:CardExpander Header="模型与任务" IsExpanded="True" Margin="0,0,0,6">

@@ -13,7 +13,7 @@ public class ConcurrencyIntegrationTests
     {
         await using var server = await TestServer.StartAsync();
         server.WriteRecipe("SLOW", """
-            {"cameraId": "cam_virtual", "debugPassthrough": true, "angleMode": "MaskMinAreaRect", "models": ["no_such.onnx"], "intervalMs": 50}
+            {"cameraId": "cam_virtual", "angleMode": "MaskMinAreaRect", "models": ["no_such.onnx"], "intervalMs": 50}
             """);
         // 相机间隔缩短：并发下每请求都走完管线（模型缺失 1005）
         server.Cfg.Cameras[0].IntervalMs = 50;
@@ -31,7 +31,7 @@ public class ConcurrencyIntegrationTests
         await using var server = await TestServer.StartAsync();
         server.Cfg.Cameras[0].IntervalMs = 200; // 慢相机：每请求 ≥200ms
         server.WriteRecipe("SLOW", """
-            {"cameraId": "cam_virtual", "debugPassthrough": true, "angleMode": "MaskMinAreaRect", "models": ["no_such.onnx"]}
+            {"cameraId": "cam_virtual", "angleMode": "MaskMinAreaRect", "models": ["no_such.onnx"]}
             """);
 
         var tasks = Enumerable.Range(0, 8)
@@ -50,7 +50,7 @@ public class ConcurrencyIntegrationTests
     {
         await using var server = await TestServer.StartAsync();
         server.WriteRecipe("SLOW", """
-            {"cameraId": "cam_virtual", "debugPassthrough": true, "angleMode": "MaskMinAreaRect", "models": ["no_such.onnx"]}
+            {"cameraId": "cam_virtual", "angleMode": "MaskMinAreaRect", "models": ["no_such.onnx"]}
             """);
 
         for (var i = 0; i < 3; i++)

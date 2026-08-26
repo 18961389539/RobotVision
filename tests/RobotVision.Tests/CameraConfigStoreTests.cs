@@ -56,6 +56,19 @@ public class CameraConfigStoreTests : IDisposable
     }
 
     [Fact]
+    public void Save_RoundTripsOptionalName()
+    {
+        var cfg = new AppConfig();
+        var store = new CameraConfigStore(cfg, _file);
+
+        store.Save([new CameraConfig { Id = "cam_a", Type = "File", Folder = "imgs", Name = "左工位" }]);
+
+        Assert.Equal("左工位", cfg.Cameras[0].Name);
+        using var doc = JsonDocument.Parse(File.ReadAllText(_file));
+        Assert.Equal("左工位", doc.RootElement.GetProperty("Cameras")[0].GetProperty("Name").GetString());
+    }
+
+    [Fact]
     public void Save_SyncsInMemoryConfig()
     {
         var cfg = new AppConfig();

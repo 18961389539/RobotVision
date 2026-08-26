@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using RobotVision.Core.Abstractions;
+using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Cameras;
@@ -104,6 +105,65 @@ public class DiContainerIntegrationTests
         error.HasValue.Should().BeTrue();
         var detail = error!.Value;
         detail.Message.Should().Contain("相机未注册");
-        detail.Code.Should().Be(RobotVision.Core.Models.VisionErrorCode.CameraNotRegistered);
+        detail.Code.Should().Be(VisionErrorCode.CameraNotRegistered);
+    }
+
+    [Fact]
+    public async Task RecipeReferenceValidator_AcceptsScaleOnlyStation()
+    {
+        await using var server = await TestServer.StartAsync((cfg, root) =>
+        {
+            var models = Path.Combine(root, "models");
+            Directory.CreateDirectory(models);
+            File.WriteAllText(Path.Combine(models, "test.onnx"), "fake");
+            cfg.ModelsFolder = models;
+        });
+
+        var calibration = server.Provider.GetRequiredService<CalibrationManager>();
+        calibration.LoadScale(new ScaleProfile
+        {
+            StationId = "1",
+            CameraId = "cam_virtual",
+            ScaleX = 0.05,
+            ScaleY = 0.05,
+            Width = 640,
+            Height = 480,
+        });
+
+        var loader = server.Provider.GetRequiredService<RecipeLoader>();
+        var error = loader.ReferenceValidator!(new RecipeConfig
+        {
+            Name = "Cage",
+            CameraId = "cam_virtual",
+            StationId = "1",
+            Models = ["test.onnx"],
+        });
+
+        error.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RecipeReferenceValidator_RejectsUnknownStation()
+    {
+        await using var server = await TestServer.StartAsync((cfg, root) =>
+        {
+            var models = Path.Combine(root, "models");
+            Directory.CreateDirectory(models);
+            File.WriteAllText(Path.Combine(models, "test.onnx"), "fake");
+            cfg.ModelsFolder = models;
+        });
+
+        var loader = server.Provider.GetRequiredService<RecipeLoader>();
+        var error = loader.ReferenceValidator!(new RecipeConfig
+        {
+            Name = "Bad",
+            CameraId = "cam_virtual",
+            StationId = "missing",
+            Models = ["test.onnx"],
+        });
+
+        error.Should().NotBeNull();
+        error!.Value.Message.Should().Contain("比例标定");
+        error.Value.Code.Should().Be(VisionErrorCode.NotCalibrated);
     }
 }

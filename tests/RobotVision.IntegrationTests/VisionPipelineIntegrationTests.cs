@@ -42,25 +42,11 @@ public class VisionPipelineIntegrationTests
     }
 
     [Fact]
-    public async Task DebugPassthrough_AllowsMissingStation()
-    {
-        await using var server = await TestServer.StartAsync();
-        server.WriteRecipe("PASSTHROUGH", """
-            {"cameraId": "cam_virtual", "stationId": "", "debugPassthrough": true, "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
-            """);
-
-        var result = await server.Vision.RunAsync("PASSTHROUGH", CancellationToken.None);
-
-        // 直通模式放行取图/推理：虚拟相机图案无目标 → 1007（管线执行到推理完成）
-        result.ErrorCode.Should().Be(VisionErrorCode.NoTargetFound);
-    }
-
-    [Fact]
     public async Task DisabledRecipe_Returns1015()
     {
         await using var server = await TestServer.StartAsync();
         server.WriteRecipe("OFF", """
-            {"cameraId": "cam_virtual", "debugPassthrough": true, "enabled": false, "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
+            {"cameraId": "cam_virtual", "enabled": false, "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
             """);
 
         var result = await server.Vision.RunAsync("OFF", CancellationToken.None);
@@ -73,7 +59,7 @@ public class VisionPipelineIntegrationTests
     {
         await using var server = await TestServer.StartAsync();
         server.WriteRecipe("BADREF", """
-            {"cameraId": "no_such_camera", "debugPassthrough": true, "angleMode": "MaskMinAreaRect", "models": ["x.onnx"]}
+            {"cameraId": "no_such_camera", "angleMode": "MaskMinAreaRect", "models": ["x.onnx"]}
             """);
 
         var result = await server.Vision.RunAsync("BADREF", CancellationToken.None);
@@ -138,8 +124,8 @@ public class VisionPipelineIntegrationTests
     public async Task FrameProcessed_Subscriber_ReceivesSnapshot()
     {
         await using var server = await TestServer.StartAsync();
-        server.WriteRecipe("PASSTHROUGH", """
-            {"cameraId": "cam_virtual", "stationId": "", "debugPassthrough": true, "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
+        server.WriteRecipe("VIRTUAL_PREVIEW", """
+            {"cameraId": "cam_virtual", "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
             """);
 
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -148,11 +134,11 @@ public class VisionPipelineIntegrationTests
         try
         {
             // 推理完成（0 目标 → 1007）后快照发布；首次加载模型较慢，放宽超时
-            var result = await server.Vision.RunAsync("PASSTHROUGH", CancellationToken.None);
+            var result = await server.Vision.RunAsync("VIRTUAL_PREVIEW", CancellationToken.None);
             result.ErrorCode.Should().Be(VisionErrorCode.NoTargetFound);
 
             var recipe = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(20));
-            recipe.Should().Be("PASSTHROUGH");
+            recipe.Should().Be("VIRTUAL_PREVIEW");
         }
         finally
         {

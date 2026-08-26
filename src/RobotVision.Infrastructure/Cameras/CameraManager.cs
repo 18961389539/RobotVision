@@ -79,6 +79,16 @@ public sealed class CameraManager : IDisposable
 
     public bool IsRegistered(string id) => _cameras.ContainsKey(id);
 
+    /// <summary>取图不可用时的原因（未注册 / 初始化失败）；可用时返回 null。</summary>
+    public string? GetGrabErrorHint(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            return "请先选择相机";
+        if (!_cameras.TryGetValue(id, out var camera))
+            return $"相机未注册: {id}";
+        return camera is FailedCamera failed ? failed.FaultMessage : null;
+    }
+
     public ICamera Get(string id) =>
         _cameras.TryGetValue(id, out var camera)
             ? camera

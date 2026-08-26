@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using OpenCvSharp;
+using RobotVision.Core.Abstractions;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Cameras;
 using Xunit;
@@ -106,6 +107,123 @@ public class HardwareCameraSmokeTests(ITestOutputHelper output)
             Cv2.ImWrite(path, mat);
             output.WriteLine($"已保存: {path}");
         }
+    }
+
+    /// <summary>
+    /// 连续取帧稳定性冒烟：连接后连续抓 30 帧，验证不丢帧/不花屏（每帧非空、尺寸一致、
+    /// 内容有变化——运动场景下全黑/全白即异常）、帧间隔无异常尖峰。
+    /// 单帧冒烟只证明"能取到图"，产线最常见的间歇花屏/丢帧需要连续帧才能暴露。
+    /// </summary>
+    [Fact]
+    public void GigE_ContinuousGrab_30Frames_Stable()
+    {
+        if (!Enabled)
+            return;
+
+        var devices = GigEVisionCamera.EnumerateDevices();
+        if (devices.Count == 0)
+        {
+            output.WriteLine("未发现 GigE 设备（跳过）");
+            return;
+        }
+
+        var serial = devices[0].Split('|')[0].Trim();
+        using var cam = new GigEVisionCamera($"hwtest_{serial}", serial, grabTimeoutMs: 5000,
+            log: new OutputLogger(output));
+        Assert.True(cam.TryConnectOnce(), $"相机 {serial} 连接失败");
+
+        var sizes = new HashSet<(int Width, int Height)>();
+        Mat? previous = null;
+        var blankFrames = 0;
+        var intervalsMs = new List<double>();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        for (var i = 0; i < 30; i++)
+        {
+            using var frame = cam.Grab();
+            Assert.False(frame.Image.IsEmpty, $"第 {i + 1} 帧为空（丢帧）");
+            sizes.Add((frame.Image.Width, frame.Image.Height));
+
+            using var mat = VisionImageCv.AsMat(frame.Image);
+            Cv2.MeanStdDev(mat, out var mean, out var stddev);
+            if (stddev.Val0 < 1.0)
+                blankFrames++; // 整帧纯色 = 花屏/断流特征
+
+            if (previous is not null)
+            {
+                using var diff = new Mat();
+                Cv2.Absdiff(previous, mat, diff);
+                if (Cv2.Mean(diff).Val0 < 0.5)
+                    blankFrames++; // 相邻帧完全一致（30fps 场景不应逐帧冻结）
+            }
+            previous?.Dispose();
+            previous = mat.Clone();
+
+            intervalsMs.Add(watch.Elapsed.TotalMilliseconds);
+            watch.Restart();
+        }
+        previous?.Dispose();
+
+        Assert.Single(sizes); // 分辨率全程一致（分辨率跳变 = 链路异常）
+        Assert.True(blankFrames <= 1,
+            $"连续 30 帧出现 {blankFrames} 次纯色/冻结帧（疑似花屏或断流）");
+        var avgInterval = intervalsMs.Average();
+        output.WriteLine($"30 帧完成: 平均帧间隔 {avgInterval:0.0}ms");
+        Assert.True(avgInterval < 2000, $"平均帧间隔 {avgInterval:0.0}ms 异常（>2s）");
+    }
+
+    /// <summary>
+    /// 曝光/增益参数链路冒烟：相机支持 IExposureControl 时，把曝光从最小调到最大，
+    /// 取帧均值应显著上升（参数写入 → 传感器生效 → 图像变化 的完整链路）。
+    /// 参数没生效是现场常见故障（配置"改了"但图像不变），此用例直接暴露。
+    /// </summary>
+    [Fact]
+    public void Exposure_ChangeAffectsBrightness()
+    {
+        if (!Enabled)
+            return;
+
+        var devices = GigEVisionCamera.EnumerateDevices();
+        if (devices.Count == 0)
+        {
+            output.WriteLine("未发现 GigE 设备（跳过）");
+            return;
+        }
+
+        var serial = devices[0].Split('|')[0].Trim();
+        using var cam = new GigEVisionCamera($"hwtest_{serial}", serial, grabTimeoutMs: 5000,
+            log: new OutputLogger(output));
+        Assert.True(cam.TryConnectOnce(), $"相机 {serial} 连接失败");
+        if (cam is not IExposureControl exposure)
+        {
+            output.WriteLine("相机未实现 IExposureControl（跳过参数链路验证）");
+            return;
+        }
+
+        var range = exposure.GetExposureRange();
+        Assert.NotNull(range);
+        Assert.True(range!.Value.Max > range.Value.Min, "曝光范围非法");
+
+        // 最小曝光取帧
+        Assert.True(exposure.TrySetExposureTimeUs(range.Value.Min), "设置最小曝光失败");
+        Thread.Sleep(100); // 等参数生效
+        using var lowFrame = cam.Grab();
+        using var lowMat = VisionImageCv.AsMat(lowFrame.Image);
+        var lowMean = Cv2.Mean(lowMat).Val0;
+
+        // 最大曝光取帧
+        Assert.True(exposure.TrySetExposureTimeUs(range.Value.Max), "设置最大曝光失败");
+        Thread.Sleep(100);
+        using var highFrame = cam.Grab();
+        using var highMat = VisionImageCv.AsMat(highFrame.Image);
+        var highMean = Cv2.Mean(highMat).Val0;
+
+        output.WriteLine($"曝光 {range.Value.Min}→{range.Value.Max}us: 均值 {lowMean:F1} → {highMean:F1}");
+        Assert.True(highMean > lowMean + 5,
+            $"高曝光均值应明显高于低曝光（参数未生效?）: {lowMean:F1} vs {highMean:F1}");
+
+        // 恢复中值曝光，避免影响后续使用
+        var mid = (range.Value.Min + range.Value.Max) / 2;
+        exposure.TrySetExposureTimeUs(mid);
     }
 
     private sealed class OutputLogger(ITestOutputHelper output) : ILogger

@@ -79,7 +79,7 @@ public class TcpProtocolEndToEndTests
     {
         await using var server = await TestServer.StartAsync();
         server.WriteRecipe("DISABLED", """
-            {"cameraId": "cam_virtual", "debugPassthrough": true, "enabled": false, "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
+            {"cameraId": "cam_virtual", "enabled": false, "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
             """);
 
         var reply = await server.SendAsync("DISABLED");
@@ -92,7 +92,7 @@ public class TcpProtocolEndToEndTests
     {
         await using var server = await TestServer.StartAsync();
         server.WriteRecipe("NOMODEL", """
-            {"cameraId": "cam_virtual", "debugPassthrough": true, "angleMode": "MaskMinAreaRect", "models": ["no_such_model.onnx"]}
+            {"cameraId": "cam_virtual", "angleMode": "MaskMinAreaRect", "models": ["no_such_model.onnx"]}
             """);
 
         // 配方校验：模型文件不存在 → 触发时 1005
@@ -106,7 +106,7 @@ public class TcpProtocolEndToEndTests
     {
         await using var server = await TestServer.StartAsync();
         server.WriteRecipe("NOCAM", """
-            {"cameraId": "no_such_camera", "debugPassthrough": true, "angleMode": "MaskMinAreaRect", "models": ["x.onnx"]}
+            {"cameraId": "no_such_camera", "angleMode": "MaskMinAreaRect", "models": ["x.onnx"]}
             """);
 
         var reply = await server.SendAsync("NOCAM");
@@ -120,7 +120,7 @@ public class TcpProtocolEndToEndTests
     {
         await using var server = await TestServer.StartAsync();
         server.WriteRecipe("SERIAL", """
-            {"serialNumber": 7, "cameraId": "cam_virtual", "debugPassthrough": true, "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
+            {"serialNumber": 7, "cameraId": "cam_virtual", "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
             """);
 
         // 纯数字序列号触发：解析成功 → 管线执行（虚拟相机图案无目标 → 1007；绝不是 1001）
@@ -185,7 +185,7 @@ public class TcpProtocolEndToEndTests
         // 慢相机（间隔 300ms）占住管线；模型存在 → 引用校验通过 → 进入取图阶段
         server.Cfg.Cameras[0].IntervalMs = 300;
         server.WriteRecipe("SLOW", """
-            {"cameraId": "cam_virtual", "debugPassthrough": true, "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
+            {"cameraId": "cam_virtual", "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
             """);
 
         var trigger = server.SendAsync("SLOW");

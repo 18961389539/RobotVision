@@ -293,6 +293,20 @@ public class TcpMonitoringTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task IdleTimeoutPositive_DisconnectsAfterSilence()
+    {
+        _tcp.IdleTimeoutMs = 250;
+        var disconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _tcp.ClientDisconnected += _ => disconnected.TrySetResult();
+        _tcp.Start();
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
+        Assert.Equal("PONG", await RoundTripAsync(client.GetStream(), "PING"));
+        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, _tcp.ConnectedClients);
+    }
+
     private sealed class TrackingSyncContext : SynchronizationContext
     {
         public override void Post(SendOrPostCallback d, object? state)
@@ -307,19 +321,5 @@ public class TcpMonitoringTests : IDisposable
             };
             thread.Start();
         }
-    }
-
-    [Fact]
-    public async Task IdleTimeoutPositive_DisconnectsAfterSilence()
-    {
-        _tcp.IdleTimeoutMs = 250;
-        var disconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _tcp.ClientDisconnected += _ => disconnected.TrySetResult();
-        _tcp.Start();
-        using var client = new TcpClient();
-        await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
-        Assert.Equal("PONG", await RoundTripAsync(client.GetStream(), "PING"));
-        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(0, _tcp.ConnectedClients);
     }
 }

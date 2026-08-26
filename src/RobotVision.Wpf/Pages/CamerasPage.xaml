@@ -3,8 +3,12 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:ivc="clr-namespace:ImageViewer.Controls;assembly=ImageViewerControl"
+      xmlns:host="clr-namespace:RobotVision.WpfHost"
       Title="相机管理"
       VerticalAlignment="Stretch"
+      host:ViewportPageLayout.FillViewport="True"
+      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
       Background="{DynamicResource ApplicationBackgroundBrush}">
 
     <Page.InputBindings>
@@ -14,7 +18,10 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
     </Page.Resources>
 
-    <Grid Margin="8">
+    <Grid Margin="8" VerticalAlignment="Stretch">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
         <!-- 主导图像区：完整 ImageViewer -->
         <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
@@ -26,7 +33,8 @@
                 HorizontalAlignment="Left" VerticalAlignment="Top" Panel.ZIndex="30"
                 Visibility="{Binding PreviewVisible,
                     Converter={StaticResource BoolToVisibilityConverter}}">
-            <TextBlock Text="{Binding PreviewCaption}" FontSize="11" Foreground="White" />
+            <TextBlock Text="{Binding PreviewCaption}" FontSize="11" Foreground="White"
+                       ToolTip="{Binding PreviewToolTip}" />
         </Border>
 
         <!-- 列表收起时的「相机」重新打开按钮 -->
@@ -88,7 +96,7 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <ui:TextBlock Text="{Binding Id}" FontTypography="BodyStrong"
+                                    <ui:TextBlock Text="{Binding Title}" FontTypography="BodyStrong"
                                                   TextTrimming="CharacterEllipsis" />
                                     <Ellipse Grid.Column="1" Width="8" Height="8" VerticalAlignment="Center"
                                              Margin="6,0,0,0">
@@ -127,6 +135,20 @@
                                         </TextBlock.Style>
                                     </TextBlock>
                                 </Grid>
+                                <TextBlock Text="{Binding Subtitle}" FontSize="11"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           TextTrimming="CharacterEllipsis" Margin="0,2,0,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Subtitle}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                                 <TextBlock Text="{Binding Summary}" FontSize="11"
                                            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                            TextTrimming="CharacterEllipsis" ToolTip="{Binding Summary}"
@@ -178,7 +200,7 @@
 
         <!-- 右：参数浮动面板（可折叠） -->
         <Border HorizontalAlignment="Right" VerticalAlignment="Stretch"
-                Width="352" Margin="12" Panel.ZIndex="20"
+                Width="428" Margin="12" Panel.ZIndex="20" ClipToBounds="True"
                 Background="#F01E2836"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                 BorderThickness="1" CornerRadius="8"
@@ -201,7 +223,8 @@
                             Command="{Binding ToggleParamPanelCommand}" />
                 </Grid>
 
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12">
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12"
+                              host:ViewportPageLayout.IsolateWheel="True">
                     <StackPanel>
                         <Grid Margin="0,0,0,12">
                             <Grid.ColumnDefinitions>
@@ -237,6 +260,13 @@
                                         <TextBox Text="{Binding EditId, UpdateSourceTrigger=PropertyChanged}"
                                                  IsEnabled="{Binding IsNew}" />
                                     </StackPanel>
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Text="显示名（可选）" Margin="0,0,0,4" />
+                                        <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="界面展示用；留空时仅显示 Id" />
+                                    </StackPanel>
+                                </UniformGrid>
+                                <UniformGrid Columns="1" Margin="0,0,0,0">
                                     <StackPanel Margin="0,0,0,8">
                                         <TextBlock Text="类型" Margin="0,0,0,4" />
                                         <ComboBox ItemsSource="{Binding TypeOptions}"
@@ -340,10 +370,6 @@
                                                      ToolTip="增益（dB）。提高亮度但放大噪声；留空=不下发，沿用相机当前值" />
                                         </StackPanel>
                                     </UniformGrid>
-                                    <StackPanel>
-                                        <TextBlock Text="采集超时（ms）" Margin="0,0,0,4" />
-                                        <TextBox Text="{Binding EditGrabTimeoutMs, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
                                 </StackPanel>
 
                                 <!-- Virtual -->
