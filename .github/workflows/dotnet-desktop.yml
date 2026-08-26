@@ -1,11 +1,11 @@
-# RobotVision 自动构建与测试
-# 触发:push / PR 到 main 分支,在 Windows runner 上还原 → 编译 → 跑全部测试。
-# 说明:
-# - 本项目无 Windows 打包(WAP)项目,不需要签名/MSIX 步骤;
-# - 硬件冒烟(RV_HARDWARE_TEST)与 UI 冒烟(RV_UI_TEST)默认关闭,CI 自动跳过;
-# - models/*.onnx 不入库(gitignore),依赖真实模型的用例检测文件缺失自动跳过。
+# RobotVision 自动构建、测试与发布
+# 触发:push / PR 到 main 分支。
+# - build-test:还原 → 编译 → 全量测试(验证代码质量);
+# - publish:自包含(win-x64)发布 WPF 宿主,上传到 Actions 下载页,工控机免装 .NET 运行时。
+# 硬件冒烟(RV_HARDWARE_TEST)与 UI 冒烟(RV_UI_TEST)默认关闭,CI 自动跳过;
+# models/*.onnx 不入库(gitignore),依赖真实模型的用例检测文件缺失自动跳过。
 
-name: Build & Test
+name: Build, Test & Publish
 
 on:
   push:
@@ -37,3 +37,29 @@ jobs:
     - name: Test (Release)
       # 全量单元 + 集成测试;UI/硬件冒烟因环境变量未设置自动跳过
       run: dotnet test RobotVision.sln -c Release --no-build --no-restore --nologo
+
+  publish:
+    # 测试全部通过后才发版;PR 不产出版本(避免 PR 分支产物混淆)
+    if: github.event_name == 'push'
+    needs: build-test
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Publish (self-contained win-x64)
+      # 自包含:运行时打进产物,目标机器免装 .NET 8;多文件目录形态(单文件易被杀软误报)
+      run: dotnet publish src/RobotVision.Wpf/RobotVision.Wpf.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o publish-out --nologo
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: RobotVision-win-x64
+        path: publish-out
+        if-no-files-found: error
