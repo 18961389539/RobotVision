@@ -1,7 +1,8 @@
 # RobotVision 自动构建、测试与发布
-# 触发:push / PR 到 main 分支。
-# - build-test:还原 → 编译 → 全量测试(验证代码质量);
-# - publish:自包含(win-x64)发布 WPF 宿主,上传到 Actions 下载页,工控机免装 .NET 运行时。
+# 触发:
+# - push / PR 到 main → build-test(还原+编译+全量测试)+ publish(自包含包上传 Artifacts);
+# - push v* 标签 → build-test 通过后 release(自包含包上传到 GitHub Release 下载页)。
+# NuGet 依赖缓存:setup-dotnet 按 Directory.Packages.props(中央包管理)缓存,加速 restore。
 # 硬件冒烟(RV_HARDWARE_TEST)与 UI 冒烟(RV_UI_TEST)默认关闭,CI 自动跳过;
 # models/*.onnx 不入库(gitignore),依赖真实模型的用例检测文件缺失自动跳过。
 
@@ -10,6 +11,7 @@ name: Build, Test & Publish
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
 
@@ -27,6 +29,8 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
+        cache: true
+        cache-dependency-path: 'Directory.Packages.props'
 
     - name: Restore
       run: dotnet restore RobotVision.sln
@@ -39,8 +43,8 @@ jobs:
       run: dotnet test RobotVision.sln -c Release --no-build --no-restore --nologo
 
   publish:
-    # 测试全部通过后才发版;PR 不产出版本(避免 PR 分支产物混淆)
-    if: github.event_name == 'push'
+    # 普通 push 产出自包含包(Artifacts 下载);打 tag 的发布走 release job
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
     needs: build-test
     runs-on: windows-latest
 
@@ -52,6 +56,8 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
+        cache: true
+        cache-dependency-path: 'Directory.Packages.props'
 
     - name: Publish (self-contained win-x64)
       # 自包含:运行时打进产物,目标机器免装 .NET 8;多文件目录形态(单文件易被杀软误报)
@@ -63,3 +69,34 @@ jobs:
         name: RobotVision-win-x64
         path: publish-out
         if-no-files-found: error
+
+  release:
+    # 打 v* 标签时:构建自包含包并上传到 GitHub Release(版本即产线固件号)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-test
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        cache: true
+        cache-dependency-path: 'Directory.Packages.props'
+
+    - name: Publish (self-contained win-x64)
+      run: dotnet publish src/RobotVision.Wpf/RobotVision.Wpf.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o publish-out --nologo
+
+    - name: Package zip
+      run: Compress-Archive -Path publish-out\* -DestinationPath RobotVision-win-x64.zip -Force
+
+    - name: Create/Update Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: RobotVision-win-x64.zip
+        generate_release_notes: true
