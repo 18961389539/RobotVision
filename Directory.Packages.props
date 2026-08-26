@@ -37,7 +37,7 @@
     <PackageVersion Include="Serilog.Sinks.File" Version="6.0.0" />
 
     <!-- UI -->
-    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageVersion Include="WPF-UI" Version="3.1.1" />
 
     <!-- 硬件：串口 -->
