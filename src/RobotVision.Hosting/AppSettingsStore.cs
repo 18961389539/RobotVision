@@ -70,6 +70,12 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             poseCheck["RzToleranceDeg"] = values.PoseRzToleranceDeg;
             obj["PoseCheck"] = poseCheck;
 
+            var health = obj["ProcessHealth"] as JsonObject ?? [];
+            health["Enabled"] = values.ProcessHealthEnabled;
+            health["ConsecutiveFailLimit"] = values.ConsecutiveFailLimit;
+            health["InhibitOnLimit"] = values.InhibitOnLimit;
+            obj["ProcessHealth"] = health;
+
             var failure = obj["FailureImage"] as JsonObject ?? [];
             failure["Enabled"] = values.FailureEnabled;
             failure["RetainedCount"] = values.FailureRetainedCount;
@@ -90,6 +96,9 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         cfg.PoseCheck.Enabled = values.PoseCheckEnabled;
         cfg.PoseCheck.XyToleranceMm = values.PoseXyToleranceMm;
         cfg.PoseCheck.RzToleranceDeg = values.PoseRzToleranceDeg;
+        cfg.ProcessHealth.Enabled = values.ProcessHealthEnabled;
+        cfg.ProcessHealth.ConsecutiveFailLimit = values.ConsecutiveFailLimit;
+        cfg.ProcessHealth.InhibitOnLimit = values.InhibitOnLimit;
 
         // 落盘 + 内存同步完成后，把可热应用的参数同步到运行中的管理器（见 RuntimeSync 注释）
         RuntimeSync?.Invoke(cfg);
@@ -112,6 +121,8 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             throw new InvalidDataException("空闲超时若启用须 ≥1000ms（0 = 永久）");
         if (values.PoseXyToleranceMm <= 0 || values.PoseRzToleranceDeg <= 0)
             throw new InvalidDataException("PoseCheck 容差必须为正");
+        if (values.ConsecutiveFailLimit < 0)
+            throw new InvalidDataException("连续失败联锁次数不能为负（0 = 不联锁）");
         if (values.MaxQueueDepth < 1)
             throw new InvalidDataException("队列深度至少为 1");
         if (values.MaxConcurrent < 1 || values.MaxConcurrent > values.MaxQueueDepth)
@@ -148,6 +159,8 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             throw new InvalidDataException($"appsettings.json 的 IdleTimeoutMs={cfg.IdleTimeoutMs} 若启用须 ≥1000ms（0 = 永久）");
         if (cfg.PoseCheck.XyToleranceMm <= 0 || cfg.PoseCheck.RzToleranceDeg <= 0)
             throw new InvalidDataException("appsettings.json 的 PoseCheck 容差必须为正");
+        if (cfg.ProcessHealth.ConsecutiveFailLimit < 0)
+            throw new InvalidDataException("appsettings.json 的 ProcessHealth.ConsecutiveFailLimit 不能为负（0 = 不联锁）");
         if (cfg.MaxQueueDepth < 1)
             throw new InvalidDataException($"appsettings.json 的 MaxQueueDepth={cfg.MaxQueueDepth} 至少为 1");
         if (cfg.MaxConcurrent < 1 || cfg.MaxConcurrent > cfg.MaxQueueDepth)
@@ -191,4 +204,7 @@ public sealed record ServiceSettingsValues(
     long IdleTimeoutMs = 0,
     bool PoseCheckEnabled = true,
     double PoseXyToleranceMm = 0.5,
-    double PoseRzToleranceDeg = 0.5);
+    double PoseRzToleranceDeg = 0.5,
+    bool ProcessHealthEnabled = true,
+    int ConsecutiveFailLimit = 5,
+    bool InhibitOnLimit = true);

@@ -116,7 +116,8 @@ Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资�
 | 请求 | 应答 | 说明 |
 |---|---|---|
 | `PING` | `PONG` | 心跳（仅证明连接存活，不反映管线忙闲） |
-| `STATUS` | `OK,ready\|busy,队列深度,队列上限,最近耗时ms` | 管线状态查询（PLC 触发前预判） |
+| `STATUS` | `OK,ready\|busy,队列深度,队列上限,最近耗时ms,连续失败,联锁0/1` | 管线状态查询（后两段为过程能力扩展，旧 PLC 可读前 5 段） |
+| `CLEARINHIBIT` 或 `CLEARINHIBIT,配方名` | `OK,CLEARED` | 解除连续失败联锁（1018） |
 | `配方名` 或 `序列号`（`3` / `#3`） | `OK,x,y,角度[,...],配方名,目标数,耗时ms` | 触发一次完整流程（不带位姿） |
 | `键,X,Y,RZ`（键=配方名或序列号） | 同上 | 带拍照位姿触发（末端相机工位必须；
 与 OnArm 外参档案比对，不一致返回 1012） |
@@ -140,7 +141,10 @@ PLC 可顺序读坐标，或用尾部 N 校验；也为将来"0 目标返回空 
 1010 排队超时（未进入推理，已放弃排队）/ 1011 相机初始化失败（pylon 运行库缺失/设备打开失败）/
 1012 拍照位姿不一致（OnArm 工位，TRIGGER 上报位姿与外参标定位姿超容差，容差见 PoseCheck 段）/
 1013 TRIGGER 参数格式错误（段数/数值非法）/ 1014 OnArm 未上报拍照位姿 /
-1015 配方被停用 / 1016 配方参数或引用校验失败 / 1099 内部错误（含配方文件 IO 故障）。
+1015 配方被停用 / 1016 配方参数或引用校验失败 /
+1017 资产哈希不一致（配方钉扎的模型/标定 SHA-256 与当前文件不符）/
+1018 连续失败联锁（同配方过程失败达到阈值，排除后 `CLEARINHIBIT` 或界面解除）/
+1099 内部错误（含配方文件 IO 故障）。
 
 配方名只允许字母、数字、下划线、中划线——`TRIGGER,..\xxx` 之类的路径穿越探测
 一律按 1001 拒绝。启动时预加载全部配方并校验（cameraId/models/阈值/keypoint 索引等），
@@ -367,6 +371,18 @@ CalibTool 用 `--tool-offset auto`。离散度 >5° 提示标记噪声大；若�
 含 `pairingMaxDistancePx`）/ `segmentation`（MaskMinAreaRect，含 `pixelConfidence`）。
 **旧版平铺字段（`keypointIndexA` 等）仍可读取**——setter-only 兼容属性在加载时自动迁移到
 子对象，存量配方文件无需手工改写；保存时统一输出子对象格式。
+
+**输出补偿**（`outputOffset`，可选）：标定与偏心工具补偿之后，对每个目标叠加 ΔX/ΔY/ΔRz（mm/°）。
+首件微调用，缺省全 0。绝对值超过 100mm / 180° 会在保存时拒绝。
+
+**资产钉扎**（`modelSha256` / `stationSha256`，可选）：配方页「钉死当前哈希」写入 SHA-256。
+钉扎后替换同名 ONNX 或覆盖标定档案，TRIGGER 返回 **1017**。未钉扎的旧配方行为不变。
+`AssetIntegrity:RequireManifest=true` 时还要求 `models/manifest.json` 中有对应条目。
+
+**过程能力**：成功/失败按日追加 `data/metrics/yyyyMMdd.tsv`，累计写入 `health.json`（重启不丢）。
+同配方连续过程失败（1003/1005/1007/1008 等）达到 `ProcessHealth:ConsecutiveFailLimit`（默认 5）
+后 TRIGGER 返回 **1018**。通信页「解除联锁」或 TCP `CLEARINHIBIT` / `CLEARINHIBIT,配方名`。
+配置类错误（1001/1004/1012/1017）不计入连续失败。
 
 **光源（可选）**：缺省不亮灯，行为与旧版完全一致。需要照明时在 appsettings
 注册光源控制器，配方成对指定 `lightControllerId` + `lighting`：

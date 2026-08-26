@@ -293,6 +293,15 @@
                                         ToolTip="仅用于备忘与左侧搜索，不影响 TRIGGER 与 TCP 输出" />
                             <CheckBox Content="启用该配方（停用触发返回 1015，文件保留）" FontSize="11"
                                       Margin="0,8,0,0" IsChecked="{Binding Editor.Enabled}" />
+                            <TextBlock Text="{Binding AssetPinStatus}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,6"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <StackPanel Orientation="Horizontal">
+                                <ui:Button Content="钉死当前哈希" Appearance="Secondary" Padding="10,4" FontSize="12"
+                                           Command="{Binding PinAssetsCommand}"
+                                           ToolTip="把当前模型文件与工位标定档案的 SHA-256 写入配方；保存后 TRIGGER 校验，拷错文件返回 1017" />
+                                <ui:Button Content="清除钉扎" Appearance="Secondary" Padding="10,4" FontSize="12" Margin="8,0,0,0"
+                                           Command="{Binding ClearAssetPinsCommand}" />
+                            </StackPanel>
                             </StackPanel>
                         </ui:CardExpander>
 
@@ -702,6 +711,35 @@
                                        Margin="0,4,0,0"
                                        Visibility="{Binding RotationCenterHint,
                                            Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+                            </StackPanel>
+                        </ui:CardExpander>
+
+                        <!-- 输出补偿（首件微调） -->
+                        <ui:CardExpander Header="输出补偿（首件微调）" IsExpanded="False" Margin="0,0,0,8">
+                            <StackPanel Margin="0,6,0,2">
+                                <ui:TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                                              Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                              Text="标定与偏心补偿之后叠加到每个目标。用于吸嘴/料厚残差，避免为 0.1mm 重做九点。勿用大补偿掩盖标定错误。" />
+                                <UniformGrid Columns="3">
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock Text="ΔX (mm)" FontSize="11" Margin="0,0,0,4" />
+                                        <ui:NumberBox Value="{Binding Editor.OutputOffset.X}"
+                                                      Minimum="-100" Maximum="100" SmallChange="0.01"
+                                                      SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock Text="ΔY (mm)" FontSize="11" Margin="0,0,0,4" />
+                                        <ui:NumberBox Value="{Binding Editor.OutputOffset.Y}"
+                                                      Minimum="-100" Maximum="100" SmallChange="0.01"
+                                                      SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock Text="ΔRz (°)" FontSize="11" Margin="0,0,0,4" />
+                                        <ui:NumberBox Value="{Binding Editor.OutputOffset.RzDeg}"
+                                                      Minimum="-180" Maximum="180" SmallChange="0.1"
+                                                      SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                </UniformGrid>
                             </StackPanel>
                         </ui:CardExpander>
 

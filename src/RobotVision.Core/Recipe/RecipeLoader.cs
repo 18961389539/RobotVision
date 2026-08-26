@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using RobotVision.Core.Assets;
 using RobotVision.Core.Models;
 
 namespace RobotVision.Core.Recipe;
@@ -213,6 +214,9 @@ public sealed class RecipeLoader(string folder)
         if (recipe.Iou is < 0 or > 1)
             throw new InvalidRecipeException(name, "iou 必须在 [0,1]");
 
+        ValidateOutputOffset(recipe);
+        ValidateAssetPins(recipe);
+
         if (recipe.AngleMode == AngleMode.KeyPointLine && recipe.Keypoint.IndexA == recipe.Keypoint.IndexB)
             throw new InvalidRecipeException(name, "keypoint.indexA 与 keypoint.indexB 不能相同");
 
@@ -230,6 +234,34 @@ public sealed class RecipeLoader(string folder)
         }
 
         ValidateLighting(recipe);
+    }
+
+    private static void ValidateOutputOffset(RecipeConfig recipe)
+    {
+        var o = recipe.OutputOffset;
+        if (!double.IsFinite(o.X) || !double.IsFinite(o.Y) || !double.IsFinite(o.RzDeg))
+            throw new InvalidRecipeException(recipe.Name, "outputOffset 必须为有限数字");
+        if (Math.Abs(o.X) > 100 || Math.Abs(o.Y) > 100)
+            throw new InvalidRecipeException(recipe.Name, "outputOffset.x/y 绝对值不能超过 100mm（疑似误填；更大偏差请重标定）");
+        if (Math.Abs(o.RzDeg) > 180)
+            throw new InvalidRecipeException(recipe.Name, "outputOffset.rzDeg 绝对值不能超过 180°");
+    }
+
+    private static void ValidateAssetPins(RecipeConfig recipe)
+    {
+        var name = recipe.Name;
+        if (!string.IsNullOrWhiteSpace(recipe.StationSha256) &&
+            !FileSha256.IsHex(recipe.StationSha256))
+            throw new InvalidRecipeException(name, "stationSha256 必须是 64 位十六进制 SHA-256");
+
+        for (var i = 0; i < recipe.ModelSha256.Count; i++)
+        {
+            var hash = recipe.ModelSha256[i];
+            if (string.IsNullOrWhiteSpace(hash))
+                continue;
+            if (!FileSha256.IsHex(hash))
+                throw new InvalidRecipeException(name, $"modelSha256[{i}] 必须是 64 位十六进制 SHA-256");
+        }
     }
 
     /// <summary>

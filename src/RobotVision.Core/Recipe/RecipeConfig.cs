@@ -267,6 +267,21 @@ public sealed class RecipeConfig
     /// <summary>旋转中心补偿（默认关闭）。开启前需 CalibTool rotation 完成轴心标定。</summary>
     public RotationCompensationMode RotationCompensation { get; set; } = RotationCompensationMode.None;
 
+    /// <summary>输出补偿（首件微调）：变换与偏心补偿之后叠加到每个机器人位姿。缺省全 0。</summary>
+    public OutputOffsetOptions OutputOffset { get; set; } = new();
+
+    /// <summary>
+    /// 与 <see cref="Models"/> 按下标对应的 SHA-256（小写 hex）。空串或不填 = 该槽不校验。
+    /// 钉死后替换同名 ONNX 会在 TRIGGER 时返回 1017，避免错模型静默出坐标。
+    /// </summary>
+    public List<string> ModelSha256 { get; set; } = [];
+
+    /// <summary>
+    /// 工位映射档案（多项式/外参/比例，以及开启偏心补偿时的旋转中心）内容指纹。
+    /// 空 = 不校验。重标定后须在配方页重新钉扎。
+    /// </summary>
+    public string? StationSha256 { get; set; }
+
     /// <summary>光源控制器 Id（对应 appsettings 中注册的光源）；空 = 不亮灯。</summary>
     public string? LightControllerId { get; set; }
 
@@ -311,6 +326,9 @@ public sealed class RecipeConfig
         Blob = Blob.Clone(),
         Roi = Roi,
         RotationCompensation = RotationCompensation,
+        OutputOffset = OutputOffset.Clone(),
+        ModelSha256 = [.. ModelSha256],
+        StationSha256 = StationSha256,
         LightControllerId = LightControllerId,
         Lighting = Lighting?.Clone(),
     };

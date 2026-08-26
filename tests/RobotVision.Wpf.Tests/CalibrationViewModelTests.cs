@@ -1,4 +1,5 @@
 using FluentAssertions;
+using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure.Calibration;

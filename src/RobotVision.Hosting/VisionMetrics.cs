@@ -11,7 +11,8 @@ public sealed record RecipeStatsSnapshot(
     long Failed,
     double AvgMs,
     double LastMs,
-    DateTime? LastAt)
+    DateTime? LastAt,
+    int ConsecutiveFails = 0)
 {
     public double SuccessRate => Total == 0 ? 0 : (double)Ok / Total;
 }
@@ -25,6 +26,7 @@ internal sealed class RecipeStat
     public double TotalMs;
     public double LastMs;
     public DateTime? LastAt;
+    public int ConsecutiveFails;
 }
 
 /// <summary>
@@ -87,7 +89,8 @@ public sealed class VisionMetrics
                 {
                     return new RecipeStatsSnapshot(
                         kv.Key, s.Total, s.Ok, s.Failed,
-                        s.Total == 0 ? 0 : s.TotalMs / s.Total, s.LastMs, s.LastAt);
+                        s.Total == 0 ? 0 : s.TotalMs / s.Total, s.LastMs, s.LastAt,
+                        s.ConsecutiveFails);
                 }
             })
             .OrderByDescending(s => s.LastAt ?? DateTime.MinValue)
@@ -107,6 +110,10 @@ public sealed class VisionMetrics
             s.TotalMs += result.ElapsedMs;
             s.LastMs = result.ElapsedMs;
             s.LastAt = DateTime.Now;
+            if (result.Ok)
+                s.ConsecutiveFails = 0;
+            else if (ProcessFailureCodes.CountsTowardStreak(result.ErrorCode))
+                s.ConsecutiveFails++;
         }
     }
 
@@ -121,6 +128,71 @@ public sealed class VisionMetrics
             _healthLatency[_healthIndex % HealthWindow] = result.ElapsedMs;
             _healthOutcome[_healthIndex % HealthWindow] = outcome;
             _healthIndex++;
+        }
+    }
+
+    /// <summary>指定配方的连续过程失败次数（成功清零；配置类错误不计入）。</summary>
+    public int GetConsecutiveFails(string recipe)
+    {
+        if (!_stats.TryGetValue(recipe, out var s))
+            return 0;
+        lock (s)
+            return s.ConsecutiveFails;
+    }
+
+    /// <summary>所有配方中最大的连续失败次数（供 STATUS 总览）。</summary>
+    public int MaxConsecutiveFails
+    {
+        get
+        {
+            var max = 0;
+            foreach (var s in _stats.Values)
+            {
+                lock (s)
+                    max = Math.Max(max, s.ConsecutiveFails);
+            }
+            return max;
+        }
+    }
+
+    /// <summary>解除联锁：清空指定配方或全部配方的连续失败计数。</summary>
+    public void ResetConsecutive(string? recipe = null)
+    {
+        if (string.IsNullOrWhiteSpace(recipe))
+        {
+            foreach (var s in _stats.Values)
+            {
+                lock (s)
+                    s.ConsecutiveFails = 0;
+            }
+            return;
+        }
+
+        if (_stats.TryGetValue(recipe, out var one))
+        {
+            lock (one)
+                one.ConsecutiveFails = 0;
+        }
+    }
+
+    /// <summary>从落盘快照恢复累计统计（进程重启后连续失败/良率不丢）。健康窗口仍从空开始。</summary>
+    public void Restore(IEnumerable<RecipeStatsSnapshot> snapshots)
+    {
+        foreach (var snap in snapshots)
+        {
+            if (string.IsNullOrWhiteSpace(snap.Recipe))
+                continue;
+            var s = _stats.GetOrAdd(snap.Recipe, _ => new RecipeStat());
+            lock (s)
+            {
+                s.Total = snap.Total;
+                s.Ok = snap.Ok;
+                s.Failed = snap.Failed;
+                s.TotalMs = snap.AvgMs * snap.Total;
+                s.LastMs = snap.LastMs;
+                s.LastAt = snap.LastAt;
+                s.ConsecutiveFails = Math.Max(0, snap.ConsecutiveFails);
+            }
         }
     }
 }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using RobotVision.Core;
+using RobotVision.Core.Assets;
 using RobotVision.Core.Models;
 
 namespace RobotVision.Infrastructure.Inference;
@@ -155,6 +156,29 @@ public sealed class ModelManager(
     public bool ModelFileExists(string fileName) =>
         !string.IsNullOrWhiteSpace(fileName) &&
         File.Exists(Path.IsPathRooted(fileName) ? fileName : Path.Combine(modelsFolder, fileName));
+
+    /// <summary>计算模型文件 SHA-256（按路径+mtime+大小缓存，TRIGGER 钉扎比对用）。</summary>
+    public string ComputeSha256(string modelFile)
+    {
+        var path = ResolvePath(modelFile);
+        if (!File.Exists(path))
+            throw new FileNotFoundException($"模型文件不存在: {modelFile}", path);
+
+        var info = new FileInfo(path);
+        lock (_hashCache)
+        {
+            if (_hashCache.TryGetValue(path, out var cached) &&
+                cached.Stamp == info.LastWriteTimeUtc && cached.Size == info.Length)
+                return cached.Hash;
+        }
+
+        var hash = FileSha256.ComputeFile(path);
+        lock (_hashCache)
+            _hashCache[path] = (info.LastWriteTimeUtc, info.Length, hash);
+        return hash;
+    }
+
+    private readonly Dictionary<string, (DateTime Stamp, long Size, string Hash)> _hashCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>已物化的缓存键（供管理界面显示加载状态；按 (路径, 任务) 去重，版本不外露）。</summary>
     public IReadOnlyList<(string Path, InferenceTask Task)> LoadedKeys

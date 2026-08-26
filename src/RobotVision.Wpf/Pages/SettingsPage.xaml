@@ -183,6 +183,42 @@
                     </StackPanel>
                 </ui:CardExpander>
 
+                <!-- 过程能力与连续失败联锁 -->
+                <ui:CardExpander IsExpanded="True" Margin="0,0,0,8" Padding="12">
+                    <ui:CardExpander.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBlock FontTypography="Subtitle" Text="过程能力 / 连续失败联锁" VerticalAlignment="Center" />
+                            <Border Style="{StaticResource HotBadge}">
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                            </Border>
+                        </StackPanel>
+                    </ui:CardExpander.Header>
+                    <StackPanel Margin="0,10,0,0">
+                        <ui:ToggleSwitch Content="启用统计落盘（data/metrics）"
+                                         IsChecked="{Binding ProcessHealthEnabled}" />
+                        <StackPanel Margin="0,8,0,0"
+                                    Visibility="{Binding ShowProcessHealthFields,
+                                        Converter={StaticResource BoolToVisibilityConverter}}">
+                            <UniformGrid Columns="2">
+                                <StackPanel Margin="0,0,10,8">
+                                    <TextBlock Text="连续失败联锁次数（0 = 不联锁）" Margin="0,0,0,4" />
+                                    <ui:NumberBox Value="{Binding ConsecutiveFailLimit}" Minimum="0" Maximum="100"
+                                                  SmallChange="1" SpinButtonPlacementMode="Inline"
+                                                  ToolTip="同配方连续过程失败（1003/1005/1007/1008 等）达到该次数后返回 1018" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,0,8" VerticalAlignment="Bottom">
+                                    <CheckBox Content="达到次数后禁止触发（1018）"
+                                              IsChecked="{Binding InhibitOnLimit}" FontSize="12"
+                                              Margin="0,0,0,8" />
+                                </StackPanel>
+                            </UniformGrid>
+                            <ui:TextBlock FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                          TextWrapping="Wrap"
+                                          Text="排除光源/来料后，在通信页点「解除联锁」或 PLC 发 CLEARINHIBIT。配置类错误（1001/1004/1012/1017）不计入连续失败。" />
+                        </StackPanel>
+                    </StackPanel>
+                </ui:CardExpander>
+
                 <!-- IP 白名单（默认收起） -->
                 <ui:CardExpander IsExpanded="False" Margin="0,0,0,8" Padding="12">
                     <ui:CardExpander.Header>

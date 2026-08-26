@@ -32,7 +32,9 @@ public sealed class VisionService(
     CalibrationManager calibration,
     AngleStrategyFactory strategies,
     FailureImageStore failureImages,
-    ILogger<VisionService> log)
+    ILogger<VisionService> log,
+    AssetIntegrityChecker? assets = null,
+    ProcessHealthStore? health = null)
 {
     private PipelineScheduler? _scheduler;
 
@@ -40,6 +42,11 @@ public sealed class VisionService(
     private PipelineScheduler Scheduler => _scheduler ??= new PipelineScheduler(log);
 
     private readonly VisionMetrics _metrics = new();
+    private int _healthRestored;
+
+    public ProcessHealthStore? ProcessHealth => health;
+
+    public int ConsecutiveFailLimit => health?.ConsecutiveFailLimit ?? 0;
 
     public int QueueDepth => Scheduler.QueueDepth;
 
@@ -71,10 +78,50 @@ public sealed class VisionService(
     }
 
     /// <summary>最近窗口健康指标：总次数 / 业务失败数 / 超时数（含 1008/1010）/ 平均耗时 / P95。</summary>
-    public (int Total, int Failed, int TimedOut, double AvgMs, double P95Ms) Health => _metrics.Health;
+    public (int Total, int Failed, int TimedOut, double AvgMs, double P95Ms) Health
+    {
+        get
+        {
+            EnsureHealthRestored();
+            return _metrics.Health;
+        }
+    }
 
     /// <summary>按配方聚合的运行统计快照（最近触发优先）。含手动触发与 TCP 触发。</summary>
-    public IReadOnlyList<RecipeStatsSnapshot> GetRecipeStats() => _metrics.GetRecipeStats();
+    public IReadOnlyList<RecipeStatsSnapshot> GetRecipeStats()
+    {
+        EnsureHealthRestored();
+        return _metrics.GetRecipeStats();
+    }
+
+    /// <summary>所有配方中最大连续过程失败次数（STATUS 附加字段）。</summary>
+    public int MaxConsecutiveFails
+    {
+        get
+        {
+            EnsureHealthRestored();
+            return _metrics.MaxConsecutiveFails;
+        }
+    }
+
+    /// <summary>是否有配方因连续失败被联锁。</summary>
+    public bool AnyInhibited
+    {
+        get
+        {
+            EnsureHealthRestored();
+            return health?.AnyInhibited(_metrics) == true;
+        }
+    }
+
+    /// <summary>解除连续失败联锁（全部或指定配方）并落盘。</summary>
+    public void ClearInhibit(string? recipe = null)
+    {
+        EnsureHealthRestored();
+        _metrics.ResetConsecutive(recipe);
+        try { health?.PersistState(_metrics); }
+        catch (Exception ex) { log.LogWarning(ex, "解除联锁后落盘失败"); }
+    }
 
     /// <summary>
     /// 每次成功完成推理（含零检出）后触发；在管线线程内克隆快照（快），
@@ -94,7 +141,12 @@ public sealed class VisionService(
     /// </summary>
     public Task<VisionResult> RunAsync(string recipeName, TcpClientPose? pose, CancellationToken ct) =>
         Scheduler.RunAsync(recipeName,
-            (name, token) => ProcessCoreInnerAsync(name, pose, token), _metrics.Record, ct);
+            (name, token) => ProcessCoreInnerAsync(name, pose, token),
+            result =>
+            {
+                _metrics.Record(result);
+                health?.OnCompleted(result, _metrics);
+            }, ct);
 
     private async Task<VisionResult> ProcessCoreInnerAsync(string recipeName, TcpClientPose? pose, CancellationToken ct)
     {
@@ -112,6 +164,16 @@ public sealed class VisionService(
             if (!recipe.Enabled)
                 throw new InvalidRecipeException(recipeName, "配方已停用（Enabled=false）",
                     VisionErrorCode.RecipeDisabled);
+
+            EnsureHealthRestored();
+            if (health?.IsInhibited(_metrics, recipeName) == true)
+                return VisionResult.Fail(recipeName, VisionErrorCode.ProcessUnhealthy,
+                    "PROCESS_UNHEALTHY", stopwatch.Elapsed.TotalMilliseconds);
+
+            var assetError = assets?.Check(recipe);
+            if (assetError is not null)
+                return VisionResult.Fail(recipeName, VisionErrorCode.AssetMismatch,
+                    assetError, stopwatch.Elapsed.TotalMilliseconds);
 
             // OnArm 位姿：缺位姿直接 1014；有位姿再做 1012 一致性（多项式 Translate 仅校 RZ）。
             calibration.RequireClientPose(recipe.StationId, pose);
@@ -190,6 +252,7 @@ public sealed class VisionService(
                     _ => calibration.PixelToRobot(recipe.StationId, p, recipe.CameraId, pose),
                 })
                 .Select(r => calibration.CompensateRotation(recipe.StationId, recipe.RotationCompensation, r))
+                .Select(r => recipe.OutputOffset.Apply(r))
                 .ToList();
 
             // 与 Poses 一一对应的置信度透传（UI/留存可用，TCP 应答格式不含）
@@ -286,5 +349,12 @@ public sealed class VisionService(
                 }
             });
         }
+    }
+
+    private void EnsureHealthRestored()
+    {
+        if (health is null || Interlocked.Exchange(ref _healthRestored, 1) != 0)
+            return;
+        health.RestoreInto(_metrics);
     }
 }

@@ -203,6 +203,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(AngleStrategyTypeRegistry.Default);
         services.AddSingleton(sp => new FailureImageStore(
             cfg.FailureImage, sp.GetRequiredService<ILogger<FailureImageStore>>()));
+
+        var metricsFolder = cfg.ResolveMetricsFolder();
+        services.AddSingleton(sp =>
+            new ProcessHealthStore(cfg.ProcessHealth, metricsFolder,
+                sp.GetRequiredService<ILogger<ProcessHealthStore>>()));
+        services.AddSingleton<AssetIntegrityChecker>();
+
         services.AddSingleton(sp => new VisionService(
             sp.GetRequiredService<RecipeLoader>(),
             sp.GetRequiredService<CameraManager>(),
@@ -210,7 +217,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<CalibrationManager>(),
             sp.GetRequiredService<AngleStrategyFactory>(),
             sp.GetRequiredService<FailureImageStore>(),
-            sp.GetRequiredService<ILogger<VisionService>>())
+            sp.GetRequiredService<ILogger<VisionService>>(),
+            sp.GetRequiredService<AssetIntegrityChecker>(),
+            sp.GetRequiredService<ProcessHealthStore>())
         {
             MaxQueueDepth = Math.Max(1, cfg.MaxQueueDepth),
             MaxConcurrent = Math.Clamp(cfg.MaxConcurrent, 1, Math.Max(1, cfg.MaxQueueDepth)),
@@ -249,7 +258,13 @@ public static class ServiceCollectionExtensions
                 // STATUS：ready 仅在未执行且队列为空时成立，避免 PLC 在排队时误判空闲
                 StateProvider = () => new TcpServerManager.TcpServerState(
                     !vision.IsProcessing && vision.QueueDepth == 0,
-                    vision.QueueDepth, vision.MaxQueueDepth, vision.LastElapsedMs),
+                    vision.QueueDepth, vision.MaxQueueDepth, vision.LastElapsedMs,
+                    vision.MaxConsecutiveFails, vision.AnyInhibited ? 1 : 0),
+                ClearInhibitHandler = recipe =>
+                {
+                    vision.ClearInhibit(recipe);
+                    return string.IsNullOrEmpty(recipe) ? "OK,CLEARED" : $"OK,CLEARED,{recipe}";
+                },
             };
         });
 
@@ -275,6 +290,9 @@ public static class ServiceCollectionExtensions
                 calibration.PoseCheckEnabled = updated.PoseCheck.Enabled;
                 calibration.PoseXyToleranceMm = updated.PoseCheck.XyToleranceMm;
                 calibration.PoseRzToleranceDeg = updated.PoseCheck.RzToleranceDeg;
+
+                var health = sp.GetRequiredService<ProcessHealthStore>();
+                health.ApplyConfig(updated.ProcessHealth);
 
                 var failures = sp.GetRequiredService<FailureImageStore>();
                 failures.Enabled = updated.FailureImage.Enabled;

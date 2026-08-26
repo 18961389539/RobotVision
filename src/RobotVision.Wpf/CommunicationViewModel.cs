@@ -53,7 +53,7 @@ public sealed record RequestRow(
 public sealed record RecipeStatsRow(
     string Recipe, long Total, long Ok, long Failed,
     string SuccessRate, string AvgMs, string LastMs, string LastAt,
-    double Rate, string Tier);
+    double Rate, string Tier, int ConsecutiveFails = 0);
 
 /// <summary>
 /// 通信监控：连接列表、请求历史、主动断开与服务启停、按配方运行统计。
@@ -98,6 +98,10 @@ public partial class CommunicationViewModel : ObservableObject
 
     /// <summary>最近一条 TCP 行（含处理中），避免只看「运行统计」时误以为没有报文。</summary>
     [ObservableProperty] private string _lastTcpLineText = "尚无 TCP 请求";
+
+    [ObservableProperty] private string _interlockText = "";
+
+    public bool HasInterlock => !string.IsNullOrEmpty(InterlockText);
 
     public CommunicationViewModel(TcpServerManager tcp, VisionService vision)
     {
@@ -211,7 +215,7 @@ public partial class CommunicationViewModel : ObservableObject
         RefreshStats();
     }
 
-    /// <summary>从 VisionService 拉取按配方聚合的统计（含手动触发；进程内存统计，重启归零）。</summary>
+    /// <summary>从 VisionService 拉取按配方聚合的统计（含手动触发；累计可落盘，重启不丢）。</summary>
     private void RefreshStats()
     {
         var stats = _vision.GetRecipeStats();
@@ -225,7 +229,7 @@ public partial class CommunicationViewModel : ObservableObject
                 s.Recipe, s.Total, s.Ok, s.Failed,
                 $"{s.SuccessRate:P1}", $"{s.AvgMs:0}", $"{s.LastMs:0}",
                 s.LastAt?.ToString("HH:mm:ss") ?? "—",
-                rate, tier));
+                rate, tier, s.ConsecutiveFails));
         }
 
         var total = stats.Sum(s => s.Total);
@@ -237,7 +241,30 @@ public partial class CommunicationViewModel : ObservableObject
 
         SuccessRateText = total == 0 ? "—" : $"{(double)ok / total:P1}";
         AvgMsText = total == 0 ? "—" : $"{avg:0} ms";
+
+        if (_vision.AnyInhibited)
+        {
+            var locked = stats.Where(s => s.ConsecutiveFails >= Math.Max(1, _vision.ConsecutiveFailLimit))
+                .Select(s => $"{s.Recipe}×{s.ConsecutiveFails}")
+                .ToList();
+            InterlockText = locked.Count == 0
+                ? "连续失败联锁已触发（1018）。排除现场问题后点「解除联锁」。"
+                : $"连续失败联锁：{string.Join("、", locked)}。TRIGGER 返回 1018，排除后点「解除联锁」。";
+        }
+        else
+        {
+            InterlockText = "";
+        }
+
+        OnPropertyChanged(nameof(HasInterlock));
         OnPropertyChanged(nameof(HasStats));
+    }
+
+    [RelayCommand]
+    private void ClearInhibit()
+    {
+        _vision.ClearInhibit();
+        RefreshStats();
     }
 
     [RelayCommand]

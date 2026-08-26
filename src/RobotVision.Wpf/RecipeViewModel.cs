@@ -334,6 +334,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         OnPropertyChanged(nameof(ShowBlobFixedThreshold));
         OnPropertyChanged(nameof(PrimaryModel));
         OnPropertyChanged(nameof(SecondaryModel));
+        OnPropertyChanged(nameof(AssetPinStatus));
     }
 
     /// <summary>
@@ -1237,6 +1238,106 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         OnPropertyChanged(nameof(IsDualBlobMode));
         OnPropertyChanged(nameof(IsTemplateMethod));
         OnPropertyChanged(nameof(HasTemplate));
+        OnPropertyChanged(nameof(AssetPinStatus));
+    }
+
+    /// <summary>把当前模型文件与工位标定档案的 SHA-256 写入编辑器（须再点保存）。</summary>
+    [RelayCommand]
+    private void PinAssets()
+    {
+        this.Commit();
+        try
+        {
+            var (hashes, station) = SnapshotAssetPins(Editor);
+            Editor.ModelSha256 = hashes;
+            Editor.StationSha256 = station;
+            NotifyEditorMutated();
+            var modelN = hashes.Count(h => !string.IsNullOrWhiteSpace(h));
+            Message = station is null
+                ? $"已钉扎 {modelN} 个模型哈希（无工位标定指纹）；请保存配方"
+                : $"已钉扎 {modelN} 个模型哈希 + 工位标定指纹；请保存配方";
+        }
+        catch (Exception ex)
+        {
+            Message = $"钉扎失败: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void ClearAssetPins()
+    {
+        Editor.ModelSha256 = [];
+        Editor.StationSha256 = null;
+        NotifyEditorMutated();
+        Message = "已清除哈希钉扎（须保存后生效）；TRIGGER 不再校验 1017";
+    }
+
+    public string AssetPinStatus
+    {
+        get
+        {
+            var pinnedModels = Editor.ModelSha256.Count(h => !string.IsNullOrWhiteSpace(h));
+            var pinnedStation = !string.IsNullOrWhiteSpace(Editor.StationSha256);
+            if (pinnedModels == 0 && !pinnedStation)
+                return "未钉扎：拷错同名 ONNX 或覆盖标定档案时不会被拦截。验证通过后请钉死哈希。";
+
+            try
+            {
+                var (hashes, station) = SnapshotAssetPins(Editor);
+                var modelOk = true;
+                for (var i = 0; i < Editor.ModelSha256.Count; i++)
+                {
+                    var pin = Editor.ModelSha256[i];
+                    if (string.IsNullOrWhiteSpace(pin))
+                        continue;
+                    var actual = i < hashes.Count ? hashes[i] : "";
+                    if (!RobotVision.Core.Assets.FileSha256.EqualsHex(pin, actual))
+                    {
+                        modelOk = false;
+                        break;
+                    }
+                }
+
+                var stationOk = !pinnedStation ||
+                    RobotVision.Core.Assets.FileSha256.EqualsHex(Editor.StationSha256, station);
+                if (modelOk && stationOk)
+                    return pinnedStation
+                        ? $"已钉扎 {pinnedModels} 个模型 + 工位，与当前文件一致"
+                        : $"已钉扎 {pinnedModels} 个模型，与当前文件一致";
+                return "钉扎与当前文件不一致：TRIGGER 将返回 1017。请核对文件或重新钉扎后保存。";
+            }
+            catch (Exception ex)
+            {
+                return $"无法核对当前哈希：{ex.Message}";
+            }
+        }
+    }
+
+    private (List<string> ModelHashes, string? StationHash) SnapshotAssetPins(RecipeConfig recipe)
+    {
+        var hashes = new List<string>();
+        if (recipe.AngleMode != AngleMode.DualBlobCenterLine)
+        {
+            foreach (var file in recipe.Models)
+            {
+                if (string.IsNullOrWhiteSpace(file) || !_models.ModelFileExists(file))
+                {
+                    hashes.Add("");
+                    continue;
+                }
+
+                hashes.Add(_models.ComputeSha256(file));
+            }
+        }
+
+        string? station = null;
+        if (!string.IsNullOrWhiteSpace(recipe.StationId))
+        {
+            var includeRotation = recipe.RotationCompensation == RotationCompensationMode.EccentricTool;
+            station = _calibration.ComputeStationSha256(recipe.StationId, includeRotation);
+        }
+
+        return (hashes, station);
     }
 
     private RecipeListItem DescribeItem(string name)
@@ -1262,6 +1363,11 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
                 tags.Add("ROI");
             if (r.Lighting is not null)
                 tags.Add($"光:{r.LightControllerId}");
+            if (!r.OutputOffset.IsZero)
+                tags.Add("补偿");
+            if (r.ModelSha256.Any(h => !string.IsNullOrWhiteSpace(h)) ||
+                !string.IsNullOrWhiteSpace(r.StationSha256))
+                tags.Add("钉扎");
             return new RecipeListItem(name, string.Join(" · ", tags), true, r.Enabled, r.Description);
         }
         catch (Exception ex)

@@ -54,6 +54,12 @@ public sealed class AppConfig
     /// <summary>拍照位姿校验（TRIGGER,配方名,X,Y,RZ 带位姿时与 OnArm 外参档案比对）。</summary>
     public PoseCheckConfig PoseCheck { get; set; } = new();
 
+    /// <summary>模型/标定资产完整性（配方钉扎哈希 + 可选全局清单）。</summary>
+    public AssetIntegrityConfig AssetIntegrity { get; set; } = new();
+
+    /// <summary>过程能力落盘与连续失败联锁。</summary>
+    public ProcessHealthConfig ProcessHealth { get; set; } = new();
+
     public List<CameraConfig> Cameras { get; set; } = [];
 
     public List<LightControllerConfig> LightControllers { get; set; } = [];
@@ -94,6 +100,35 @@ public sealed class PoseCheckConfig
 
     /// <summary>拍照点第 4 轴角度容差（deg，归一化差，超过返回 1012）。</summary>
     public double RzToleranceDeg { get; set; } = 0.5;
+}
+
+/// <summary>模型/标定 SHA-256 钉扎。Enabled=false 时 TRIGGER 不校验哈希（仅调试）。</summary>
+public sealed class AssetIntegrityConfig
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// true = 配方引用的每个模型必须出现在 models/manifest.json 且哈希一致。
+    /// 默认 false：仅校验配方里已钉扎的哈希（未钉扎的旧配方行为不变）。
+    /// </summary>
+    public bool RequireManifest { get; set; }
+}
+
+/// <summary>过程能力：按日 TSV 追加 + 累计 JSON；连续过程失败达到阈值后返回 1018。</summary>
+public sealed class ProcessHealthConfig
+{
+    public bool Enabled { get; set; } = true;
+
+    public string Folder { get; set; } = "data/metrics";
+
+    /// <summary>连续过程失败达到该次数后联锁（0 = 只统计不联锁）。</summary>
+    public int ConsecutiveFailLimit { get; set; } = 5;
+
+    /// <summary>达到阈值后拒绝 TRIGGER（1018）。false = 只记录/展示，不拦截。</summary>
+    public bool InhibitOnLimit { get; set; } = true;
+
+    /// <summary>按日 TSV 保留天数；≤0 不按天清理。</summary>
+    public int RetainedDays { get; set; } = 90;
 }
 
 public sealed class FileLoggingConfig
@@ -243,6 +278,8 @@ public static class AppConfigExtensions
     public static string ResolveModelsFolder(this AppConfig cfg) => ResolveFolder(cfg.ModelsFolder);
 
     public static string ResolveCalibrationFolder(this AppConfig cfg) => ResolveFolder(cfg.CalibrationFolder);
+
+    public static string ResolveMetricsFolder(this AppConfig cfg) => ResolveFolder(cfg.ProcessHealth.Folder);
 
     /// <summary>
     /// 启动时对齐固定超时策略：采集 60s、请求总超时 ≥90s（UI 不暴露，避免旧配置 3s/5s 带病运行）。

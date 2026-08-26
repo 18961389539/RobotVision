@@ -7,8 +7,12 @@
     <Page.InputBindings>
         <KeyBinding Key="F5" Command="{Binding ToggleServiceCommand}" />
     </Page.InputBindings>
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+    </Page.Resources>
     <Grid Margin="8">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -41,8 +45,23 @@
             </Grid>
         </ui:Card>
 
+        <Border Grid.Row="1" Margin="0,0,0,8" Padding="12,8" CornerRadius="6"
+                Background="#3DA32D2D"
+                Visibility="{Binding HasInterlock, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding InterlockText}" TextWrapping="Wrap" VerticalAlignment="Center"
+                           Foreground="White" FontSize="12" />
+                <ui:Button Grid.Column="1" Content="解除联锁" Appearance="Primary" Margin="12,0,0,0"
+                           Command="{Binding ClearInhibitCommand}" Padding="12,4" />
+            </Grid>
+        </Border>
+
         <!-- 方案 A：统计迷你卡（4 个核心指标一瞥即知） -->
-        <ui:Card Grid.Row="1" Margin="0,0,0,8" Padding="16,10">
+        <ui:Card Grid.Row="2" Margin="0,0,0,8" Padding="16,10">
             <UniformGrid Columns="4">
                 <StackPanel>
                     <TextBlock Text="当前连接" FontSize="11"
@@ -72,7 +91,7 @@
         </ui:Card>
 
         <!-- 默认打开「请求历史」：PING / 未知序列号等不会进入「运行统计」 -->
-        <TabControl Grid.Row="2" SelectedIndex="0">
+        <TabControl Grid.Row="3" SelectedIndex="0">
             <TabItem>
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal">
@@ -226,6 +245,7 @@
                                             <Run Text=" · 失败 " /><Run Text="{Binding Failed, StringFormat={}{0:N0}}" />
                                             <Run Text=" · 平均 " /><Run Text="{Binding AvgMs}" /><Run Text=" ms" />
                                             <Run Text=" · 最近 " /><Run Text="{Binding LastMs}" /><Run Text=" ms" />
+                                            <Run Text=" · 连续失败 " /><Run Text="{Binding ConsecutiveFails}" />
                                             <Run Text=" · 最近触发 " /><Run Text="{Binding LastAt}" />
                                         </TextBlock>
                                     </StackPanel>

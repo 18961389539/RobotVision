@@ -52,6 +52,16 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     private double _poseRzToleranceDeg = 0.5;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowProcessHealthFields))]
+    private bool _processHealthEnabled = true;
+
+    [ObservableProperty]
+    private int _consecutiveFailLimit = 5;
+
+    [ObservableProperty]
+    private bool _inhibitOnLimit = true;
+
+    [ObservableProperty]
     private int _maxQueueDepth;
 
     [ObservableProperty]
@@ -69,6 +79,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
 
     /// <summary>位姿校验关闭时隐藏容差字段（仅调试场景关校验）。</summary>
     public bool ShowPoseToleranceFields => PoseCheckEnabled;
+
+    /// <summary>过程能力关闭时隐藏联锁次数。</summary>
+    public bool ShowProcessHealthFields => ProcessHealthEnabled;
 
     /// <summary>失败留存关闭时隐藏保留数量。</summary>
     public bool ShowFailureRetention => FailureEnabled;
@@ -124,6 +137,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         PoseCheckEnabled = _cfg.PoseCheck.Enabled;
         PoseXyToleranceMm = _cfg.PoseCheck.XyToleranceMm;
         PoseRzToleranceDeg = _cfg.PoseCheck.RzToleranceDeg;
+        ProcessHealthEnabled = _cfg.ProcessHealth.Enabled;
+        ConsecutiveFailLimit = _cfg.ProcessHealth.ConsecutiveFailLimit;
+        InhibitOnLimit = _cfg.ProcessHealth.InhibitOnLimit;
         MaxQueueDepth = _vision.MaxQueueDepth;
         MaxConcurrent = _vision.MaxConcurrent;
         TcpBacklog = _tcp.Backlog;
@@ -202,6 +218,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         PoseCheckEnabled = true;
         PoseXyToleranceMm = 0.5;
         PoseRzToleranceDeg = 0.5;
+        ProcessHealthEnabled = true;
+        ConsecutiveFailLimit = 5;
+        InhibitOnLimit = true;
         MaxQueueDepth = DefaultMaxQueueDepth;
         MaxConcurrent = DefaultMaxConcurrent;
         TcpBacklog = DefaultTcpBacklog;
@@ -241,7 +260,8 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
             FailureEnabled, FailureRetainedCount,
             IpAddress.Trim(), TcpPort, whitelist,
             (long)Math.Round(IdleTimeoutMs),
-            PoseCheckEnabled, PoseXyToleranceMm, PoseRzToleranceDeg);
+            PoseCheckEnabled, PoseXyToleranceMm, PoseRzToleranceDeg,
+            ProcessHealthEnabled, ConsecutiveFailLimit, InhibitOnLimit);
     }
 
     private static bool Same(ServiceSettingsValues a, ServiceSettingsValues b) =>
@@ -255,5 +275,8 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         a.PoseCheckEnabled == b.PoseCheckEnabled &&
         Math.Abs(a.PoseXyToleranceMm - b.PoseXyToleranceMm) < 1e-9 &&
         Math.Abs(a.PoseRzToleranceDeg - b.PoseRzToleranceDeg) < 1e-9 &&
+        a.ProcessHealthEnabled == b.ProcessHealthEnabled &&
+        a.ConsecutiveFailLimit == b.ConsecutiveFailLimit &&
+        a.InhibitOnLimit == b.InhibitOnLimit &&
         a.IpWhitelist.SequenceEqual(b.IpWhitelist, StringComparer.OrdinalIgnoreCase);
 }

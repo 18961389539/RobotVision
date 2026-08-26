@@ -101,12 +101,27 @@ public class ProtocolTests
     }
 
     [Theory]
-    [InlineData(true, 0, 4, 122, "OK,ready,0,4,122")]
-    [InlineData(false, 3, 4, 1009, "OK,busy,3,4,1009")]
+    [InlineData(true, 0, 4, 122, "OK,ready,0,4,122,0,0")]
+    [InlineData(false, 3, 4, 1009, "OK,busy,3,4,1009,0,0")]
     public void FormatStatus_ReflectsPipelineState(bool ready, int queue, int max, double lastMs, string expected)
     {
         var state = new TcpServerManager.TcpServerState(ready, queue, max, lastMs);
         Assert.Equal(expected, TcpServerManager.FormatStatus(state));
+    }
+
+    [Fact]
+    public void FormatStatus_AppendsHealthFields()
+    {
+        var state = new TcpServerManager.TcpServerState(true, 0, 4, 80, ConsecutiveFails: 5, Inhibited: 1);
+        Assert.Equal("OK,ready,0,4,80,5,1", TcpServerManager.FormatStatus(state));
+    }
+
+    [Fact]
+    public void ParseClearInhibitRecipe_AllOrNamed()
+    {
+        Assert.Null(TcpServerManager.ParseClearInhibitRecipe("CLEARINHIBIT"));
+        Assert.Equal("A01", TcpServerManager.ParseClearInhibitRecipe("CLEARINHIBIT,A01"));
+        Assert.Equal("A01", TcpServerManager.ParseClearInhibitRecipe("clearinhibit, A01 ,extra"));
     }
 
     // ---- 触发行格式（配方名 / 序列号,X,Y,RZ）----

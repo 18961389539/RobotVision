@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using OpenCvSharp;
 using RobotVision.Core;
+using RobotVision.Core.Assets;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
@@ -122,6 +123,38 @@ public sealed class CalibrationManager : IDisposable
         if (_scales.ContainsKey(stationId))
             return StationMappingMode.Scale;
         return StationMappingMode.None;
+    }
+
+    /// <summary>
+    /// 工位映射档案指纹（多项式 &gt; 外参 &gt; 比例的内存对象规范化 JSON）。
+    /// <paramref name="includeRotation"/> 为 true 时并入旋转中心档案（偏心补偿工位）。
+    /// 无映射档案返回 null。
+    /// </summary>
+    public string? ComputeStationSha256(string? stationId, bool includeRotation = false)
+    {
+        if (string.IsNullOrEmpty(stationId))
+            return null;
+
+        var parts = new List<string>();
+        switch (GetMappingMode(stationId))
+        {
+            case StationMappingMode.Polynomial when _polynomials.TryGetValue(stationId, out var poly):
+                parts.Add("polynomial:" + JsonSerializer.Serialize(poly, JsonOptions));
+                break;
+            case StationMappingMode.Extrinsic when _extrinsics.TryGetValue(stationId, out var ext):
+                parts.Add("extrinsic:" + JsonSerializer.Serialize(ext, JsonOptions));
+                break;
+            case StationMappingMode.Scale when _scales.TryGetValue(stationId, out var scale):
+                parts.Add("scale:" + JsonSerializer.Serialize(scale, JsonOptions));
+                break;
+            default:
+                return null;
+        }
+
+        if (includeRotation && _rotationCenters.TryGetValue(stationId, out var rotation))
+            parts.Add("rotation:" + JsonSerializer.Serialize(rotation, JsonOptions));
+
+        return FileSha256.ComputeUtf8(string.Join("\n", parts));
     }
 
     /// <summary>加载时发现的质量超标警告（供启动日志/UI 展示）。</summary>
