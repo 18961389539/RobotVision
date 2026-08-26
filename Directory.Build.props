@@ -1,0 +1,8 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- 全仓统一依赖锁定:restore 生成/校验 packages.lock.json,构建可复现 -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+</Project>
