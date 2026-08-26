@@ -40,6 +40,15 @@ public enum VisionErrorCode
     /// <summary>配方文件存在但参数/引用校验失败（cameraId 空、模型缺失、阈值越界等）。
     /// 处置：打开配方页修正配置。与 1001 区分：名字是对的，内容不合法。</summary>
     InvalidRecipeConfig = 1016,
+
+    /// <summary>模型或标定档案与配方钉扎的 SHA-256 不一致（或强制清单缺失/不符）。
+    /// 处置：核对 models/ 与标定目录后，在配方页重新「钉死当前哈希」并保存。
+    /// 与 1005 区分：文件在，但不是当时验证过的那一份。</summary>
+    AssetMismatch = 1017,
+
+    /// <summary>连续过程失败达到联锁阈值（未检出/取图失败等），禁止继续触发以免盲打。
+    /// 处置：排除光源/来料/相机后，界面「解除联锁」或 TCP <c>CLEARINHIBIT</c>。</summary>
+    ProcessUnhealthy = 1018,
 }
 
 /// <summary>
