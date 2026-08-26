@@ -130,6 +130,8 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
 
     public ObservableCollection<PoseRow> Poses { get; } = [];
 
+    public bool HasPoseResults => Poses.Count > 0;
+
     public ObservableCollection<LogLine> Logs { get; } = [];
 
     public MainViewModel(
@@ -154,6 +156,8 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         SelectedCamera = ResolveDefaultMonitorCamera(null);
 
         RefreshRecipes();
+
+        Poses.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasPoseResults));
 
         _vision.FrameProcessed += OnFrameProcessed;
         _sink.EntryAdded += OnLogEntry;

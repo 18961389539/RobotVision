@@ -16,6 +16,7 @@
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <vm:NullToCollapsedConverter x:Key="NullToCollapsedConverter" xmlns:vm="clr-namespace:RobotVision.WpfHost" />
+        <vm:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter" xmlns:vm="clr-namespace:RobotVision.WpfHost" />
     </Page.Resources>
 
     <Grid Margin="8" VerticalAlignment="Stretch">
@@ -182,27 +183,39 @@
                         <ui:Card>
                             <StackPanel>
                                 <ui:TextBlock FontTypography="BodyStrong" Text="结果（机器人坐标）" Margin="0,0,0,8" />
-                                <DataGrid ItemsSource="{Binding Poses}"
-                                          AutoGenerateColumns="False"
-                                          IsReadOnly="True"
-                                          HeadersVisibility="Column"
-                                          CanUserAddRows="False"
-                                          MinHeight="120"
-                                          EnableRowVirtualization="False"
-                                          EnableColumnVirtualization="False"
-                                          GridLinesVisibility="Horizontal">
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="32" />
-                                        <DataGridTextColumn Header="X (mm)" Binding="{Binding X, StringFormat=F3}" Width="*" />
-                                        <DataGridTextColumn Header="Y (mm)" Binding="{Binding Y, StringFormat=F3}" Width="*" />
-                                        <DataGridTextColumn Binding="{Binding AngleDeg, StringFormat=F3}" Width="*">
-                                            <DataGridTextColumn.Header>
-                                                <TextBlock Text="角度 (°)" ToolTip="范围 (-180, 180]；[0,360) 表示的机器人由 PLC 换算（负角 +360）" />
-                                            </DataGridTextColumn.Header>
-                                        </DataGridTextColumn>
-                                        <DataGridTextColumn Header="置信度" Binding="{Binding Score, StringFormat=F3}" Width="*" />
-                                    </DataGrid.Columns>
-                                </DataGrid>
+                                <Grid MinHeight="96">
+                                    <DataGrid ItemsSource="{Binding Poses}"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              HeadersVisibility="Column"
+                                              CanUserAddRows="False"
+                                              EnableRowVirtualization="False"
+                                              EnableColumnVirtualization="False"
+                                              GridLinesVisibility="Horizontal"
+                                              Visibility="{Binding HasPoseResults,
+                                                  Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="32" />
+                                            <DataGridTextColumn Header="X (mm)" Binding="{Binding X, StringFormat=F3}" Width="*" />
+                                            <DataGridTextColumn Header="Y (mm)" Binding="{Binding Y, StringFormat=F3}" Width="*" />
+                                            <DataGridTextColumn Binding="{Binding AngleDeg, StringFormat=F3}" Width="*">
+                                                <DataGridTextColumn.Header>
+                                                    <TextBlock Text="角度 (°)" ToolTip="范围 (-180, 180]；[0,360) 表示的机器人由 PLC 换算（负角 +360）" />
+                                                </DataGridTextColumn.Header>
+                                            </DataGridTextColumn>
+                                            <DataGridTextColumn Header="置信度" Binding="{Binding Score, StringFormat=F3}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <Border CornerRadius="4" Padding="12,10"
+                                            Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                            Visibility="{Binding HasPoseResults,
+                                                Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                                        <TextBlock Text="尚未触发。手动触发或 TCP TRIGGER 成功后在此显示机器人坐标；失败时见上方横幅。"
+                                                   TextWrapping="Wrap" TextAlignment="Center"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                    </Border>
+                                </Grid>
                             </StackPanel>
                         </ui:Card>
                     </StackPanel>

@@ -59,6 +59,10 @@
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="Padding" Value="8,0" />
                 <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="0,0,0,1" />
             </Style>
 
             <!-- ToolTip：跟随主题、适度留白与停留时长（工控机上短闪即逝的提示不可用） -->
