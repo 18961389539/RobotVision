@@ -16,18 +16,35 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="System.IO.Ports" />
-    <!-- Basler pylon .NET API（官方包，仅托管包装）。目标框架为 net40+native，
-         经 .NET Framework 兼容模式供 net8.0 引用（NU1701）。运行时需安装同版本
-         pylon Camera Software Suite（pylon 10.x）提供原生 pylon.dll。 -->
-    <PackageReference Include="Basler.Pylon.NET.x64" NoWarn="NU1701" GeneratePathProperty="true" />
+    <!-- 未检测到本机 pylon 安装时回退 NuGet 10.x（须与已装 pylon 大版本一致，否则枚举 SEH 异常）。 -->
+    <PackageReference Include="Basler.Pylon.NET.x64" NoWarn="NU1701" GeneratePathProperty="true"
+                      Condition="'$(PylonManagedDll)' == '' or !Exists('$(PylonManagedDll)')" />
+    <!-- 纯托管 GigE Vision（GVCP/GVSP），不依赖 pylon 运行库；与 Basler.Pylon 并存，按 Type 选用。 -->
+    <PackageReference Include="GigEVision.Net" />
   </ItemGroup>
 
-  <!-- 包内 build/*.targets 仅在 Platform=x64 时添加引用；本项目为 AnyCPU，手动引用。
-       Basler.Pylon.dll 为纯托管程序集（net40），net8.0 运行时可直接加载。 -->
-  <ItemGroup>
+  <!-- 优先引用本机 pylon 安装目录（与 Runtime 大版本一致）；否则回退 NuGet 10.x。 -->
+  <PropertyGroup>
+    <PylonRoot Condition="'$(PYLON_ROOT)' != ''">$(PYLON_ROOT)</PylonRoot>
+    <PylonRoot Condition="'$(PylonRoot)' == '' and Exists('D:\Program Files\Basler\pylon')">D:\Program Files\Basler\pylon</PylonRoot>
+    <PylonRoot Condition="'$(PylonRoot)' == '' and Exists('C:\Program Files\Basler\pylon')">C:\Program Files\Basler\pylon</PylonRoot>
+    <PylonManagedDll Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Development\Assemblies\Basler.Pylon\net8.0\x64\Basler.Pylon.dll</PylonManagedDll>
+    <PylonRuntimeDir Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Runtime\x64</PylonRuntimeDir>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(PylonManagedDll)')">
+    <Reference Include="Basler.Pylon">
+      <HintPath>$(PylonManagedDll)</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('$(PylonManagedDll)')">
     <Reference Include="Basler.Pylon">
       <HintPath>$(PkgBasler_Pylon_NET_x64)\lib\native\Basler.Pylon.dll</HintPath>
     </Reference>
+  </ItemGroup>
+  <!-- 将 pylon 原生运行库部署到输出目录（优先于 System32 加载，免改 PATH）。 -->
+  <ItemGroup Condition="Exists('$(PylonRuntimeDir)')">
+    <None Include="$(PylonRuntimeDir)\*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
+    <None Include="$(PylonRuntimeDir)\*.cti" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>

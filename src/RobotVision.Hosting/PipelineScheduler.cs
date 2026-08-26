@@ -106,7 +106,7 @@ public sealed class PipelineScheduler(ILogger log)
             try
             {
                 // 等待并发槽位；超时则放弃排队（未进入处理，无僵尸）
-                await Pipeline.WaitAsync(ct);
+                await Pipeline.WaitAsync(ct).ConfigureAwait(false);
                 acquired = true;
             }
             catch (OperationCanceledException)
@@ -135,7 +135,7 @@ public sealed class PipelineScheduler(ILogger log)
                     {
                         // 取图/光源延时等阶段响应取消（取消后按 1008 处理超时）；
                         // 推理段不可中断（Task.Run 内不响应取消），调用方超时后任务跑完丢弃结果。
-                        var result = await core(recipeName, ct);
+                        var result = await core(recipeName, ct).ConfigureAwait(false);
                         waiter.TrySetResult(result);
                     }
                     finally
@@ -150,7 +150,7 @@ public sealed class PipelineScheduler(ILogger log)
             Interlocked.Decrement(ref _depth);
         }
 
-        var final = await waiter.Task;
+        var final = await waiter.Task.ConfigureAwait(false);
 
         // 统一口径：RecipeStats 与 Health 都以"最终应答"（waiter.Task 的结果）为准——
         // 客户端超时后推理在后台跑完、应答已被置为超时时，配方统计同样记为该次超时失败，

@@ -9,6 +9,7 @@ namespace RobotVision.Tests;
 /// Basler 相机接入的纯托管测试：配置默认值、字段持久化往返、
 /// 设备枚举在无 pylon 运行库时不抛异常（降级为空列表）。
 /// 真实采集链路需在装有 pylon Camera Software Suite 的工控机上验证。
+/// GrabOne 不得与 StreamGrabber.Start 连续采集混用（pylon 前置条件：采集已停止）。
 /// </summary>
 public class BaslerCameraTests : IDisposable
 {

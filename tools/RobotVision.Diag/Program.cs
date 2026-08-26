@@ -10,6 +10,7 @@ using YoloDotNet.ExecutionProvider.Cpu;
 using YoloDotNet.Models;
 using SkiaSharp;
 using OpenCvSharp;
+using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Inference;
@@ -44,17 +45,18 @@ Console.WriteLine("== 复刻 App 管线 ==");
 // 1. FileCamera 取图
 var camera = new FileCamera("cam_file", replayDir);
 using var frame = camera.Grab();
-var image = frame.Image; // CameraFrame.Dispose 已释放 Image，这里不再 using 避免对同一 Mat 双释放
-Console.WriteLine($"FileCamera: {image.Width}x{image.Height} channels={image.Channels()} type={image.Type()}");
+var image = frame.Image;
+Console.WriteLine($"FileCamera: {image.Width}x{image.Height} channels={image.Channels}");
 
 // 2. 内参去畸变（读取与 App 相同的标定档案）
 var calib = new CalibrationManager();
 calib.LoadDirectory(@"D:\Code\RobotVision\data\calibration");
 using var undistorted = calib.Undistort("cam_file", image);
-Console.WriteLine($"Undistort: {undistorted.Width}x{undistorted.Height} channels={undistorted.Channels()}");
+Console.WriteLine($"Undistort: {undistorted.Width}x{undistorted.Height} channels={undistorted.Channels}");
 
 // 3. Mat → SKBitmap
-using var bitmap = MatSkiaConverter.ToSKBitmap(undistorted);
+using var undistortedMat = VisionImageCv.AsMat(undistorted);
+using var bitmap = MatSkiaConverter.ToSKBitmap(undistortedMat);
 Console.WriteLine($"SKBitmap: {bitmap.Width}x{bitmap.Height} colorType={bitmap.ColorType} alpha={bitmap.AlphaType}");
 
 // 4. 推理

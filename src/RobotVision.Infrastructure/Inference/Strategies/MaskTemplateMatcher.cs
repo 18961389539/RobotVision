@@ -375,7 +375,7 @@ public static class MaskTemplateMatcher
         else
         {
             // 圆孔：质心→孔心连线（指向孔）
-            var (_, ang) = AngleGeometry.FromTwoPoints(centroid, holeCenter);
+            var (_, ang) = AngleGeometry.FromTwoPoints(centroid.X, centroid.Y, holeCenter.X, holeCenter.Y);
             angleDeg = ang;
         }
         return new CentroidHoleResult(angleDeg, centroid);

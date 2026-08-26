@@ -16,6 +16,12 @@ public enum AngleMode
 
     /// <summary>分割+模板匹配：分割给粗角度与位置，模板匹配精修角度并消 180° 歧义。</summary>
     MaskTemplate,
+
+    /// <summary>
+    /// 双BLOB连线（无需模型）：阈值分割+连通域分析，主 BLOB 质心定位 XY，
+    /// 主 BLOB 外扩窗口内最近次 BLOB 质心定向（主→次连线，主次有序天然消 180° 歧义）。
+    /// </summary>
+    DualBlobCenterLine,
 }
 
 /// <summary>旋转中心补偿模式。</summary>
@@ -64,9 +70,21 @@ public sealed class DualModelOptions
     /// <summary>双模型配对时允许的最大中心距离（px），超过不配对。</summary>
     public double PairingMaxDistancePx { get; set; } = 800;
 
+    /// <summary>
+    /// 窗口配对（主从级联）：A 全图检测 → 每个 A 包围盒外扩窗口内单独跑 B，
+    /// 窗口内最近中心配对——多目标不会跨目标配错，且 B 只推理小图。
+    /// false = 旧行为（A/B 各跑整图，全局贪心最近邻配对）。
+    /// </summary>
+    public bool CropWindowPairing { get; set; }
+
+    /// <summary>窗口外扩系数：A 包围盒四边各外扩（边长×该值），仅 CropWindowPairing 生效，(0,5]。</summary>
+    public double CropExpandRatio { get; set; } = 1.0;
+
     public DualModelOptions Clone() => new()
     {
         PairingMaxDistancePx = PairingMaxDistancePx,
+        CropWindowPairing = CropWindowPairing,
+        CropExpandRatio = CropExpandRatio,
     };
 }
 
@@ -135,6 +153,63 @@ public sealed class TemplateOptions
     };
 }
 
+/// <summary>
+/// 双BLOB连线策略（DualBlobCenterLine）专属参数：阈值分割 + 连通域分析。
+/// 主 BLOB（面积在 [MinArea,MaxArea] 内）质心定位 XY；主包围盒按 CropExpandRatio 外扩
+/// 圈定次 BLOB 搜索窗口，窗口内面积合格且距主质心 [Min,Max]PairDistancePx 的最近
+/// 连通域为次 BLOB；角度 = 主质心→次质心连线。
+/// </summary>
+public sealed class BlobOptions
+{
+    /// <summary>true = 检测暗 BLOB（阈值取反）；false = 亮 BLOB。</summary>
+    public bool DetectDark { get; set; }
+
+    /// <summary>true = Otsu 自动阈值（忽略 Threshold）；false = 固定阈值。</summary>
+    public bool UseOtsu { get; set; } = true;
+
+    /// <summary>固定二值化阈值 [0,255]（UseOtsu=false 时生效）。</summary>
+    public int Threshold { get; set; } = 128;
+
+    /// <summary>主 BLOB 面积下限（px²）。</summary>
+    public int MinArea { get; set; } = 200;
+
+    /// <summary>主 BLOB 面积上限（px²）。</summary>
+    public int MaxArea { get; set; } = 200000;
+
+    /// <summary>次 BLOB 面积下限（px²）。</summary>
+    public int SecondaryMinArea { get; set; } = 10;
+
+    /// <summary>次 BLOB 面积上限（px²）。</summary>
+    public int SecondaryMaxArea { get; set; } = 50000;
+
+    /// <summary>次 BLOB 搜索窗口外扩系数：主包围盒四边各外扩（边长×该值），(0,5]。</summary>
+    public double CropExpandRatio { get; set; } = 1.0;
+
+    /// <summary>主次质心最小间距（px）：防止把主 BLOB 边缘碎块配成次 BLOB。</summary>
+    public double MinPairDistancePx { get; set; } = 5;
+
+    /// <summary>主次质心最大间距（px）：超过不配对。</summary>
+    public double MaxPairDistancePx { get; set; } = 800;
+
+    /// <summary>开运算核边长（px，≤1 = 关闭）：主次 BLOB 轻微粘连时先开运算分离再分析。</summary>
+    public int OpenKernelSize { get; set; }
+
+    public BlobOptions Clone() => new()
+    {
+        DetectDark = DetectDark,
+        UseOtsu = UseOtsu,
+        Threshold = Threshold,
+        MinArea = MinArea,
+        MaxArea = MaxArea,
+        SecondaryMinArea = SecondaryMinArea,
+        SecondaryMaxArea = SecondaryMaxArea,
+        CropExpandRatio = CropExpandRatio,
+        MinPairDistancePx = MinPairDistancePx,
+        MaxPairDistancePx = MaxPairDistancePx,
+        OpenKernelSize = OpenKernelSize,
+    };
+}
+
 /// <summary>配方：一次 TRIGGER 触发所需的全部参数。</summary>
 public sealed class RecipeConfig
 {
@@ -144,10 +219,16 @@ public sealed class RecipeConfig
     /// <summary>配方用途备注（管理台展示，不参与推理）。</summary>
     public string Description { get; set; } = "";
 
-    /// <summary>启用开关：false 时配方不可触发（返回 1001），文件保留不删。</summary>
+    /// <summary>启用开关：false 时配方不可触发（返回 1015 RecipeDisabled），文件保留不删。</summary>
     public bool Enabled { get; set; } = true;
 
     public string Name { get; set; } = "";
+
+    /// <summary>
+    /// PLC 触发的配方序列号（&gt;0 唯一；0 表示未分配，仅能用名称触发）。
+    /// TCP 请求可发纯数字或 #数字，如 <c>3</c> / <c>#3</c> / <c>3,X,Y,RZ</c>。
+    /// </summary>
+    public int SerialNumber { get; set; }
 
     /// <summary>相机 Id（对应 appsettings 中注册的相机）。</summary>
     public string CameraId { get; set; } = "";
@@ -181,6 +262,9 @@ public sealed class RecipeConfig
 
     /// <summary>分割+模板匹配专属参数（MaskTemplate 模式使用）。</summary>
     public TemplateOptions Template { get; set; } = new();
+
+    /// <summary>双BLOB连线专属参数（DualBlobCenterLine 模式使用；该模式不需要模型）。</summary>
+    public BlobOptions Blob { get; set; } = new();
 
     /// <summary>检测区域（相对比例 0~1，X/Y 左上角、W/H 宽高）；null = 全图推理。
     /// 大图上只检测局部区域可显著降低 CPU 推理耗时。</summary>
@@ -219,6 +303,7 @@ public sealed class RecipeConfig
         Description = Description,
         Enabled = Enabled,
         Name = Name,
+        SerialNumber = SerialNumber,
         CameraId = CameraId,
         StationId = StationId,
         DebugPassthrough = DebugPassthrough,
@@ -230,6 +315,7 @@ public sealed class RecipeConfig
         DualModel = DualModel.Clone(),
         Segmentation = Segmentation.Clone(),
         Template = Template.Clone(),
+        Blob = Blob.Clone(),
         Roi = Roi,
         RotationCompensation = RotationCompensation,
         LightControllerId = LightControllerId,

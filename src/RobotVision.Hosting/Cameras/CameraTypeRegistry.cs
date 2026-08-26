@@ -5,7 +5,7 @@ namespace RobotVision.Hosting.Cameras;
 
 /// <summary>
 /// 相机工厂注册表：Type 字符串 → 工厂的映射。
-/// 静态 <see cref="Default"/> 预注册内置三种类型（File/Basler/Virtual），
+/// 静态 <see cref="Default"/> 预注册内置类型（File/Basler/GigEVision/Virtual），
 /// 第三方品牌接入时在启动早期调用 <c>CameraTypeRegistry.Default.Register(new HikCameraFactory())</c>
 /// 一行接入——服务注册循环、UI 类型下拉、测试取图、运行时注册均从本表查询，
 /// 加新相机品牌不再改任何分支代码。
@@ -18,12 +18,13 @@ public sealed class CameraTypeRegistry
     private readonly Dictionary<string, ICameraFactory> _factories = new(StringComparer.OrdinalIgnoreCase);
     private string[]? _cachedTypeNames;
 
-    /// <summary>预置内置类型工厂（File / Basler / Virtual）。</summary>
+    /// <summary>预置内置类型工厂（File / Basler / GigEVision / Virtual）。</summary>
     public static CameraTypeRegistry CreateDefault()
     {
         var registry = new CameraTypeRegistry();
         registry.Register(new FileCameraFactory());
         registry.Register(new BaslerCameraFactory());
+        registry.Register(new GigEVisionCameraFactory());
         registry.Register(new VirtualCameraFactory());
         return registry;
     }

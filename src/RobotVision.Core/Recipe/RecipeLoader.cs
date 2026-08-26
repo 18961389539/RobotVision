@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using RobotVision.Core.Models;
@@ -11,7 +12,7 @@ public sealed class RecipeNotFoundException(string name)
 public sealed class InvalidRecipeException(
     string name,
     string reason,
-    VisionErrorCode errorCode = VisionErrorCode.UnknownRecipe)
+    VisionErrorCode errorCode = VisionErrorCode.InvalidRecipeConfig)
     : Exception($"配方 {name} 无效: {reason}")
 {
     public VisionErrorCode ErrorCode { get; } = errorCode;
@@ -79,9 +80,12 @@ public sealed class RecipeLoader(string folder)
         {
             throw new RecipeNotFoundException(name);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
-            throw new RecipeNotFoundException(name);
+            // 文件锁/磁盘满/网络盘瞬断是 IO 故障而非"配方不存在"——伪装成 1001 会把
+            // PLC 与现场排障导向"配方名错了"的错误方向；按内部错误（1099）上报
+            throw new InvalidRecipeException(name, $"读取配方文件失败（IO）: {ex.Message}",
+                VisionErrorCode.InternalError);
         }
     }
 
@@ -127,10 +131,23 @@ public sealed class RecipeLoader(string folder)
     {
         var name = recipe.Name;
 
+        if (recipe.SerialNumber < 0)
+            throw new InvalidRecipeException(name, "serialNumber 不能为负");
+
         if (string.IsNullOrWhiteSpace(recipe.CameraId))
             throw new InvalidRecipeException(name, "cameraId 为空");
 
-        if (recipe.Models.Count == 0)
+        // 偏心工具补偿依赖 stationId 查旋转中心档案：缺 stationId 时补偿会被静默跳过
+        // （配置声称补偿、实际没补偿），比直接报错危险——加载期拦截
+        if (recipe.RotationCompensation == RotationCompensationMode.EccentricTool &&
+            string.IsNullOrWhiteSpace(recipe.StationId))
+            throw new InvalidRecipeException(name,
+                "rotationCompensation=EccentricTool 必须配置 stationId（旋转中心档案按工位查找）");
+
+        // 双BLOB模式纯图像处理、不使用模型：跳过一切模型数量校验（多配的模型静默忽略）
+        var isBlobMode = recipe.AngleMode == AngleMode.DualBlobCenterLine;
+
+        if (recipe.Models.Count == 0 && !isBlobMode)
             throw new InvalidRecipeException(name, "models 列表为空");
 
         // 单模型模式（MaskMinAreaRect/KeyPointLine/MaskTemplate）只使用 Models[0]，多配会静默忽略多余模型，
@@ -159,8 +176,36 @@ public sealed class RecipeLoader(string folder)
         if (recipe.AngleMode == AngleMode.DualCenterLine && recipe.Models.Count > 2)
             throw new InvalidRecipeException(name, "双模型模式（DualCenterLine）最多 2 个模型");
 
-        if (recipe.Models.Count > 2)
+        if (recipe.AngleMode == AngleMode.DualCenterLine &&
+            recipe.DualModel.CropWindowPairing &&
+            recipe.DualModel.CropExpandRatio is <= 0 or > 5)
+            throw new InvalidRecipeException(name, "dualModel.cropExpandRatio 必须在 (0,5]");
+
+        if (recipe.Models.Count > 2 && !isBlobMode)
             throw new InvalidRecipeException(name, "models 最多 2 个");
+
+        if (isBlobMode)
+        {
+            var blob = recipe.Blob;
+            if (blob.Threshold is < 0 or > 255)
+                throw new InvalidRecipeException(name, "blob.threshold 必须在 [0,255]");
+            if (blob.MinArea < 1)
+                throw new InvalidRecipeException(name, "blob.minArea 必须 ≥1");
+            if (blob.MaxArea < blob.MinArea)
+                throw new InvalidRecipeException(name, "blob.maxArea 不能小于 blob.minArea");
+            if (blob.SecondaryMinArea < 1)
+                throw new InvalidRecipeException(name, "blob.secondaryMinArea 必须 ≥1");
+            if (blob.SecondaryMaxArea < blob.SecondaryMinArea)
+                throw new InvalidRecipeException(name, "blob.secondaryMaxArea 不能小于 blob.secondaryMinArea");
+            if (blob.CropExpandRatio is <= 0 or > 5)
+                throw new InvalidRecipeException(name, "blob.cropExpandRatio 必须在 (0,5]");
+            if (blob.MinPairDistancePx < 0)
+                throw new InvalidRecipeException(name, "blob.minPairDistancePx 不能为负");
+            if (blob.MaxPairDistancePx <= blob.MinPairDistancePx)
+                throw new InvalidRecipeException(name, "blob.maxPairDistancePx 必须大于 blob.minPairDistancePx");
+            if (blob.OpenKernelSize is < 0 or > 31)
+                throw new InvalidRecipeException(name, "blob.openKernelSize 必须在 [0,31]");
+        }
 
         if (recipe.Confidence is < 0 or > 1)
             throw new InvalidRecipeException(name, "confidence 必须在 [0,1]");
@@ -248,6 +293,62 @@ public sealed class RecipeLoader(string folder)
                 .ToList()
             : [];
 
+    /// <summary>
+    /// 将 TCP 触发行首段（配方名或序列号）解析为配方名。
+    /// 纯数字（或 # 前缀）优先按序列号查找；未命中时再按配方名（支持名称为纯数字的配方）。
+    /// </summary>
+    public (string? RecipeName, string? Error) ResolveTriggerKey(string key)
+    {
+        key = NormalizeTriggerKey(key);
+        if (key.Length == 0)
+            return (null, "MISSING_RECIPE");
+
+        if (IsSerialKey(key))
+        {
+            if (!int.TryParse(key, NumberStyles.None, CultureInfo.InvariantCulture, out var serial) || serial <= 0)
+                return (null, "INVALID_SERIAL");
+
+            var bySerial = FindNameBySerial(serial);
+            if (bySerial is not null)
+                return (bySerial, null);
+
+            if (IsValidRecipeName(key) && FileExists(key))
+                return (key, null);
+
+            return (null, "UNKNOWN_SERIAL");
+        }
+
+        if (!IsValidRecipeName(key))
+            return (null, "INVALID_RECIPE_NAME");
+
+        if (!FileExists(key))
+            return (null, "UNKNOWN_RECIPE");
+
+        return (key, null);
+    }
+
+    private static string NormalizeTriggerKey(string key)
+    {
+        key = key.Trim();
+        if (key.StartsWith('#') && key.Length > 1)
+            key = key[1..].Trim();
+        return key;
+    }
+
+    private static bool IsSerialKey(string key) =>
+        key.Length > 0 && key.All(char.IsAsciiDigit);
+
+    private string? FindNameBySerial(int serial)
+    {
+        foreach (var name in ListNames())
+        {
+            if (Get(name).SerialNumber == serial)
+                return name;
+        }
+
+        return null;
+    }
+
     public string Folder => folder;
 
     private static readonly JsonSerializerOptions WriteOptions = new()
@@ -269,6 +370,7 @@ public sealed class RecipeLoader(string folder)
 
         Validate(recipe);
         ValidateReferences(recipe);
+        EnsureUniqueSerialNumber(recipe);
 
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, recipe.Name + ".json");
@@ -276,6 +378,32 @@ public sealed class RecipeLoader(string folder)
 
         var info = new FileInfo(path);
         _cache[recipe.Name] = new CachedRecipe(recipe.Clone(), info.LastWriteTimeUtc, info.Length);
+    }
+
+    private void EnsureUniqueSerialNumber(RecipeConfig recipe)
+    {
+        if (recipe.SerialNumber <= 0)
+            return;
+
+        foreach (var other in ListNames())
+        {
+            if (string.Equals(other, recipe.Name, StringComparison.OrdinalIgnoreCase))
+                continue;
+            RecipeConfig loaded;
+            try
+            {
+                loaded = Get(other);
+            }
+            catch (Exception)
+            {
+                // 损坏/无法加载的配方不参与序列号占用判断，否则保存有效配方会被其拖死
+                continue;
+            }
+
+            if (loaded.SerialNumber == recipe.SerialNumber)
+                throw new InvalidRecipeException(recipe.Name,
+                    $"serialNumber {recipe.SerialNumber} 已被配方 {other} 占用");
+        }
     }
 
     /// <summary>原子写（临时文件 + 替换）：配方是产线关键资产，与标定档案同策略。

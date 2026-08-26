@@ -21,7 +21,7 @@
 
   <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\recipes\**\*" CopyToOutputDirectory="PreserveNewest" Link="recipes\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\recipes\**\*" CopyToOutputDirectory="PreserveNewest" Link="recipes.samples\%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\data\calibration\**\*" CopyToOutputDirectory="PreserveNewest" Link="data\calibration\%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\data\replay\**\*" CopyToOutputDirectory="PreserveNewest" Link="data\replay\%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\models\**\*" CopyToOutputDirectory="PreserveNewest" Link="models\%(RecursiveDir)%(Filename)%(Extension)" />

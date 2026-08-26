@@ -9,6 +9,7 @@ using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Hosting;
+using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Cameras;
 
@@ -77,12 +78,14 @@ public sealed record ModeOption(WizardMode Value, string Label, string Descripti
 /// CalibrationManager，无需重启。外参与旋转中心的取图必须经过内参去畸变
 /// （与产线推理同一坐标系，铁律见 CalibrationManager 注释）。
 /// </summary>
-public partial class CalibrationWizardViewModel : ObservableObject
+public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendingEdits
 {
     private readonly CameraManager _cameras;
     private readonly CalibrationManager _calibration;
     private readonly AppConfig _cfg;
     private readonly string _calibrationFolder;
+
+    public Action? FlushPendingEdits { get; set; }
 
     private Mat? _lastRawFrame;
     private Mat? _currentFrame;
@@ -124,7 +127,11 @@ public partial class CalibrationWizardViewModel : ObservableObject
     public ObservableCollection<CalibPointItem> Points { get; } = [];
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowStationIdField))]
     private WizardMode _mode = WizardMode.Polynomial; // 默认快换标定（推荐）：拍 1 张免示教
+
+    /// <summary>内参标定按相机 Id 存档，不需要工位 Id。</summary>
+    public bool ShowStationIdField => Mode != WizardMode.Intrinsic;
 
     /// <summary>下拉选中的标定类型项（中文显示模型）。两个 Polynomial 项靠坐标空间区分：
     /// "快换标定"自动切到棋盘毫米系（免示教），"机器人坐标标定"切到机器人系。</summary>
@@ -285,7 +292,7 @@ public partial class CalibrationWizardViewModel : ObservableObject
 
     partial void OnModeChanged(WizardMode value)
     {
-        Clickable = value is WizardMode.Extrinsic or WizardMode.Rotation or WizardMode.Polynomial;
+        Clickable = !IsBusy && value is WizardMode.Extrinsic or WizardMode.Rotation or WizardMode.Polynomial;
         Result = "";
         _chessboardCorners = [];
         // 操作员视角的步骤指引（与下拉副标同一套文案口径）
@@ -312,11 +319,18 @@ public partial class CalibrationWizardViewModel : ObservableObject
     /// <summary>取图未进行中（防抖）。</summary>
     private bool CanOperate => !IsBusy;
 
-    partial void OnIsBusyChanged(bool value) => GrabCommand.NotifyCanExecuteChanged();
+    partial void OnIsBusyChanged(bool value)
+    {
+        GrabCommand.NotifyCanExecuteChanged();
+        // 取图进行中禁止图上点选：此时 _chessboardCorners 正被后台线程改写，
+        // 点选吸附会读到半成品角点数组（错吸附）
+        Clickable = !value && Mode is WizardMode.Extrinsic or WizardMode.Rotation or WizardMode.Polynomial;
+    }
 
     [RelayCommand(CanExecute = nameof(CanOperate))]
     private async Task GrabAsync()
     {
+        this.Commit();
         if (SelectedCamera.Length == 0)
         {
             Message = "请先选择相机";
@@ -328,14 +342,23 @@ public partial class CalibrationWizardViewModel : ObservableObject
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
+        // 快照取图参数：后台线程执行期间 UI 仍可改模式下拉/角点数/工位号，
+        // 直接读实例属性会让后台按"取图后被改过的参数"检测棋盘（跨线程读写且语义错乱）
+        var mode = Mode;
+        var cols = Cols;
+        var rows = Rows;
+        var stationId = StationId.Trim();
+        var polynomialImageSpace = PolynomialImageSpace;
+
         IsBusy = true;
         try
         {
             Message = $"取图中 · {SelectedCamera} …";
             // 取图 + 棋盘检测在后台线程执行（真实相机可达 GrabTimeoutMs，棋盘检测亦耗时），避免冻结 UI
-            var result = await Task.Run(() => GrabCore(SelectedCamera));
+            var result = await Task.Run(() =>
+                GrabCore(SelectedCamera, mode, cols, rows, stationId, polynomialImageSpace));
 
-            if (Mode is WizardMode.Extrinsic or WizardMode.Polynomial)
+            if (mode is WizardMode.Extrinsic or WizardMode.Polynomial)
             {
                 Points.Clear();
                 OnPointsChanged();
@@ -348,8 +371,8 @@ public partial class CalibrationWizardViewModel : ObservableObject
         }
         catch (VisionException vex)
         {
-            var needIntrinsic = Mode is WizardMode.Extrinsic
-                || (Mode is WizardMode.Rotation && !_calibration.HasPolynomial(StationId.Trim()));
+            var needIntrinsic = mode is WizardMode.Extrinsic
+                || (mode is WizardMode.Rotation && !_calibration.HasPolynomial(stationId));
             Message = needIntrinsic
                 ? $"{vex.Message}（外参/旋转中心取图前须先完成该相机的内参标定）"
                 : vex.Message;
@@ -367,28 +390,31 @@ public partial class CalibrationWizardViewModel : ObservableObject
     /// <summary>一次取图的后台工作结果（Display 所有权移交调用方，Raw 可为 null）。</summary>
     private sealed record GrabResult(Mat Display, Mat? Raw, string Info);
 
-    /// <summary>后台执行取图与棋盘检测；Mat 在后台线程创建、返回后仅 UI 线程使用。</summary>
-    private GrabResult GrabCore(string cameraId)
+    /// <summary>后台执行取图与棋盘检测；Mat 在后台线程创建、返回后仅 UI 线程使用。
+    /// 模式/角点数/工位号等由调用方快照传入，不在后台线程读实例属性（UI 可随时修改）。</summary>
+    private GrabResult GrabCore(string cameraId, WizardMode mode, int cols, int rows,
+        string stationId, bool polynomialImageSpace)
     {
-        using var frame = _cameras.Grab(cameraId).Image;
+        using var grabbed = _cameras.Grab(cameraId);
+        using var frame = VisionImageCv.AsMat(grabbed.Image);
 
-        if (Mode is WizardMode.Intrinsic or WizardMode.Polynomial)
+        if (mode is WizardMode.Intrinsic or WizardMode.Polynomial)
         {
             using var gray = new Mat();
             Cv2.CvtColor(frame, gray, ColorConversionCodes.BGR2GRAY);
-            var pattern = new OpenCvSharp.Size(Cols, Rows);
+            var pattern = new OpenCvSharp.Size(cols, rows);
             var found = Cv2.FindChessboardCornersSB(gray, pattern, out var corners);
 
             var preview = frame.Clone();
             if (found)
                 Cv2.DrawChessboardCorners(preview, pattern, corners, true);
 
-            if (Mode == WizardMode.Intrinsic)
+            if (mode == WizardMode.Intrinsic)
             {
                 _lastChessboardFound = found;
                 var raw = frame.Clone();
                 var info = found
-                    ? $"棋盘检测成功（{Cols}×{Rows}），可加入采集"
+                    ? $"棋盘检测成功（{cols}×{rows}），可加入采集"
                     : "未检测到棋盘：调整角度/对焦或核对内角点数";
                 return new GrabResult(preview, raw, info);
             }
@@ -396,16 +422,16 @@ public partial class CalibrationWizardViewModel : ObservableObject
             // Polynomial：保存角点供点选吸附（原图坐标系，无去畸变——与推理一致）
             _chessboardCorners = found ? corners : [];
             var polyInfo = found
-                ? PolynomialImageSpace
-                    ? $"棋盘检测成功（{Cols}×{Rows}，{corners.Length} 角点）。棋盘毫米系免示教，直接点「计算」即可"
-                    : $"棋盘检测成功（{Cols}×{Rows}，{corners.Length} 角点）。请在图上点选同一行的 2 个参考角点（自动吸附），并抄录其机器人坐标"
+                ? polynomialImageSpace
+                    ? $"棋盘检测成功（{cols}×{rows}，{corners.Length} 角点）。棋盘毫米系免示教，直接点「计算」即可"
+                    : $"棋盘检测成功（{cols}×{rows}，{corners.Length} 角点）。请在图上点选同一行的 2 个参考角点（自动吸附），并抄录其机器人坐标"
                 : "未检测到棋盘：调整角度/对焦或核对内角点数（多项式标定不依赖内参，直接用原图）";
             return new GrabResult(preview, null, polyInfo);
         }
 
-        if (Mode is WizardMode.Rotation &&
-            !string.IsNullOrWhiteSpace(StationId) &&
-            _calibration.HasPolynomial(StationId.Trim()))
+        if (mode is WizardMode.Rotation &&
+            stationId.Length > 0 &&
+            _calibration.HasPolynomial(stationId))
         {
             var preview = frame.Clone();
             return new GrabResult(preview, null,
@@ -414,7 +440,7 @@ public partial class CalibrationWizardViewModel : ObservableObject
 
         // 外参与（无多项式时的）旋转中心必须在去畸变坐标系下取点（与推理一致）
         var undistorted = _calibration.Undistort(cameraId, frame);
-        var text = Mode == WizardMode.Extrinsic
+        var text = mode == WizardMode.Extrinsic
             ? $"新图已就绪（{undistorted.Width}×{undistorted.Height}），请依次点 9 个标定点"
             : $"新图已就绪（{undistorted.Width}×{undistorted.Height}），请点选本角度的标记点";
         return new GrabResult(undistorted, null, text);
@@ -544,6 +570,7 @@ public partial class CalibrationWizardViewModel : ObservableObject
     [RelayCommand]
     private async Task ComputeAsync()
     {
+        this.Commit();
         try
         {
             Message = "计算中...";
@@ -695,6 +722,7 @@ public partial class CalibrationWizardViewModel : ObservableObject
     [RelayCommand]
     private void Save()
     {
+        this.Commit();
         try
         {
             switch (Mode)

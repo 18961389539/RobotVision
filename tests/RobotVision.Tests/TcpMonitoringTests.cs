@@ -34,11 +34,22 @@ public class TcpMonitoringTests : IDisposable
 
     private static async Task<string> RoundTripAsync(NetworkStream stream, string request)
     {
-        await stream.WriteAsync(Encoding.UTF8.GetBytes(request + "\n"));
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(request + "\n"));
+        return await ReadReplyAsync(stream);
+    }
+
+    private static async Task<string> RoundTripRawAsync(NetworkStream stream, string request)
+    {
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
+        return await ReadReplyAsync(stream);
+    }
+
+    private static async Task<string> ReadReplyAsync(NetworkStream stream)
+    {
         var buffer = new byte[4096];
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var read = await stream.ReadAsync(buffer, timeout.Token);
-        return Encoding.UTF8.GetString(buffer, 0, read).Trim();
+        return Encoding.ASCII.GetString(buffer, 0, read).Trim();
     }
 
     [Fact]
@@ -85,13 +96,13 @@ public class TcpMonitoringTests : IDisposable
         Assert.Equal(session.Id, ping.ClientId);
         Assert.Equal(session.Remote, ping.Client);
 
-        Assert.StartsWith("OK,A01,1,", await RoundTripAsync(stream, "TRIGGER,A01"));
+        Assert.Equal("OK,1.500,2.500,30.000,A01,1,4", await RoundTripAsync(stream, "A01"));
 
         var stats = Assert.Single(_tcp.GetClients());
         Assert.Equal(2, stats.Requests);
         Assert.Equal(1, _tcp.TotalConnections);
         Assert.Equal(2, _tcp.TotalRequests);
-        Assert.Equal("TRIGGER,A01", stats.LastRequest);
+        Assert.Equal("A01", stats.LastRequest);
         Assert.NotNull(stats.LastRequestAt);
         Assert.True(stats.BytesReceived > 0);
         Assert.True(stats.BytesSent > stats.BytesReceived);
@@ -100,6 +111,63 @@ public class TcpMonitoringTests : IDisposable
         await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(0, _tcp.ConnectedClients);
         Assert.Empty(_tcp.GetClients());
+    }
+
+    [Fact]
+    public async Task RequestHistory_RetainedWithoutSubscriber()
+    {
+        _tcp.Start();
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
+        Assert.Equal("PONG", await RoundTripAsync(client.GetStream(), "PING"));
+        Assert.Equal("OK,1.500,2.500,30.000,A01,1,4", await RoundTripAsync(client.GetStream(), "A01"));
+
+        var history = _tcp.GetRecentRequests();
+        Assert.Equal(2, history.Count);
+        Assert.Equal("A01", history[0].Request);
+        Assert.Equal("PING", history[1].Request);
+        Assert.Equal("PONG", history[1].Reply);
+    }
+
+    [Fact]
+    public async Task RequestStarted_FiresBeforeHandlerCompletes()
+    {
+        using var allowComplete = new ManualResetEventSlim(false);
+        using var tcp = new TcpServerManager(
+            "127.0.0.1", GetFreePort(), 5000,
+            (_, _, ct) =>
+            {
+                allowComplete.Wait(ct);
+                return Task.FromResult(VisionResult.Success("A01", [new RobotPose(1, 2, 3)], 4));
+            },
+            NullLogger<TcpServerManager>.Instance);
+
+        var started = new TaskCompletionSource<TcpRequestRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        tcp.RequestStarted += r => started.TrySetResult(r);
+        tcp.Start();
+        try
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, tcp.Port);
+            await client.GetStream().WriteAsync(Encoding.ASCII.GetBytes("A01\n"));
+
+            var record = await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("A01", record.Request);
+            Assert.Equal("", record.Reply);
+            Assert.Empty(tcp.GetRecentRequests());
+
+            allowComplete.Set();
+            var buffer = new byte[4096];
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var read = await client.GetStream().ReadAsync(buffer, timeout.Token);
+            Assert.StartsWith("OK,", Encoding.ASCII.GetString(buffer, 0, read));
+            Assert.Single(tcp.GetRecentRequests());
+        }
+        finally
+        {
+            allowComplete.Set();
+            tcp.Dispose();
+        }
     }
 
     [Fact]
@@ -143,6 +211,35 @@ public class TcpMonitoringTests : IDisposable
     }
 
     [Fact]
+    public async Task Ping_WithoutNewline_StillReplies()
+    {
+        _tcp.Start();
+        using var client = new TcpClient { NoDelay = true };
+        await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
+        Assert.Equal("PONG", await RoundTripRawAsync(client.GetStream(), "PING"));
+    }
+
+    [Fact]
+    public async Task Ping_WithCrLf_StillReplies()
+    {
+        _tcp.Start();
+        using var client = new TcpClient { NoDelay = true };
+        await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
+        Assert.Equal("PONG", await RoundTripRawAsync(client.GetStream(), "PING\r\n"));
+    }
+
+    [Fact]
+    public async Task TwoPings_WithoutNewline_SameConnection()
+    {
+        _tcp.Start();
+        using var client = new TcpClient { NoDelay = true };
+        await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
+        var stream = client.GetStream();
+        Assert.Equal("PONG", await RoundTripRawAsync(stream, "PING"));
+        Assert.Equal("PONG", await RoundTripRawAsync(stream, "PING"));
+    }
+
+    [Fact]
     public async Task IdleTimeoutZero_KeepsConnectionUntilClientCloses()
     {
         _tcp.IdleTimeoutMs = 0;
@@ -154,6 +251,62 @@ public class TcpMonitoringTests : IDisposable
         await Task.Delay(400);
         Assert.Equal(1, _tcp.ConnectedClients);
         Assert.Equal("PONG", await RoundTripAsync(stream, "PING"));
+    }
+
+    [Fact]
+    public async Task Handler_DoesNotRunOnCallerSynchronizationContext()
+    {
+        var ctx = new TrackingSyncContext();
+        var handlerSawCallerContext = 0;
+        using var tcp = new TcpServerManager(
+            "127.0.0.1", GetFreePort(), 2000,
+            (recipe, _, _) =>
+            {
+                if (SynchronizationContext.Current == ctx)
+                    Interlocked.Increment(ref handlerSawCallerContext);
+                return Task.FromResult(VisionResult.Success(recipe, [new RobotPose(1, 2, 3)], 1));
+            },
+            NullLogger<TcpServerManager>.Instance);
+
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(ctx);
+        try
+        {
+            tcp.Start();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        try
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, tcp.Port);
+            var reply = await RoundTripAsync(client.GetStream(), "A01");
+            Assert.StartsWith("OK,", reply);
+            Assert.Equal(0, handlerSawCallerContext);
+        }
+        finally
+        {
+            tcp.Stop();
+        }
+    }
+
+    private sealed class TrackingSyncContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            var thread = new Thread(() =>
+            {
+                SetSynchronizationContext(this);
+                d(state);
+            })
+            {
+                IsBackground = true,
+            };
+            thread.Start();
+        }
     }
 
     [Fact]

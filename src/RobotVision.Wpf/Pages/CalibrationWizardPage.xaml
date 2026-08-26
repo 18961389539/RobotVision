@@ -85,9 +85,31 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                     <TextBlock Grid.Column="2" Text="相机" VerticalAlignment="Center" Margin="16,0,8,0" />
-                    <ComboBox Grid.Column="3" ItemsSource="{Binding CameraIds}" SelectedItem="{Binding SelectedCamera}" />
-                    <TextBlock Grid.Column="4" Text="工位 Id" VerticalAlignment="Center" Margin="16,0,8,0" />
-                    <TextBox Grid.Column="5" Text="{Binding StationId, UpdateSourceTrigger=PropertyChanged}" />
+                    <ComboBox Grid.Column="3" ItemsSource="{Binding CameraIds}" SelectedItem="{Binding SelectedCamera}" ToolTip="选择参与标定的相机" />
+                    <TextBlock Grid.Column="4" Text="工位 Id" VerticalAlignment="Center" Margin="16,0,8,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ShowStationIdField}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBox Grid.Column="5" Text="{Binding StationId, UpdateSourceTrigger=PropertyChanged}">
+                        <TextBox.Style>
+                            <Style TargetType="TextBox">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ShowStationIdField}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBox.Style>
+                    </TextBox>
                     <ui:Button Grid.Column="7" Content="取图" Appearance="Primary"
                                Command="{Binding GrabCommand}" />
                     <ui:Button Grid.Column="8" Content="清空点" Margin="8,0,0,0"
@@ -101,11 +123,10 @@
         <!-- 主区：图像主导 + 参数浮动面板（参照相机管理页） -->
         <Grid Grid.Row="1">
 
-            <!-- 主导图像区：ImageViewer 支持缩放(滚轮)/平移(中键)/右键菜单，点选坐标自动换算 -->
+            <!-- 主导图像区：完整 ImageViewer；左键点选标定点 -->
             <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
                 <ivc:ImageViewer x:Name="Viewer" ImageSource="{Binding FrameImage}"
-                                 IsToolbarVisible="False"
-                                 PreviewMouseLeftButtonDown="OnViewerMouseLeftButtonDown" />
+                                PreviewMouseLeftButtonDown="OnViewerMouseLeftButtonDown" />
             </Border>
 
             <!-- 取图信息角标（左下） -->
@@ -219,7 +240,7 @@
                                 <UniformGrid Columns="2" Margin="0,0,0,8">
                                     <StackPanel Margin="0,0,8,8">
                                         <TextBlock Text="相机安装模式" Margin="0,0,0,4" FontSize="12" />
-                                        <ComboBox ItemsSource="{Binding MountOptions}"
+                                        <ComboBox ItemsSource="{Binding MountOptions}" ToolTip="相机安装模式（如眼在手 / 眼在地）"
                                                   DisplayMemberPath="Label" SelectedValuePath="Value"
                                                   SelectedValue="{Binding SelectedMount}" />
                                     </StackPanel>
@@ -270,7 +291,7 @@
                                 <UniformGrid Columns="2" Margin="0,0,0,8">
                                     <StackPanel Margin="0,0,8,8">
                                         <TextBlock Text="输出坐标" Margin="0,0,0,4" FontSize="12" />
-                                        <ComboBox ItemsSource="{Binding SpaceOptions}"
+                                        <ComboBox ItemsSource="{Binding SpaceOptions}" ToolTip="输出坐标空间（如机器人基坐标系 / 相机坐标系）"
                                                   DisplayMemberPath="Label" SelectedValuePath="Value"
                                                   SelectedValue="{Binding SelectedSpace}" />
                                     </StackPanel>
@@ -316,13 +337,13 @@
                                     <UniformGrid Columns="2" Margin="0,0,0,8">
                                         <StackPanel Margin="0,0,8,8">
                                             <TextBlock Text="安装模式" Margin="0,0,0,4" FontSize="12" />
-                                            <ComboBox ItemsSource="{Binding MountOptions}"
+                                            <ComboBox ItemsSource="{Binding MountOptions}" ToolTip="相机安装模式（如眼在手 / 眼在地）"
                                                       DisplayMemberPath="Label" SelectedValuePath="Value"
                                                       SelectedValue="{Binding SelectedMount}" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,8">
                                             <TextBlock Text="位姿处理" Margin="0,0,0,4" FontSize="12" />
-                                            <ComboBox ItemsSource="{Binding ComposeOptions}"
+                                            <ComboBox ItemsSource="{Binding ComposeOptions}" ToolTip="位姿合成方式（如何组合平移与旋转）"
                                                       DisplayMemberPath="Label" SelectedValuePath="Value"
                                                       SelectedValue="{Binding SelectedCompose}" />
                                         </StackPanel>

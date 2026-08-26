@@ -1,4 +1,5 @@
 using System.IO;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -14,6 +15,7 @@ namespace RobotVision.WpfHost;
 public partial class App : Application
 {
     private IHost? _host;
+    private Mutex? _instanceMutex;
     private bool _showingFatalDialog;
     private int _unhandledCount;
 
@@ -38,6 +40,12 @@ public partial class App : Application
             return;
         }
 
+        if (!TryAcquireSingleInstance())
+        {
+            Shutdown(0);
+            return;
+        }
+
         // 重入保护：MessageBox 自带嵌套消息泵，期间的新异常不允许再弹框（否则递归至栈溢出）
         DispatcherUnhandledException += (_, args) =>
         {
@@ -45,6 +53,7 @@ public partial class App : Application
             var text = $"[第 {count} 次] {args.Exception}";
             Console.Error.WriteLine(text);
             System.Diagnostics.Debug.WriteLine(text);
+            try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rv-ui-exception.txt"), DateTime.Now.ToString("HH:mm:ss.fff") + " " + text + Environment.NewLine + new string('-', 80) + Environment.NewLine); } catch { }
 
             if (!_showingFatalDialog && count <= 3)
             {
@@ -78,19 +87,23 @@ public partial class App : Application
         _host = builder.Build();
         Services = _host.Services;
 
-        var logger = _host.Services.GetRequiredService<ILogger<App>>();
-        var recipeErrors = _host.Services.GetRequiredService<RobotVision.Core.Recipe.RecipeLoader>().LoadAll();
-        foreach (var (recipeName, error) in recipeErrors)
-            logger.LogWarning("配方 {Recipe} 加载失败: {Error}", recipeName, error);
-
-        _host.Start();
-
-        var window = new MainWindow
-        {
-            DataContext = _host.Services.GetRequiredService<MainViewModel>(),
-        };
+        // 先显示主窗口壳，避免 CameraManager / MainViewModel 组装期间长时间无界面
+        var window = new MainWindow();
         MainWindow = window;
         window.Show();
+
+        // 服务与 ViewModel 在首帧渲染后继续（仍可能在绑定 DataContext 时短暂卡顿，但窗口已可见）
+        Dispatcher.BeginInvoke(() =>
+        {
+            var logger = _host.Services.GetRequiredService<ILogger<App>>();
+            var recipeErrors = _host.Services.GetRequiredService<RobotVision.Core.Recipe.RecipeLoader>().LoadAll();
+            foreach (var (recipeName, error) in recipeErrors)
+                logger.LogWarning("配方 {Recipe} 加载失败: {Error}", recipeName, error);
+
+            _host.Services.GetRequiredService<CommunicationViewModel>();
+            _host.Start();
+            window.DataContext = _host.Services.GetRequiredService<MainViewModel>();
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -104,7 +117,46 @@ public partial class App : Application
             // 退出阶段尽力而为
         }
         _host?.Dispose();
+        ReleaseSingleInstance();
         base.OnExit(e);
+    }
+
+    /// <summary>进程级互斥：禁止双开（否则 TCP 9999 端口冲突、相机争用）。</summary>
+    private bool TryAcquireSingleInstance()
+    {
+        foreach (var name in new[] { @"Global\RobotVision.WpfHost.SingleInstance", @"Local\RobotVision.WpfHost.SingleInstance" })
+        {
+            try
+            {
+                _instanceMutex = new Mutex(initiallyOwned: true, name, out var createdNew);
+                if (createdNew)
+                    return true;
+
+                _instanceMutex.Dispose();
+                _instanceMutex = null;
+                break;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Global 名已被其他会话占用等情况，尝试 Local
+            }
+        }
+
+        MessageBox.Show(
+            "RobotVision 已在运行中，不能重复启动。\n\n请切换到任务栏已有窗口，或先关闭再启动。",
+            "RobotVision",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+        return false;
+    }
+
+    private void ReleaseSingleInstance()
+    {
+        if (_instanceMutex is null)
+            return;
+        try { _instanceMutex.ReleaseMutex(); } catch { /* 未持有或已释放 */ }
+        _instanceMutex.Dispose();
+        _instanceMutex = null;
     }
 
     private static void RegisterPageViewModels(IServiceCollection services)

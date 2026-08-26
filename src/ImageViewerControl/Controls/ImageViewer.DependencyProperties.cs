@@ -88,6 +88,11 @@ namespace ImageViewer.Controls
 
         public static readonly DependencyProperty IsToolbarVisibleProperty =
             DependencyProperty.Register(nameof(IsToolbarVisible), typeof(bool), typeof(ImageViewer),
+                new PropertyMetadata(false, OnIsToolbarVisibleChanged));
+
+        /// <summary>无图像时是否显示「尚未加载图像」占位面板。宿主仅绑定 ImageSource 时应设为 false。</summary>
+        public static readonly DependencyProperty ShowEmptyStatePanelProperty =
+            DependencyProperty.Register(nameof(ShowEmptyStatePanel), typeof(bool), typeof(ImageViewer),
                 new PropertyMetadata(true));
 
         public static readonly DependencyProperty PseudoColorPaletteProperty =
@@ -122,11 +127,17 @@ namespace ImageViewer.Controls
             set => SetValue(IsImageLoadingProperty, value);
         }
 
-        /// <summary>是否显示左上角浮动工具栏（文件与项目 / 视图操作 / 显示选项）。默认 true。</summary>
+        /// <summary>是否显示左上角浮动工具栏（文件与项目 / 视图操作 / 显示选项）。默认 false。</summary>
         public bool IsToolbarVisible
         {
             get => (bool)GetValue(IsToolbarVisibleProperty);
             set => SetValue(IsToolbarVisibleProperty, value);
+        }
+
+        public bool ShowEmptyStatePanel
+        {
+            get => (bool)GetValue(ShowEmptyStatePanelProperty);
+            set => SetValue(ShowEmptyStatePanelProperty, value);
         }
 
         public double ImageLoadProgress
@@ -286,6 +297,17 @@ namespace ImageViewer.Controls
         private static void OnShowRoiListChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             WithViewer<bool>(d, e, (viewer, value) => viewer._imageViewStateController.HandleShowRoiListChanged(value));
+        }
+
+        private static void OnIsToolbarVisibleChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            if (d is not ImageViewer viewer)
+                return;
+
+            if (!viewer._isApplyingToolbarPreference)
+                ImageViewerToolbarPreferences.ShowToolbar = (bool)e.NewValue;
+
+            viewer.UpdateContextMenuState();
         }
 
         private static void OnImageSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

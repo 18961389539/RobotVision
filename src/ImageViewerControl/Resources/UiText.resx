@@ -79,6 +79,7 @@
 
 这些建议不会自动修改当前图像显示。</value></data>
   <data name="MenuDisplaySettings" xml:space="preserve"><value>显示选项</value></data>
+  <data name="MenuShowFloatingToolbar" xml:space="preserve"><value>显示浮动工具栏</value></data>
   <data name="MenuSearchNoResults" xml:space="preserve"><value>未找到匹配的命令</value></data>
   <data name="MenuShowPixelGrid" xml:space="preserve"><value>显示像素网格</value></data>
   <data name="MenuShowSnapGrid" xml:space="preserve"><value>显示吸附网格</value></data>

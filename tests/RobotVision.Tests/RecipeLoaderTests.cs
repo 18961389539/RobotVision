@@ -112,6 +112,25 @@ public sealed class RecipeLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Save_PersistsSerialNumber()
+    {
+        var loader = new RecipeLoader(_folder);
+        var recipe = new RecipeConfig
+        {
+            Name = "SN1",
+            CameraId = "cam1",
+            AngleMode = AngleMode.KeyPointLine,
+            Models = ["m.onnx"],
+            SerialNumber = 1,
+        };
+        loader.Save(recipe);
+
+        var json = File.ReadAllText(Path.Combine(_folder, "SN1.json"));
+        Assert.Contains("\"SerialNumber\": 1", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, loader.Get("SN1", forceReload: true).SerialNumber);
+    }
+
+    [Fact]
     public void Get_MissingRotationCompensation_DefaultsToNone()
     {
         File.WriteAllText(Path.Combine(_folder, "R02.json"), """
@@ -131,6 +150,37 @@ public sealed class RecipeLoaderTests : IDisposable
     public void Get_UnknownRecipe_Throws()
     {
         Assert.Throws<RecipeNotFoundException>(() => new RecipeLoader(_folder).Get("nope"));
+    }
+
+    /// <summary>文件被独占锁定（IO 故障）不得伪装成"配方不存在"（1001），应报 1099 内部错误——
+    /// 否则文件锁/磁盘满/网络盘瞬断会把排障导向"配方名错了"的错误方向。</summary>
+    [Fact]
+    public void Get_FileLockedIoFault_ThrowsInternalError_NotNotFound()
+    {
+        var path = Path.Combine(_folder, "LOCKED.json");
+        File.WriteAllText(path, """{ "cameraId": "cam", "models": ["m.onnx"] }""");
+
+        using var lockStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        var ex = Assert.Throws<InvalidRecipeException>(() => new RecipeLoader(_folder).Get("LOCKED"));
+        Assert.Equal(VisionErrorCode.InternalError, ex.ErrorCode);
+    }
+
+    /// <summary>EccentricTool 补偿缺 stationId 时补偿会被静默跳过（声称补偿实际没补偿），
+    /// 必须在加载期拦截而不是留到运行期。</summary>
+    [Fact]
+    public void Validate_EccentricToolWithoutStationId_Throws()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "ECC",
+            CameraId = "cam",
+            Models = ["m.onnx"],
+            RotationCompensation = RotationCompensationMode.EccentricTool,
+            StationId = "",
+        };
+
+        var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+        Assert.Contains("stationId", ex.Message);
     }
 
     // ---- 改进项 3：缓存按 LastWriteTime 失效（外部改动可感知） ----
@@ -271,5 +321,91 @@ public sealed class RecipeLoaderTests : IDisposable
         allow = false;
         var ex = Assert.Throws<InvalidRecipeException>(() => loader.Get("R05"));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
+    }
+
+    [Fact]
+    public void ResolveTriggerKey_ByName()
+    {
+        File.WriteAllText(Path.Combine(_folder, "A01.json"), """
+            { "serialNumber": 3, "cameraId": "cam", "models": ["m.onnx"] }
+            """);
+        var loader = new RecipeLoader(_folder);
+
+        var (name, error) = loader.ResolveTriggerKey("A01");
+        Assert.Null(error);
+        Assert.Equal("A01", name);
+    }
+
+    [Fact]
+    public void ResolveTriggerKey_BySerial()
+    {
+        File.WriteAllText(Path.Combine(_folder, "A01.json"), """
+            { "serialNumber": 3, "cameraId": "cam", "models": ["m.onnx"] }
+            """);
+        var loader = new RecipeLoader(_folder);
+
+        Assert.Equal("A01", loader.ResolveTriggerKey("3").RecipeName);
+        Assert.Equal("A01", loader.ResolveTriggerKey("#3").RecipeName);
+    }
+
+    [Fact]
+    public void ResolveTriggerKey_UnknownSerial_ReturnsError()
+    {
+        File.WriteAllText(Path.Combine(_folder, "A01.json"), """
+            { "serialNumber": 3, "cameraId": "cam", "models": ["m.onnx"] }
+            """);
+        var loader = new RecipeLoader(_folder);
+
+        var (_, error) = loader.ResolveTriggerKey("9");
+        Assert.Equal("UNKNOWN_SERIAL", error);
+    }
+
+    [Fact]
+    public void Save_RejectsDuplicateSerialNumber()
+    {
+        File.WriteAllText(Path.Combine(_folder, "A01.json"), """
+            { "serialNumber": 1, "cameraId": "cam", "models": ["m.onnx"] }
+            """);
+        File.WriteAllText(Path.Combine(_folder, "B02.json"), """
+            { "serialNumber": 2, "cameraId": "cam", "models": ["m.onnx"] }
+            """);
+        var loader = new RecipeLoader(_folder);
+        var recipe = loader.Get("B02");
+        recipe.SerialNumber = 1;
+
+        var ex = Assert.Throws<InvalidRecipeException>(() => loader.Save(recipe));
+        Assert.Contains("serialNumber 1", ex.Message);
+    }
+
+    [Fact]
+    public void Save_SerialNumber_IgnoresUnloadableSibling()
+    {
+        File.WriteAllText(Path.Combine(_folder, "GOOD.json"), """
+            { "cameraId": "cam", "models": ["m.onnx"], "angleMode": "KeyPointLine", "keypointIndexA": 0, "keypointIndexB": 1 }
+            """);
+        File.WriteAllText(Path.Combine(_folder, "BROKEN.json"), """
+            { "cameraId": "cam", "angleMode": "UnknownMode" }
+            """);
+        var loader = new RecipeLoader(_folder);
+        var recipe = loader.Get("GOOD");
+        recipe.SerialNumber = 1;
+
+        loader.Save(recipe);
+        Assert.Equal(1, loader.Get("GOOD", forceReload: true).SerialNumber);
+    }
+
+    [Fact]
+    public void Delete_RemovesFileAndListEntry()
+    {
+        File.WriteAllText(Path.Combine(_folder, "A02.json"), """
+            { "cameraId": "cam", "models": ["m.onnx"], "angleMode": "KeyPointLine", "keypointIndexA": 0, "keypointIndexB": 1 }
+            """);
+        var loader = new RecipeLoader(_folder);
+        Assert.Contains("A02", loader.ListNames());
+
+        Assert.True(loader.Delete("A02"));
+        Assert.False(File.Exists(Path.Combine(_folder, "A02.json")));
+        Assert.DoesNotContain("A02", loader.ListNames());
+        Assert.False(loader.Delete("A02"));
     }
 }

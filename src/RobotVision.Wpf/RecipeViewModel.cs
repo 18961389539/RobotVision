@@ -16,6 +16,7 @@ using RobotVision.Infrastructure.Lighting;
 using RobotVision.Core.Models;
 using System.Windows.Threading;
 using RobotVision.Infrastructure.Communication;
+using RobotVision.Infrastructure;
 
 namespace RobotVision.WpfHost;
 
@@ -32,7 +33,7 @@ public sealed record RecipeAngleModeItem(string Value, string Label);
 /// 配方管理：列表（可搜索）+ 编辑表单。编辑始终作用于克隆副本，保存时校验、写回文件并刷新缓存；
 /// 未保存的修改在切换配方/删除时弹确认，防止误丢；新建/改名与已有配方重名时弹覆盖确认。
 /// </summary>
-public partial class RecipeViewModel : ObservableObject, IDisposable
+public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
     private readonly RecipeLoader _loader;
     private readonly CameraManager _cameras;
@@ -56,6 +57,9 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     /// <summary>防止 OnSelectedChanged 重入（程序内设置 Selected 时置位）。</summary>
     private bool _switching;
 
+    /// <summary>页面把 NumberBox 未提交的值刷进 Editor。见 <see cref="NumberBoxCommit"/>。</summary>
+    public Action? FlushPendingEdits { get; set; }
+
     /// <summary>
     /// 测试触发的一次性快照捕获标志：测试前置位（记录配方名），快照到达后原子清除。
     /// 不能用 IsBusy 判断——快照回调经 Task.Run 在线程池异步执行，RunAsync 返回后
@@ -71,7 +75,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private RecipeConfig _editor = new();
 
-    /// <summary>新建/复制模式下名称可编辑（已有配方改名 = 复制 + 删旧）。</summary>
+    /// <summary>新建/复制草稿（尚无磁盘原名）。已有配方也可改名，保存时按移动语义删除旧文件。</summary>
     [ObservableProperty]
     private bool _isNew;
 
@@ -89,6 +93,13 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     /// <summary>ROI 预览图（当前相机取一帧 + 检测区域矩形叠加）。</summary>
     [ObservableProperty]
     private System.Windows.Media.ImageSource? _roiPreviewImage;
+
+    /// <summary>配方列表浮动面板可见性（与右侧参数栏同构，图像主导布局）。</summary>
+    [ObservableProperty]
+    private bool _isListPanelVisible = true;
+
+    [RelayCommand]
+    private void ToggleListPanel() => IsListPanelVisible = !IsListPanelVisible;
 
     /// <summary>参数浮动面板可见性（图像主导布局：收起后图像全幅，参照相机管理页）。</summary>
     [ObservableProperty]
@@ -126,7 +137,10 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowTriggerPoseFields))]
     private bool _includeTriggerPose;
+
+    public bool ShowTriggerPoseFields => IncludeTriggerPose;
 
     [ObservableProperty]
     private double _triggerPoseX;
@@ -160,9 +174,8 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         _tcp = tcp;
         _dirtyTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _dirtyTimer.Tick += (_, _) => NotifyEditorMutated();
-        // 测试触发的结果画面：与监控页同一快照通道（成功完成推理后发布），
-        // 仅在测试期间捕获（TCP/监控页触发的快照不覆盖本页显示）
-        _vision.FrameProcessed += OnTestFrameProcessed;
+        // 注意：FrameProcessed 只在测试触发期间订阅（见 TestTriggerAsync）——
+        // 常驻订阅会让管线的每次 TRIGGER 都为本页多克隆一份全图 Mat
         Refresh();
     }
 
@@ -179,6 +192,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
                 return;
             if (Interlocked.Exchange(ref _awaitSnapshotFor, null) != expected)
                 return;
+            _vision.FrameProcessed -= OnTestFrameProcessed; // 一次性消费后即退订
 
             OverlayDrawer.DrawPoses(image, snapshot.Poses);
             var source = ImageConverter.ToBitmapSource(image);
@@ -194,11 +208,19 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>结束快照等待：清标志并退订（测试失败/异常路径，或 Dispose）。</summary>
+    private void EndSnapshotAwait()
+    {
+        Interlocked.Exchange(ref _awaitSnapshotFor, null);
+        _vision.FrameProcessed -= OnTestFrameProcessed;
+    }
+
     /// <summary>ROI 预览：当前相机取一帧，按配方 ROI（比例）叠加检测区域矩形。
     /// 四个裸数字框（X/Y/W/H 比例值）无图像对照时现场无从判断对应画面哪块。</summary>
     [RelayCommand]
     private async Task PreviewRoiAsync()
     {
+        this.Commit();
         var cameraId = Editor.CameraId;
         if (string.IsNullOrWhiteSpace(cameraId))
         {
@@ -213,15 +235,15 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
             Message = $"ROI 预览取图中 · {cameraId} …";
             var source = await Task.Run(() =>
             {
-                using var frame = _cameras.Grab(cameraId).Image;
-                using var preview = frame.Clone();
-                // 全图推理（Roi=null）也画整框：让操作员确认"当前是全图"这一事实
+                using var grabbed = _cameras.Grab(cameraId);
+                using var preview = grabbed.Image.Clone();
+                using var mat = VisionImageCv.AsMat(preview);
                 var r = roi ?? new Roi(0, 0, 1, 1);
                 var rect = new OpenCvSharp.Rect(
                     (int)(r.X * preview.Width), (int)(r.Y * preview.Height),
                     (int)(r.Width * preview.Width), (int)(r.Height * preview.Height));
-                Cv2.Rectangle(preview, rect, new OpenCvSharp.Scalar(0, 200, 255), 2);
-                Cv2.PutText(preview, "ROI", new OpenCvSharp.Point(rect.X + 6, Math.Max(rect.Y + 22, 22)),
+                Cv2.Rectangle(mat, rect, new OpenCvSharp.Scalar(0, 200, 255), 2);
+                Cv2.PutText(mat, "ROI", new OpenCvSharp.Point(rect.X + 6, Math.Max(rect.Y + 22, 22)),
                     OpenCvSharp.HersheyFonts.HersheySimplex, 0.6, new OpenCvSharp.Scalar(0, 200, 255), 2);
                 return ImageConverter.ToBitmapSource(preview);
             });
@@ -257,8 +279,11 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsKeyPointMode));
         OnPropertyChanged(nameof(IsSegmentationMode));
         OnPropertyChanged(nameof(IsMaskTemplateMode));
+        OnPropertyChanged(nameof(IsDualBlobMode));
         OnPropertyChanged(nameof(IsTemplateMethod));
         OnPropertyChanged(nameof(HasTemplate));
+        OnPropertyChanged(nameof(ShowRotationCompensation));
+        OnPropertyChanged(nameof(ShowBlobFixedThreshold));
         OnPropertyChanged(nameof(PrimaryModel));
         OnPropertyChanged(nameof(SecondaryModel));
     }
@@ -270,6 +295,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task TeachTemplateAsync()
     {
+        this.Commit();
         var cameraId = Editor.CameraId;
         if (string.IsNullOrWhiteSpace(cameraId))
         {
@@ -292,68 +318,52 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
 
             var (b64, w, h) = await Task.Run(() =>
             {
-                using var frame = _cameras.Grab(cameraId).Image;
+                using var grabbed = _cameras.Grab(cameraId);
                 // 与管线一致的去畸变：多项式工位用原图（多项式吸收畸变），否则内参去畸变；
                 // 未做内参标定（台架调试）退回原图，模板坐标系仍与触发时一致（同相机同路径）
-                Mat image;
-                Mat? owned;
-                if (!string.IsNullOrEmpty(Editor.StationId) && _calibration.HasPolynomial(Editor.StationId))
-                {
-                    image = frame;
-                    owned = null;
-                }
-                else
+                VisionImage image = grabbed.Image;
+                VisionImage? undistorted = null;
+                if (string.IsNullOrEmpty(Editor.StationId) || !_calibration.HasPolynomial(Editor.StationId))
                 {
                     try
                     {
-                        owned = _calibration.Undistort(cameraId, frame);
-                        image = owned;
+                        undistorted = _calibration.Undistort(cameraId, grabbed.Image);
+                        image = undistorted;
                     }
                     catch (Core.VisionException)
                     {
-                        owned = null;
-                        image = frame;
+                        image = grabbed.Image;
                     }
                 }
 
-                using var ownedScope = owned;
-                // 推理在 ROI 内，裁剪也用 ROI 视图：轮廓坐标与像素坐标同一坐标系
-                Mat roiView = image;
-                Mat? roiOwned = Editor.Roi is null ? null : RoiHelper.Crop(image, Editor.Roi, out _, out _);
-                try
-                {
-                    if (roiOwned is not null)
-                        roiView = roiOwned;
-                    using var bitmap = RoiHelper.ToBitmap(roiView, null, out _, out _);
-                    var session = _models.Open(Editor.Models[0], InferenceTask.Segmentation);
-                    var results = session.Run(y => y.RunSegmentation(
-                        bitmap, Editor.Confidence, Editor.Segmentation.PixelConfidence, Editor.Iou));
+                using var undistortedScope = undistorted;
+                using var roiOwned = RoiHelper.CropToVisionImage(image, Editor.Roi, out _, out _);
+                var roiView = roiOwned ?? image;
+                var session = _models.Open(Editor.Models[0], InferenceTask.Segmentation);
+                var results = session.Run(y => y.RunSegmentation(
+                    roiView, Editor.Confidence, Editor.Segmentation.PixelConfidence, Editor.Iou));
 
-                    // 最优目标：置信度最高且轮廓有效（与运行时同口径的面积/点数下限）
-                    foreach (var seg in results.OrderByDescending(s => s.Confidence))
+                foreach (var seg in results.OrderByDescending(s => s.Confidence))
+                {
+                    var box = seg.Box;
+                    if ((double)box.Width * box.Height < 400)
+                        continue;
+                    if (seg.ContourLocal.Count < 4)
+                        continue;
+
+                    var points = new Point2f[seg.ContourLocal.Count];
+                    for (var i = 0; i < seg.ContourLocal.Count; i++)
                     {
-                        var box = seg.BoundingBox;
-                        if ((double)box.Width * box.Height < 400)
-                            continue;
-                        var contour = seg.GetContourPoints();
-                        if (contour.Length < 4)
-                            continue;
-
-                        var points = new Point2f[contour.Length];
-                        for (var i = 0; i < contour.Length; i++)
-                            points[i] = new Point2f(contour[i].X + box.Left, contour[i].Y + box.Top);
-
-                        // 紧裁剪（无边距）：运行时旋转搜索的滑窗目标就是这块
-                        var crop = MaskTemplateMatcher.UprightCrop(roiView, points, 0);
-                        using (crop.Upright)
-                            return (MaskTemplateMatcher.EncodeTemplatePng(crop.Upright), crop.Upright.Width, crop.Upright.Height);
+                        var p = seg.ContourLocal[i];
+                        points[i] = new Point2f((float)(p.X + box.X), (float)(p.Y + box.Y));
                     }
-                    throw new InvalidOperationException("分割未检出有效目标，无法示教（请确认模型/阈值/画面内有目标）");
+
+                    using var roiMat = VisionImageCv.AsMat(roiView);
+                    var crop = MaskTemplateMatcher.UprightCrop(roiMat, points, 0);
+                    using (crop.Upright)
+                        return (MaskTemplateMatcher.EncodeTemplatePng(crop.Upright), crop.Upright.Width, crop.Upright.Height);
                 }
-                finally
-                {
-                    roiOwned?.Dispose();
-                }
+                throw new InvalidOperationException("分割未检出有效目标，无法示教（请确认模型/阈值/画面内有目标）");
             });
             lightingScope.Dispose();
 
@@ -421,13 +431,13 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
             if (poly is not null &&
                 string.Equals(poly.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase) &&
                 poly.HasTeachPose)
-                return $"工位 {station} 为末端相机：TRIGGER 必须带 X,Y,RZ，否则 1014";
+                return $"工位 {station} 为末端相机：触发行必须带 X,Y,RZ，否则 1014";
             var ext = _calibration.ExtrinsicProfiles.FirstOrDefault(p =>
                 string.Equals(p.StationId, station, StringComparison.OrdinalIgnoreCase));
             if (ext is not null &&
                 string.Equals(ext.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase) &&
                 ext.HasTeachPose)
-                return $"工位 {station} 为末端相机：TRIGGER 必须带 X,Y,RZ，否则 1014";
+                return $"工位 {station} 为末端相机：触发行必须带 X,Y,RZ，否则 1014";
             return "";
         }
     }
@@ -436,8 +446,9 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     public string AngleModeHint => Editor.AngleMode switch
     {
         AngleMode.MaskMinAreaRect => "最小外接矩形角度为 [0,180)，无头尾方向；偏心工具补偿可能差 180°",
-        AngleMode.DualCenterLine => "双模型连线为一对一就近配对，多目标间距接近时可能配错",
+        AngleMode.DualCenterLine => "默认全局就近配对，多目标间距接近时可能配错；开「窗口配对」后 B 只在 A 外扩窗口内检测，多目标不配错",
         AngleMode.MaskTemplate => "模板匹配失败会回退粗角度 [0,180)（无方向）；示教须与生产同一套照明",
+        AngleMode.DualBlobCenterLine => "主BLOB质心定位、主→次质心定向（有方向）；次BLOB缺失该目标不输出；无需模型",
         _ => "",
     };
 
@@ -681,6 +692,15 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     public bool IsSegmentationMode => Editor.AngleMode == AngleMode.MaskMinAreaRect;
     public bool IsMaskTemplateMode => Editor.AngleMode == AngleMode.MaskTemplate;
 
+    /// <summary>双BLOB模式：纯图像处理，隐藏模型选择与置信度/IoU，显示 BLOB 参数。</summary>
+    public bool IsDualBlobMode => Editor.AngleMode == AngleMode.DualBlobCenterLine;
+
+    /// <summary>台架直通时不显示旋转补偿（返回像素，不涉及机器人坐标）。</summary>
+    public bool ShowRotationCompensation => !Editor.DebugPassthrough;
+
+    /// <summary>BLOB 固定阈值：Otsu 开启时隐藏。</summary>
+    public bool ShowBlobFixedThreshold => IsDualBlobMode && !Editor.Blob.UseOtsu;
+
     /// <summary>是否已示教模板（模板参数卡状态提示；示教/换配方后通知）。</summary>
     public bool HasTemplate => !string.IsNullOrEmpty(Editor.Template.TemplateImageBase64);
 
@@ -774,6 +794,8 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     {
         try
         {
+            this.Commit();
+
             // 空名/非法名先给友好提示（RecipeLoader 的校验文案面向配置格式，不面向表单）
             if (string.IsNullOrWhiteSpace(Editor.Name))
             {
@@ -810,15 +832,16 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
             _loader.Save(Editor);
 
             // 改名 = 移动语义：删除旧名文件，避免双配方同名异体（PLC 触发旧名走旧参数）
+            string savedMessage;
             if (isRename && _originalName.Length > 0 &&
                 !string.Equals(Editor.Name, _originalName, StringComparison.OrdinalIgnoreCase))
             {
                 _loader.Delete(_originalName);
-                Message = $"已保存 {Editor.Name}（原 {_originalName} 已重命名，旧文件已删除）";
+                savedMessage = $"已保存 {Editor.Name}（原 {_originalName} 已重命名，旧文件已删除）";
             }
             else
             {
-                Message = $"已保存 {Editor.Name}";
+                savedMessage = $"已保存 {Editor.Name}";
             }
 
             IsNew = false;
@@ -827,6 +850,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
             Refresh();
+            Message = savedMessage;
         }
         catch (Exception ex)
         {
@@ -876,6 +900,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanOperate))]
     private async Task TestTriggerAsync()
     {
+        this.Commit();
         if (string.IsNullOrEmpty(_originalName))
             return;
 
@@ -887,6 +912,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         IsBusy = true;
         TestImage = null; // 清上一轮结果图（失败时不显示旧画面误导）
         _awaitSnapshotFor = _originalName; // 置位一次性捕获标志（见字段注释）
+        _vision.FrameProcessed += OnTestFrameProcessed; // 仅测试期间订阅，避免常驻克隆开销
         try
         {
             Message = $"测试触发中：{_originalName} …";
@@ -900,19 +926,19 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
             if (result.Ok)
             {
                 // 成功：保持标志置位——快照回调可能在 RunAsync 返回后才执行，
-                // 由回调一次性消费；finally 清除会重现"测试通过但无图"竞态
+                // 由回调一次性消费并退订；finally 清除会重现"测试通过但无图"竞态
                 Message = $"测试通过：{result.RecipeName} · {result.Poses.Count} 个目标 · {result.ElapsedMs:0}ms";
             }
             else
             {
-                // 失败：清标志，防之后 TCP 触发的同配方快照被误当作测试结果显示
-                Interlocked.Exchange(ref _awaitSnapshotFor, null);
+                // 失败：清标志退订，防之后 TCP 触发的同配方快照被误当作测试结果显示
+                EndSnapshotAwait();
                 Message = $"测试失败：ERR {result.ErrorCode} · {result.Message}";
             }
         }
         catch (Exception ex)
         {
-            Interlocked.Exchange(ref _awaitSnapshotFor, null);
+            EndSnapshotAwait();
             Message = $"测试异常：{ex.Message}";
         }
         finally
@@ -955,7 +981,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
             Editor = loaded.Clone();
             _baseline = Editor.Clone();
             NotifyEditorBindings();
-            Message = loaded.Enabled ? "" : $"配方 {name} 已停用（Enabled=false），触发将返回 1001";
+            Message = loaded.Enabled ? "" : $"配方 {name} 已停用（Enabled=false），触发将返回 1015";
         }
         catch (Exception ex)
         {
@@ -993,6 +1019,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsDualMode));
         OnPropertyChanged(nameof(IsKeyPointMode));
         OnPropertyChanged(nameof(IsSegmentationMode));
+        OnPropertyChanged(nameof(IsDualBlobMode));
         OnPropertyChanged(nameof(IsTemplateMethod));
         OnPropertyChanged(nameof(HasTemplate));
     }
@@ -1008,6 +1035,7 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
                 AngleMode.DualCenterLine => "双模型",
                 AngleMode.KeyPointLine => "关键点",
                 AngleMode.MaskTemplate => "分割+精修",
+                AngleMode.DualBlobCenterLine => "双BLOB",
                 _ => r.AngleMode.ToString(),
             };
             // 信息密度：模式/相机/主模型之外，工位、ROI、光源直接可见——
@@ -1059,6 +1087,6 @@ public partial class RecipeViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _dirtyTimer.Stop();
-        _vision.FrameProcessed -= OnTestFrameProcessed;
+        EndSnapshotAwait();
     }
 }

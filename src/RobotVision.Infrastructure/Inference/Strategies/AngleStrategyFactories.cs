@@ -47,3 +47,14 @@ public sealed class MaskTemplateStrategyFactory : IAngleStrategyFactory
     public IAngleStrategy Create(ModelManager models, ILogger? logger = null) =>
         new MaskTemplateStrategy(models);
 }
+
+/// <summary>DualBlobCenterLine 策略工厂：双BLOB主次质心连线（纯图像处理，无需模型）。</summary>
+public sealed class DualBlobCenterLineStrategyFactory : IAngleStrategyFactory
+{
+    public AngleMode Mode => AngleMode.DualBlobCenterLine;
+
+    public string Label => "双BLOB连线（主BLOB定位+次BLOB定向，无需模型）";
+
+    public IAngleStrategy Create(ModelManager models, ILogger? logger = null) =>
+        new DualBlobCenterLineStrategy();
+}

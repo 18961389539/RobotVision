@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using RobotVision.Core;
 using RobotVision.Core.Models;
-using SkiaSharp;
 
 namespace RobotVision.Infrastructure.Inference;
 
@@ -355,11 +354,17 @@ public sealed class ModelManager(
 
         try
         {
+            InferenceTaskValidation.EnsureSupported(engine, task);
             WarmUp(engine, task);
         }
         catch (Exception ex)
         {
-            engine.Dispose(); // 预热失败也要释放已创建的 ONNX 会话
+            engine.Dispose();
+            if (ex is VisionException)
+                throw;
+            if (ex is InvalidCastException)
+                throw new VisionException(VisionErrorCode.ModelNotAvailable,
+                    $"模型任务与所选「{InferenceTaskValidation.Label(task)}」不匹配（{ex.Message}）", ex);
             throw new VisionException(VisionErrorCode.ModelNotAvailable,
                 $"模型预热失败: {Path.GetFileName(path)}（{task}）: {ex.Message}", ex);
         }
@@ -374,7 +379,7 @@ public sealed class ModelManager(
     /// </summary>
     private static void WarmUp(IInferenceEngine engine, InferenceTask task)
     {
-        using var dummy = new SKBitmap(new SKImageInfo(640, 640, SKColorType.Bgra8888, SKAlphaType.Opaque));
+        using var dummy = VisionImage.AllocateZero(640, 640, 3);
         switch (task)
         {
             case InferenceTask.ObjectDetection:

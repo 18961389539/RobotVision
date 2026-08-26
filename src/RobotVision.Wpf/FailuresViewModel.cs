@@ -48,6 +48,13 @@ public partial class FailuresViewModel : ObservableObject
     [ObservableProperty]
     private string _filterSummary = "";
 
+    /// <summary>失败列表浮动面板是否可见（与相机/配方/模型页同构，图像主导布局）。</summary>
+    [ObservableProperty]
+    private bool _isListPanelVisible = true;
+
+    [RelayCommand]
+    private void ToggleListPanel() => IsListPanelVisible = !IsListPanelVisible;
+
     /// <summary>清空按钮文案：筛选状态下仅删除筛选结果，文案与行为一致。</summary>
     public string DeleteAllButtonText =>
         RecipeFilter != AllFilter || ErrorCodeFilter != AllFilter ? "清空筛选结果" : "清空全部";

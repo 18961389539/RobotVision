@@ -9,6 +9,7 @@ public partial class RecipePage : Page
     {
         InitializeComponent();
         DataContext = App.Services.GetRequiredService(typeof(RecipeViewModel));
+        NumberBoxCommit.Bind(this, DataContext as RecipeViewModel);
         // 再次进入页面时刷新相机下拉（相机管理页增删相机后）
         Loaded += (_, _) =>
         {
@@ -23,4 +24,3 @@ public partial class RecipePage : Page
     private void AngleMode_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         (DataContext as RecipeViewModel)?.NotifyAngleModeChanged();
 }
-

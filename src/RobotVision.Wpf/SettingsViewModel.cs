@@ -12,7 +12,7 @@ namespace RobotVision.WpfHost;
 /// 网络端点（IP/端口）保存后热重启监听（无需重启程序，失败自动回滚并提示）。
 /// 校验集中在 AppSettingsStore（值域 + 相机取图超时联动），本页只负责展示与交互。
 /// </summary>
-public partial class SettingsViewModel : ObservableObject
+public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
 {
     // 出厂默认值（与 appsettings.json 初始一致）
     private const int DefaultTimeoutMs = 5000;
@@ -36,6 +36,8 @@ public partial class SettingsViewModel : ObservableObject
     /// <summary>最近一次载入/保存时的参数快照（脏标记基准）。</summary>
     private ServiceSettingsValues? _baseline;
 
+    public Action? FlushPendingEdits { get; set; }
+
     [ObservableProperty]
     private int _timeoutMs;
 
@@ -44,6 +46,7 @@ public partial class SettingsViewModel : ObservableObject
     private double _idleTimeoutMs;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowPoseToleranceFields))]
     private bool _poseCheckEnabled;
 
     [ObservableProperty]
@@ -65,7 +68,14 @@ public partial class SettingsViewModel : ObservableObject
     private int _maxConnections;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowFailureRetention))]
     private bool _failureEnabled;
+
+    /// <summary>位姿校验关闭时隐藏容差字段（仅调试场景关校验）。</summary>
+    public bool ShowPoseToleranceFields => PoseCheckEnabled;
+
+    /// <summary>失败留存关闭时隐藏保留数量。</summary>
+    public bool ShowFailureRetention => FailureEnabled;
 
     [ObservableProperty]
     private int _failureRetainedCount;
@@ -146,6 +156,7 @@ public partial class SettingsViewModel : ObservableObject
     {
         try
         {
+            this.Commit();
             var values = CurrentValues();
 
             // 校验集中在 Store（值域 + 相机取图超时联动），非法值抛 InvalidDataException

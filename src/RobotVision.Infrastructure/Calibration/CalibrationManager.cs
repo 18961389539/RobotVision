@@ -5,6 +5,7 @@ using RobotVision.Core;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
+using RobotVision.Infrastructure;
 
 namespace RobotVision.Infrastructure.Calibration;
 
@@ -809,7 +810,7 @@ public sealed class CalibrationManager : IDisposable
         if (pose is not null || !ClientPoseRequired(stationId))
             return;
         throw new VisionException(VisionErrorCode.PoseRequired,
-            "OnArm 工位必须使用 TRIGGER,配方名,X,Y,RZ（未上报拍照位姿，拒绝执行以免输出错位坐标）");
+            "OnArm 工位必须使用 配方名或序列号,X,Y,RZ（未上报拍照位姿，拒绝执行以免输出错位坐标）");
     }
 
     /// <summary>
@@ -902,6 +903,13 @@ public sealed class CalibrationManager : IDisposable
     public bool IsCalibrated(string cameraId) => _intrinsics.ContainsKey(cameraId);
 
     /// <summary>内参去畸变。读锁内执行，与热加载（写锁）互斥，防止 Remap 使用已释放的 Map。</summary>
+    public VisionImage Undistort(string cameraId, VisionImage src)
+    {
+        using var mat = VisionImageCv.AsMat(src);
+        return VisionImageCv.FromMat(Undistort(cameraId, mat), ownsMat: true);
+    }
+
+    /// <summary>内参去畸变（Mat 重载，标定工具与内部映射用）。</summary>
     public Mat Undistort(string cameraId, Mat src)
     {
         _intrinsicLock.EnterReadLock();

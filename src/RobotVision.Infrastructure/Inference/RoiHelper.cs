@@ -1,6 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Models;
 using SkiaSharp;
+using RobotVision.Infrastructure;
 
 namespace RobotVision.Infrastructure.Inference;
 
@@ -25,6 +26,24 @@ public static class RoiHelper
 
         using var cropped = Crop(undistorted, roi, out offsetX, out offsetY);
         return MatSkiaConverter.ToSKBitmap(cropped);
+    }
+
+    /// <summary>
+    /// 按 ROI 得到推理用 VisionImage。roi 为 null 时返回 null（调用方直接用原图，避免多余拷贝）。
+    /// 非 null 时返回拥有裁剪头的 VisionImage，调用方必须 Dispose；像素仍共享自 source。
+    /// </summary>
+    public static VisionImage? CropToVisionImage(VisionImage source, Roi? roi, out double offsetX, out double offsetY)
+    {
+        if (roi is null)
+        {
+            offsetX = 0;
+            offsetY = 0;
+            return null;
+        }
+
+        using var mat = VisionImageCv.AsMat(source);
+        var cropped = Crop(mat, roi, out offsetX, out offsetY);
+        return VisionImageCv.FromMat(cropped, ownsMat: true);
     }
 
     /// <summary>按相对比例裁剪（边界 clamp），返回 Mat 视图（共享数据）。</summary>

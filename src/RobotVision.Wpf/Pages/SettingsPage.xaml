@@ -6,6 +6,7 @@
       Background="{DynamicResource ApplicationBackgroundBrush}">
 
     <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <!-- 生效方式徽章（组标题右侧）：绿 = 保存后生效 -->
         <Style x:Key="HotBadge" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource SystemFillColorSuccessBrush}" />
@@ -128,20 +129,39 @@
                     <StackPanel Margin="0,10,0,0">
                         <ui:ToggleSwitch Content="启用位姿校验（正式产线应开启）"
                                          IsChecked="{Binding PoseCheckEnabled}" />
-                        <UniformGrid Columns="2" Margin="0,8,0,0">
-                            <StackPanel Margin="0,0,10,8">
-                                <TextBlock Text="XY 容差（mm）" Margin="0,0,0,4" />
-                                <ui:NumberBox Value="{Binding PoseXyToleranceMm}" Minimum="0.01" Maximum="50"
-                                              SmallChange="0.1" SpinButtonPlacementMode="Inline" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,0,8">
-                                <TextBlock Text="RZ 容差（°）" Margin="0,0,0,4" />
-                                <ui:NumberBox Value="{Binding PoseRzToleranceDeg}" Minimum="0.01" Maximum="45"
-                                              SmallChange="0.1" SpinButtonPlacementMode="Inline" />
-                            </StackPanel>
-                        </UniformGrid>
+                        <StackPanel Margin="0,8,0,0"
+                                    Visibility="{Binding ShowPoseToleranceFields,
+                                        Converter={StaticResource BoolToVisibilityConverter}}">
+                            <UniformGrid Columns="2">
+                                <StackPanel Margin="0,0,10,8">
+                                    <TextBlock Text="XY 容差（mm）" Margin="0,0,0,4" />
+                                    <ui:NumberBox Value="{Binding PoseXyToleranceMm}" Minimum="0.01" Maximum="50"
+                                                  SmallChange="0.1" SpinButtonPlacementMode="Inline" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,0,8">
+                                    <TextBlock Text="RZ 容差（°）" Margin="0,0,0,4" />
+                                    <ui:NumberBox Value="{Binding PoseRzToleranceDeg}" Minimum="0.01" Maximum="45"
+                                                  SmallChange="0.1" SpinButtonPlacementMode="Inline" />
+                                </StackPanel>
+                            </UniformGrid>
+                        </StackPanel>
                         <ui:TextBlock FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                      Text="末端相机工位：未上报 X,Y,RZ 返回 1014；超容差返回 1012。关闭后两项均不拦截（仅调试）。" />
+                                      TextWrapping="Wrap" Margin="0,4,0,0">
+                            <ui:TextBlock.Style>
+                                <Style TargetType="ui:TextBlock">
+                                    <Setter Property="Text"
+                                            Value="末端相机工位：未上报 X,Y,RZ 返回 1014；超容差返回 1012。关闭后两项均不拦截（仅调试）。" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding PoseCheckEnabled}" Value="False">
+                                            <Setter Property="Text"
+                                                    Value="位姿校验已关闭：1012/1014 均不拦截，仅用于台架调试；正式产线请开启。" />
+                                            <Setter Property="Foreground"
+                                                    Value="{DynamicResource SystemFillColorCautionBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ui:TextBlock.Style>
+                        </ui:TextBlock>
                     </StackPanel>
                 </ui:CardExpander>
 
@@ -159,7 +179,9 @@
                         <StackPanel Margin="0,0,0,8">
                             <ui:ToggleSwitch Content="启用失败现场图像留存" IsChecked="{Binding FailureEnabled}" />
                         </StackPanel>
-                        <StackPanel MaxWidth="320" HorizontalAlignment="Left">
+                        <StackPanel MaxWidth="320" HorizontalAlignment="Left"
+                                    Visibility="{Binding ShowFailureRetention,
+                                        Converter={StaticResource BoolToVisibilityConverter}}">
                             <TextBlock Text="滚动保留数量（最旧先删，0 = 不自动清理）" Margin="0,0,0,4" />
                             <ui:NumberBox Value="{Binding FailureRetainedCount}" Minimum="0" Maximum="10000"
                                           SmallChange="50" SpinButtonPlacementMode="Inline" />

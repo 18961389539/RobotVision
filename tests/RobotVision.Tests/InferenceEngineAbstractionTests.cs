@@ -2,9 +2,7 @@ using Microsoft.Extensions.Logging;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Infrastructure.Inference;
-using SkiaSharp;
 using Xunit;
-using YoloDotNet.Models;
 
 namespace RobotVision.Tests;
 
@@ -47,24 +45,26 @@ public class InferenceEngineAbstractionTests : IDisposable
     /// <summary>记录型假引擎：验证 ModelManager 经抽象调用引擎方法。</summary>
     private sealed class FakeEngine : IInferenceEngine
     {
+        public InferenceTask? DetectedTask => null;
+
         public int DetectionCalls;
         public int SegmentationCalls;
         public int PoseCalls;
         public int DisposedCount;
 
-        public IReadOnlyList<ObjectDetection> RunObjectDetection(SKBitmap image, double confidence = 0.25, double iou = 0.45)
+        public IReadOnlyList<ObjectDetectionResult> RunObjectDetection(VisionImage image, double confidence = 0.25, double iou = 0.45)
         {
             DetectionCalls++;
             return [];
         }
 
-        public IReadOnlyList<Segmentation> RunSegmentation(SKBitmap image, double confidence = 0.25, double pixelConfidence = 0.5, double iou = 0.45)
+        public IReadOnlyList<InstanceSegmentation> RunSegmentation(VisionImage image, double confidence = 0.25, double pixelConfidence = 0.5, double iou = 0.45)
         {
             SegmentationCalls++;
             return [];
         }
 
-        public IReadOnlyList<PoseEstimation> RunPoseEstimation(SKBitmap image, double confidence = 0.25, double iou = 0.45)
+        public IReadOnlyList<PoseDetectionResult> RunPoseEstimation(VisionImage image, double confidence = 0.25, double iou = 0.45)
         {
             PoseCalls++;
             return [];
@@ -90,7 +90,8 @@ public class InferenceEngineAbstractionTests : IDisposable
         using var manager = new ModelManager(_folder, factory);
         var session = manager.Open("fake.onnx", InferenceTask.PoseEstimation);
 
-        var results = session.Run(e => e.RunPoseEstimation(new SKBitmap(64, 64)));
+        using var dummy = VisionImage.AllocateZero(64, 64, 3);
+        var results = session.Run(e => e.RunPoseEstimation(dummy));
         Assert.Empty(results);
         Assert.Equal(2, factory.Engine.PoseCalls); // 预热(1) + 本次推理(1)
         Assert.Equal(0, factory.Engine.DetectionCalls);

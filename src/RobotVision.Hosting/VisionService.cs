@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
-using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
@@ -19,7 +17,7 @@ namespace RobotVision.Hosting;
 /// <param name="UndistortedImage">去畸变图像，所有权移交订阅者，用完必须 Dispose。</param>
 public sealed record VisionFrameSnapshot(
     string RecipeName,
-    Mat UndistortedImage,
+    VisionImage UndistortedImage,
     IReadOnlyList<PixelPose> Poses);
 
 /// <summary>
@@ -36,8 +34,6 @@ public sealed class VisionService(
     FailureImageStore failureImages,
     ILogger<VisionService> log)
 {
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _cameraGates = new(StringComparer.OrdinalIgnoreCase);
-
     private PipelineScheduler? _scheduler;
 
     /// <summary>调度器（懒创建：与 VisionService 主构造解耦，构造时无需额外参数）。</summary>
@@ -104,7 +100,7 @@ public sealed class VisionService(
     {
         var stopwatch = Stopwatch.StartNew();
         using var processing = Scheduler.BeginExecution();
-        Mat? undistorted = null;
+        VisionImage? undistorted = null;
         double grabMs = 0, undistortMs = 0, inferenceMs = 0;
         FailureContext? failureCtx = null;
         try
@@ -114,7 +110,8 @@ public sealed class VisionService(
 
             // 停用配方（Enabled=false）拒绝触发，文件保留
             if (!recipe.Enabled)
-                throw new InvalidRecipeException(recipeName, "配方已停用（Enabled=false）");
+                throw new InvalidRecipeException(recipeName, "配方已停用（Enabled=false）",
+                    VisionErrorCode.RecipeDisabled);
 
             // OnArm 位姿：缺位姿直接 1014；有位姿再做 1012 一致性（多项式 Translate 仅校 RZ）。
             calibration.RequireClientPose(recipe.StationId, pose);
@@ -129,35 +126,26 @@ public sealed class VisionService(
             // 取图前：点亮光源并等待稳定（配方未配置照明时零开销）
             using var lightingScope = lighting.Apply(recipe.LightControllerId, recipe.Lighting);
             if (lightingScope.StabilizeDelayMs > 0)
-                await Task.Delay(lightingScope.StabilizeDelayMs, ct);
+                await Task.Delay(lightingScope.StabilizeDelayMs, ct).ConfigureAwait(false);
 
             // 多项式工位（单图模式）：跳过内参去畸变，推理直接用原图（多项式吸收畸变）
             var usePolynomial = calibration.HasPolynomial(recipe.StationId);
 
-            // 取图 + 去畸变：按相机粒度串行（相机 I/O 非线程安全）；不同相机可并行取图。
-            // Grab 支持取消：阻塞中的 SDK 调用返回后立即响应取消（抛 OperationCanceledException）。
-            var cameraGate = _cameraGates.GetOrAdd(recipe.CameraId, _ => new SemaphoreSlim(1, 1));
-            await cameraGate.WaitAsync(ct);
-            try
+            // 取图走 CameraManager 按 Id 串行门闩（与 UI 预览共用，SDK 非线程安全）。
+            // 去畸变在锁外：预览可与 CPU 去畸变重叠，不必再占相机。
+            using var frame = await cameras.GrabAsync(recipe.CameraId, ct).ConfigureAwait(false);
+            grabMs = stopwatch.Elapsed.TotalMilliseconds;
+            if (usePolynomial)
             {
-                using var frame = cameras.Grab(recipe.CameraId, ct);
-                grabMs = stopwatch.Elapsed.TotalMilliseconds;
-                if (usePolynomial)
-                {
-                    // 分辨率必须与标定档案一致（归一化坐标错位 = 映射整体失效）
-                    calibration.VerifyPolynomialResolution(recipe.StationId!, frame.Image.Width, frame.Image.Height);
-                    undistorted = frame.Image.Clone(); // 复用变量：快照/失败留存/Dispose 路径不变
-                }
-                else
-                {
-                    undistorted = calibration.Undistort(recipe.CameraId, frame.Image);
-                }
-                undistortMs = stopwatch.Elapsed.TotalMilliseconds;
+                // 分辨率必须与标定档案一致（归一化坐标错位 = 映射整体失效）
+                calibration.VerifyPolynomialResolution(recipe.StationId!, frame.Image.Width, frame.Image.Height);
+                undistorted = frame.Image.Clone();
             }
-            finally
+            else
             {
-                cameraGate.Release();
+                undistorted = calibration.Undistort(recipe.CameraId, frame.Image);
             }
+            undistortMs = stopwatch.Elapsed.TotalMilliseconds;
 
             // 取图完成立即熄灯（兑现 TurnOffAfterGrab 语义）：推理/后处理全程不再亮灯，
             // 避免原来 `using var` 把熄灯推迟到请求结束、取图后推理阶段一直亮灯；
@@ -168,7 +156,8 @@ public sealed class VisionService(
             // 推理：ModelSession 内信号量按模型串行（Yolo 非线程安全），不同模型可并行；
             // 等待模型信号量阶段响应取消（排队超时），ONNX 推理本身不可中断
             var strategy = strategies.Create(recipe);
-            var pixelPoses = await Task.Run(() => strategy.Compute(undistorted, recipe, ct), ct);
+            var pixelPoses = await Task.Run(() => strategy.Compute(undistorted, recipe, ct), ct)
+                .ConfigureAwait(false);
             inferenceMs = stopwatch.Elapsed.TotalMilliseconds;
 
             PublishSnapshot(recipeName, undistorted, pixelPoses);
@@ -251,20 +240,15 @@ public sealed class VisionService(
         Iou: recipe.Iou,
         Source: "pipeline");
 
-    private void PublishSnapshot(string recipeName, Mat undistorted, IReadOnlyList<PixelPose> poses)
+    private void PublishSnapshot(string recipeName, VisionImage undistorted, IReadOnlyList<PixelPose> poses)
     {
         var handler = FrameProcessed;
         if (handler is null)
             return;
 
-        // 每个订阅者一份独立克隆：多播委托按订阅顺序串行传同一 snapshot，
-        // 订阅者各自 using 释放 UndistortedImage——共享一份时先执行的订阅者
-        // 释放后，后续订阅者拿到已释放的 Mat（异常被各自 catch 静默吞掉，
-        // 表现为"后订阅的页面永远无图"）。
-        // 克隆（快）留在管线线程，保证在 undistorted Dispose 前完成。
         foreach (var subscriber in handler.GetInvocationList())
         {
-            Mat clone;
+            VisionImage clone;
             try
             {
                 clone = undistorted.Clone();
@@ -275,7 +259,6 @@ public sealed class VisionService(
                 continue;
             }
 
-            // 订阅者回调（绘制叠加/位图转换等重活）移到线程池，管线尽快释放
             var snapshot = new VisionFrameSnapshot(recipeName, clone, poses);
             _ = Task.Run(() =>
             {
@@ -285,8 +268,8 @@ public sealed class VisionService(
                 }
                 catch (Exception ex)
                 {
-                    // 订阅者异常绝不能影响产线管线
                     log.LogWarning(ex, "FrameProcessed 订阅者处理快照异常");
+                    try { snapshot.UndistortedImage.Dispose(); } catch { /* 尽力而为 */ }
                 }
             });
         }

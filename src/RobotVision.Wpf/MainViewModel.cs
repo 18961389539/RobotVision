@@ -4,6 +4,8 @@ using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using OpenCvSharp;
+using RobotVision.Core;
+using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
@@ -17,7 +19,7 @@ public sealed record PoseRow(int Index, double X, double Y, double AngleDeg, dou
 
 public sealed record LogLine(string Time, string Level, string Message);
 
-public partial class MainViewModel : ObservableObject, IDisposable
+public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
     private const int LogCapacity = 500;
     private static readonly TimeSpan PreviewInterval = TimeSpan.FromMilliseconds(500);
@@ -31,6 +33,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _previewTimer;
     private readonly DispatcherTimer _statusTimer;
     private readonly Random _random = new();
+
+    public Action? FlushPendingEdits { get; set; }
 
     private bool _showingSnapshot;
     private int _previewBusy;
@@ -63,7 +67,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string? _selectedCamera;
 
     [ObservableProperty]
-    private bool _previewEnabled = true;
+    private bool _previewEnabled;
 
     [ObservableProperty]
     private bool _autoScroll = true;
@@ -94,6 +98,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>触发是否成功（决定横幅绿/红底色）。</summary>
     [ObservableProperty]
     private bool _triggerSuccess;
+
+    /// <summary>监控页参数浮动面板展开状态（图像主导布局，与相机/配方页同构）。</summary>
+    [ObservableProperty]
+    private bool _isParamPanelVisible = true;
+
+    [RelayCommand]
+    private void ToggleParamPanel() => IsParamPanelVisible = !IsParamPanelVisible;
+
+    /// <summary>监控页日志浮动面板展开状态。</summary>
+    [ObservableProperty]
+    private bool _isLogPanelVisible = true;
+
+    [RelayCommand]
+    private void ToggleLogPanel() => IsLogPanelVisible = !IsLogPanelVisible;
 
     /// <summary>日志级别过滤选项。</summary>
     public IReadOnlyList<string> LogFilterOptions { get; } = ["全部", "警告及错误", "仅错误"];
@@ -130,7 +148,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         foreach (var camera in cameras.CameraIds)
             Cameras.Add(camera);
-        SelectedCamera = Cameras.FirstOrDefault();
+        SelectedCamera = ResolveDefaultMonitorCamera(null);
 
         RefreshRecipes();
 
@@ -159,7 +177,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Cameras.Clear();
         foreach (var camera in _cameras.CameraIds)
             Cameras.Add(camera);
-        SelectedCamera = current is not null && Cameras.Contains(current) ? current : Cameras.FirstOrDefault();
+        SelectedCamera = current is not null && Cameras.Contains(current)
+            ? current
+            : ResolveDefaultMonitorCamera(null);
+    }
+
+    /// <summary>监控页默认相机：优先 Virtual，其次 File，最后列表首项（无硬件时不默认 Basler）。</summary>
+    private string? ResolveDefaultMonitorCamera(string? preferred)
+    {
+        if (!string.IsNullOrEmpty(preferred) && Cameras.Contains(preferred))
+            return preferred;
+
+        foreach (var id in Cameras)
+        {
+            if (_cameras.TryGet(id, out var camera) && camera.Kind == CameraKind.Virtual)
+                return id;
+        }
+
+        foreach (var id in Cameras)
+        {
+            if (_cameras.TryGet(id, out var camera) && camera.Kind == CameraKind.File)
+                return id;
+        }
+
+        return Cameras.FirstOrDefault();
     }
 
     [RelayCommand]
@@ -183,6 +224,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task TriggerAsync()
     {
+        this.Commit();
         var recipeName = SelectedRecipe;
         if (string.IsNullOrEmpty(recipeName) || IsBusy)
             return;
@@ -210,9 +252,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Poses.Clear();
             for (var i = 0; i < result.Poses.Count; i++)
             {
-                var pose = result.Poses[i];
+                var robotPose = result.Poses[i];
                 var score = i < result.Confidences.Count ? result.Confidences[i] : 0;
-                Poses.Add(new PoseRow(i + 1, pose.X, pose.Y, pose.AngleDeg, score));
+                Poses.Add(new PoseRow(i + 1, robotPose.X, robotPose.Y, robotPose.AngleDeg, score));
             }
 
             StatusText = $"{result.RecipeName} · {result.Poses.Count} 个目标 · {result.ElapsedMs:0}ms";
@@ -276,6 +318,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _showingSnapshot = false;
     }
 
+    private void HandlePreviewFailure(string statusMessage)
+    {
+        PreviewEnabled = false;
+        StatusText = statusMessage + " · 已自动停止预览";
+    }
+
     private async Task GrabPreviewAsync()
     {
         if (!PreviewEnabled || !MonitorActive || _showingSnapshot || IsBusy || SelectedCamera is null)
@@ -284,13 +332,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (Interlocked.Exchange(ref _previewBusy, 1) == 1)
             return;
 
+        var cameraId = SelectedCamera;
         try
         {
-            var cameraId = SelectedCamera;
             var recipeName = SelectedRecipe;
             var image = await Task.Run(() =>
             {
-                var frame = _cameras.Grab(cameraId);
+                var frame = _cameras.Grab(cameraId!);
                 try
                 {
                     string? stationId = null;
@@ -330,14 +378,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 StatusText = $"预览中 · {cameraId}";
             });
         }
+        catch (VisionException vex)
+        {
+            UiDispatch.Begin(() => HandlePreviewFailure(FormatPreviewError(cameraId!, vex)));
+        }
         catch (Exception ex)
         {
-            UiDispatch.Begin(() => StatusText = $"预览失败: {ex.Message}");
+            UiDispatch.Begin(() => HandlePreviewFailure($"预览失败 · {cameraId}: {ex.Message}"));
         }
         finally
         {
             Volatile.Write(ref _previewBusy, 0);
         }
+    }
+
+    private static string FormatPreviewError(string cameraId, VisionException vex)
+    {
+        var hint = vex.Message.Contains("GigE Vision", StringComparison.OrdinalIgnoreCase)
+            ? " · 建议相机页将类型改为 Basler，并通过「枚举设备」选择本机相机"
+            : vex.Message.Contains("自动重连未恢复", StringComparison.OrdinalIgnoreCase)
+                || vex.Message.Contains("未发现 Basler 相机", StringComparison.OrdinalIgnoreCase)
+                ? " · 请检查 pylon/网线/上电，或改用 cam_virtual / cam_file"
+                : "";
+        return $"预览失败 · {cameraId} ({(int)vex.ErrorCode}): {vex.Message}{hint}";
     }
 
     /// <summary>管线线程回调：同步绘制叠加并转换，再封送到 UI 线程更新显示。</summary>

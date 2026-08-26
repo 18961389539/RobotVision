@@ -105,7 +105,7 @@ public sealed class CameraConfig
 {
     public string Id { get; set; } = "";
 
-    /// <summary>File = 文件夹回放；Basler = pylon .NET 真实相机；其他品牌 SDK 接入后在此扩展。</summary>
+    /// <summary>File = 文件夹回放；Basler = pylon；GigEVision = 开源 GigE Vision；Virtual = 程序生成。</summary>
     public string Type { get; set; } = "Basler";
 
     /// <summary>File 相机：回放图片目录。</summary>
@@ -114,16 +114,16 @@ public sealed class CameraConfig
     /// <summary>File 相机：回放帧间隔（ms），0 = 不限速。与 Virtual 的 IntervalMs 共用字段。</summary>
     public int IntervalMs { get; set; } = 0;
 
-    /// <summary>Basler 相机：序列号；留空时自动绑定枚举到的第一台。</summary>
+    /// <summary>Basler / GigEVision：序列号或 IP；留空时自动绑定枚举到的第一台。</summary>
     public string DeviceId { get; set; } = "";
 
-    /// <summary>Basler 相机：曝光时间（µs）；null = 不下发，使用相机当前值。</summary>
+    /// <summary>Basler / GigEVision：曝光时间（µs）；null = 不下发，使用相机当前值。</summary>
     public double? ExposureTimeUs { get; set; }
 
-    /// <summary>Basler 相机：增益（dB）；null = 不下发。</summary>
+    /// <summary>Basler / GigEVision：增益（dB 或机型原始单位）；null = 不下发。</summary>
     public double? Gain { get; set; }
 
-    /// <summary>Basler 相机：单帧采集超时（ms），需小于配方总超时 TimeoutMs。</summary>
+    /// <summary>Basler / GigEVision：单帧采集超时（ms），需小于配方总超时 TimeoutMs。</summary>
     public int GrabTimeoutMs { get; set; } = 3000;
 
     /// <summary>Virtual 相机：生成图像宽（px）。</summary>
@@ -214,6 +214,22 @@ public static class AppConfigExtensions
     }
 
     public static string ResolveRecipesFolder(this AppConfig cfg) => ResolveFolder(cfg.RecipesFolder);
+
+    /// <summary>
+    /// 运行时配方目录：相对路径固定锚定 exe 目录（不回退仓库根），避免 UI 改 bin 而列表读源码目录。
+    /// 首次使用时从 <c>recipes.samples</c> 拷入示例，之后删除的配方不会因编译/重启被拷回。
+    /// </summary>
+    public static string ResolveAndPrepareRecipesFolder(this AppConfig cfg)
+    {
+        var folder = string.IsNullOrWhiteSpace(cfg.RecipesFolder)
+            ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "recipes"))
+            : Path.IsPathRooted(cfg.RecipesFolder)
+                ? Path.GetFullPath(cfg.RecipesFolder)
+                : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, cfg.RecipesFolder));
+        Directory.CreateDirectory(folder);
+        RecipeSampleSeeder.SeedIfNeeded(folder);
+        return folder;
+    }
 
     public static string ResolveModelsFolder(this AppConfig cfg) => ResolveFolder(cfg.ModelsFolder);
 

@@ -4,43 +4,35 @@
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:ivc="clr-namespace:ImageViewer.Controls;assembly=ImageViewerControl"
       Title="运行监控"
+      VerticalAlignment="Stretch"
       Background="{DynamicResource ApplicationBackgroundBrush}">
     <Page.InputBindings>
         <KeyBinding Key="F5" Command="{Binding TriggerCommand}" />
     </Page.InputBindings>
-    <Grid Margin="8">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="330" />
-        </Grid.ColumnDefinitions>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="*" />
-            <RowDefinition Height="220" />
-        </Grid.RowDefinitions>
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <vm:NullToCollapsedConverter x:Key="NullToCollapsedConverter" xmlns:vm="clr-namespace:RobotVision.WpfHost" />
+    </Page.Resources>
 
-        <!-- 画面区：统一使用 ImageViewer 控件（缩放/平移/像素信息/测量） -->
-        <Grid Grid.Row="0" Grid.Column="0" Margin="0,0,8,8">
-            <Border Background="#1E1E1E" CornerRadius="4" ClipToBounds="True">
-                <ivc:ImageViewer x:Name="Viewer" ImageSource="{Binding DisplayImage}"
-                                 IsToolbarVisible="False" />
-            </Border>
-            <Border HorizontalAlignment="Left" VerticalAlignment="Top"
-                    Background="#B0000000" CornerRadius="3" Padding="8,4" Margin="8"
+    <Grid Margin="8">
+
+        <!-- 主导图像区 + 悬浮参数栏 + 悬浮日志 -->
+        <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
+            <ivc:ImageViewer x:Name="Viewer" ImageSource="{Binding DisplayImage}" />
+        </Border>
+
+        <!-- 左上：状态 + 触发结果横幅 -->
+        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Panel.ZIndex="30"
                     IsHitTestVisible="False">
+            <Border Background="#B0000000" CornerRadius="3" Padding="8,4" Margin="0,0,0,6">
                 <TextBlock Text="{Binding StatusText}" Foreground="White" />
             </Border>
-            <!-- 触发结果横幅：成功绿 / 失败红，远距可读；无结果时不显示 -->
-            <Border HorizontalAlignment="Right" VerticalAlignment="Top"
-                    CornerRadius="3" Padding="12,6" Margin="8"
-                    IsHitTestVisible="False" Panel.ZIndex="10">
+            <Border CornerRadius="3" Padding="12,6"
+                    Visibility="{Binding TriggerBannerText, Converter={StaticResource NullToCollapsedConverter}}">
                 <Border.Style>
                     <Style TargetType="Border">
-                        <Setter Property="Visibility" Value="Visible" />
                         <Setter Property="Background" Value="#C01E7A46" />
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding TriggerBannerText}" Value="{x:Null}">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                            </DataTrigger>
                             <DataTrigger Binding="{Binding TriggerSuccess}" Value="False">
                                 <Setter Property="Background" Value="#C0A32D2D" />
                             </DataTrigger>
@@ -50,115 +42,193 @@
                 <TextBlock Text="{Binding TriggerBannerText}" Foreground="White"
                            FontWeight="SemiBold" FontSize="13" />
             </Border>
-        </Grid>
+        </StackPanel>
 
-        <!-- 右侧控制面板 -->
-        <ScrollViewer Grid.Row="0" Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="0,0,0,8">
-            <StackPanel>
-                <ui:Card Margin="0,0,0,8">
-                    <StackPanel>
-                        <ui:TextBlock FontTypography="BodyStrong" Text="相机" Margin="0,0,0,8" />
-                        <ComboBox ItemsSource="{Binding Cameras}"
-                                  SelectedItem="{Binding SelectedCamera}" />
-                        <CheckBox Content="实时预览（0.5s/帧）"
-                                  IsChecked="{Binding PreviewEnabled}" Margin="0,10,0,0" />
-                    </StackPanel>
-                </ui:Card>
+        <!-- 面板收起时的「参数」重新打开按钮 -->
+        <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
+                Content="参数" Padding="14,8" FontWeight="SemiBold"
+                Panel.ZIndex="30"
+                Command="{Binding ToggleParamPanelCommand}">
+            <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsParamPanelVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
 
-                <ui:Card Margin="0,0,0,8">
-                    <StackPanel>
-                        <ui:TextBlock FontTypography="BodyStrong" Text="配方" Margin="0,0,0,8" />
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <ComboBox ItemsSource="{Binding Recipes}"
-                                      SelectedItem="{Binding SelectedRecipe}" />
-                            <ui:Button Grid.Column="1" Content="刷新" Margin="8,0,0,0"
-                                       Command="{Binding RefreshRecipesCommand}" />
-                        </Grid>
-                    </StackPanel>
-                </ui:Card>
+        <!-- 日志收起时的「日志」重新打开按钮 -->
+        <Button HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12"
+                Content="日志" Padding="14,8" FontWeight="SemiBold"
+                Panel.ZIndex="30"
+                Command="{Binding ToggleLogPanelCommand}">
+            <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsLogPanelVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
 
-                <ui:Card Margin="0,0,0,8">
-                    <StackPanel>
-                        <ui:TextBlock FontTypography="BodyStrong" Text="触发" Margin="0,0,0,8" />
-                        <ui:Button Appearance="Primary"
-                                   Content="{Binding TriggerButtonText}"
-                                   IsEnabled="{Binding CanTrigger}"
-                                   FontSize="14"
-                                   ToolTip="触发一次完整流程：取图 → 去畸变 → 推理 → 坐标变换（快捷键 F5）"
-                                   Command="{Binding TriggerCommand}" />
-                        <CheckBox Content="上报拍照位姿（末端相机必须勾选）"
-                                  IsChecked="{Binding IncludeTriggerPose}" Margin="0,8,0,4" FontSize="11" />
-                        <UniformGrid Columns="3">
-                            <StackPanel Margin="0,0,4,0">
-                                <TextBlock Text="X mm" FontSize="10" />
-                                <ui:NumberBox Value="{Binding TriggerPoseX}" SmallChange="0.1"
-                                              IsEnabled="{Binding IncludeTriggerPose}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,4,0">
-                                <TextBlock Text="Y mm" FontSize="10" />
-                                <ui:NumberBox Value="{Binding TriggerPoseY}" SmallChange="0.1"
-                                              IsEnabled="{Binding IncludeTriggerPose}" />
-                            </StackPanel>
-                            <StackPanel>
-                                <TextBlock Text="RZ °" FontSize="10" />
-                                <ui:NumberBox Value="{Binding TriggerPoseRz}" SmallChange="0.1"
-                                              IsEnabled="{Binding IncludeTriggerPose}" />
-                            </StackPanel>
-                        </UniformGrid>
-                        <ui:Button Appearance="Secondary" Content="恢复预览"
-                                   Margin="0,8,0,0"
-                                   Command="{Binding ResumePreviewCommand}" />
-                    </StackPanel>
-                </ui:Card>
-
-                <ui:Card>
-                    <StackPanel>
-                        <ui:TextBlock FontTypography="BodyStrong" Text="结果（机器人坐标）" Margin="0,0,0,8" />
-                        <DataGrid ItemsSource="{Binding Poses}"
-                                  AutoGenerateColumns="False"
-                                  IsReadOnly="True"
-                                  HeadersVisibility="Column"
-                                  CanUserAddRows="False"
-                                  MinHeight="120"
-                                  EnableRowVirtualization="False"
-                                  EnableColumnVirtualization="False"
-                                  GridLinesVisibility="Horizontal">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="32" />
-                                <DataGridTextColumn Header="X (mm)" Binding="{Binding X, StringFormat=F3}" Width="*" />
-                                <DataGridTextColumn Header="Y (mm)" Binding="{Binding Y, StringFormat=F3}" Width="*" />
-                                <DataGridTextColumn Binding="{Binding AngleDeg, StringFormat=F3}" Width="*">
-                                    <DataGridTextColumn.Header>
-                                        <TextBlock Text="角度 (°)" ToolTip="范围 (-180, 180]；[0,360) 表示的机器人由 PLC 换算（负角 +360）" />
-                                    </DataGridTextColumn.Header>
-                                </DataGridTextColumn>
-                                <DataGridTextColumn Header="置信度" Binding="{Binding Score, StringFormat=F3}" Width="*" />
-                            </DataGrid.Columns>
-                        </DataGrid>
-                    </StackPanel>
-                </ui:Card>
-            </StackPanel>
-        </ScrollViewer>
-
-        <!-- 底部日志 -->
-        <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Padding="8"
-                VerticalAlignment="Stretch"
-                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{DynamicResource CardBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="{DynamicResource ControlCornerRadius}">
+        <!-- 右：参数浮动面板（可折叠） -->
+        <Border HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                Width="352" Margin="12" Panel.ZIndex="20"
+                Background="#F01E2836"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8"
+                Visibility="{Binding IsParamPanelVisible,
+                    Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Margin="12,12,12,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Text="参数面板" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="收起" Padding="10,4" FontSize="12"
+                            Command="{Binding ToggleParamPanelCommand}" />
+                </Grid>
+
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12">
+                    <StackPanel>
+                        <ui:Card Margin="0,0,0,8">
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="BodyStrong" Text="相机" Margin="0,0,0,8" />
+                                <ComboBox ItemsSource="{Binding Cameras}"
+                                          SelectedItem="{Binding SelectedCamera}" />
+                                <CheckBox Content="实时预览（0.5s/帧）"
+                                          IsChecked="{Binding PreviewEnabled}" Margin="0,10,0,0" />
+                            </StackPanel>
+                        </ui:Card>
+
+                        <ui:Card Margin="0,0,0,8">
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="BodyStrong" Text="配方" Margin="0,0,0,8" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox ItemsSource="{Binding Recipes}"
+                                              SelectedItem="{Binding SelectedRecipe}" />
+                                    <ui:Button Grid.Column="1" Content="刷新" Margin="8,0,0,0"
+                                               Command="{Binding RefreshRecipesCommand}" />
+                                </Grid>
+                            </StackPanel>
+                        </ui:Card>
+
+                        <ui:Card Margin="0,0,0,8">
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="BodyStrong" Text="触发" Margin="0,0,0,8" />
+                                <ui:Button Appearance="Primary"
+                                           Content="{Binding TriggerButtonText}"
+                                           IsEnabled="{Binding CanTrigger}"
+                                           FontSize="14"
+                                           ToolTip="触发一次完整流程：取图 → 去畸变 → 推理 → 坐标变换（快捷键 F5）"
+                                           Command="{Binding TriggerCommand}" />
+                                <ui:CardExpander Header="高级选项" IsExpanded="False" Margin="0,8,0,0">
+                                    <StackPanel Margin="0,10,0,0">
+                                        <CheckBox Content="上报拍照位姿（末端相机 OnArm 试跑时勾选）"
+                                                  IsChecked="{Binding IncludeTriggerPose}" Margin="0,0,0,4" FontSize="11" />
+                                        <UniformGrid Columns="3">
+                                            <StackPanel Margin="0,0,4,0">
+                                                <TextBlock Text="X mm" FontSize="10" />
+                                                <ui:NumberBox Value="{Binding TriggerPoseX}" SmallChange="0.1"
+                                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,4,0">
+                                                <TextBlock Text="Y mm" FontSize="10" />
+                                                <ui:NumberBox Value="{Binding TriggerPoseY}" SmallChange="0.1"
+                                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="RZ °" FontSize="10" />
+                                                <ui:NumberBox Value="{Binding TriggerPoseRz}" SmallChange="0.1"
+                                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                                            </StackPanel>
+                                        </UniformGrid>
+                                        <ui:TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
+                                                      Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                      Text="产线 PLC 触发自带位姿，此处仅用于本机手动试跑；固定机架相机无需展开。" />
+                                    </StackPanel>
+                                </ui:CardExpander>
+                                <ui:Button Appearance="Secondary" Content="恢复预览"
+                                           Margin="0,8,0,0"
+                                           Command="{Binding ResumePreviewCommand}" />
+                            </StackPanel>
+                        </ui:Card>
+
+                        <ui:Card>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="BodyStrong" Text="结果（机器人坐标）" Margin="0,0,0,8" />
+                                <DataGrid ItemsSource="{Binding Poses}"
+                                          AutoGenerateColumns="False"
+                                          IsReadOnly="True"
+                                          HeadersVisibility="Column"
+                                          CanUserAddRows="False"
+                                          MinHeight="120"
+                                          EnableRowVirtualization="False"
+                                          EnableColumnVirtualization="False"
+                                          GridLinesVisibility="Horizontal">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="32" />
+                                        <DataGridTextColumn Header="X (mm)" Binding="{Binding X, StringFormat=F3}" Width="*" />
+                                        <DataGridTextColumn Header="Y (mm)" Binding="{Binding Y, StringFormat=F3}" Width="*" />
+                                        <DataGridTextColumn Binding="{Binding AngleDeg, StringFormat=F3}" Width="*">
+                                            <DataGridTextColumn.Header>
+                                                <TextBlock Text="角度 (°)" ToolTip="范围 (-180, 180]；[0,360) 表示的机器人由 PLC 换算（负角 +360）" />
+                                            </DataGridTextColumn.Header>
+                                        </DataGridTextColumn>
+                                        <DataGridTextColumn Header="置信度" Binding="{Binding Score, StringFormat=F3}" Width="*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </ui:Card>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- 底：日志浮动面板（可折叠） -->
+        <Border HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
+                Height="220" MaxHeight="320" Margin="12" Panel.ZIndex="25"
+                Background="#F01E2836"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8"
+                Visibility="{Binding IsLogPanelVisible,
+                    Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid Margin="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <ListBox x:Name="LogList" ItemsSource="{Binding Logs}" FontFamily="Consolas"
+
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Text="运行日志" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="收起" Padding="10,4" FontSize="12"
+                            Command="{Binding ToggleLogPanelCommand}" />
+                </Grid>
+
+                <ListBox x:Name="LogList" Grid.Row="1" ItemsSource="{Binding Logs}" FontFamily="Consolas"
                          VirtualizingStackPanel.IsVirtualizing="False"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         Background="Transparent" BorderThickness="0">
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
                             <Style.Triggers>
@@ -184,7 +254,8 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
-                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="4,8,4,0">
+
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
                     <TextBlock Text="级别" VerticalAlignment="Center" Margin="0,0,6,0"
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                     <ComboBox ItemsSource="{Binding LogFilterOptions}" SelectedItem="{Binding LogFilter}"

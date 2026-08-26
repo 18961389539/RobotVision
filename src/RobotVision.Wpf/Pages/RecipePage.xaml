@@ -30,11 +30,11 @@
 
     <Grid Margin="8">
 
-        <!-- 主导图像区：ImageViewer 支持缩放(滚轮)/平移(中键)/像素信息，结果图与 ROI 预览按当前视图切换 -->
+        <!-- 主导图像区：完整 ImageViewer；结果图与 ROI 预览切换 -->
         <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
             <Grid>
                 <!-- 结果图视图 -->
-                <ivc:ImageViewer ImageSource="{Binding TestImage}" IsToolbarVisible="False">
+                <ivc:ImageViewer ImageSource="{Binding TestImage}">
                     <ivc:ImageViewer.Style>
                         <Style TargetType="ivc:ImageViewer">
                             <Setter Property="Visibility" Value="Collapsed" />
@@ -47,7 +47,7 @@
                     </ivc:ImageViewer.Style>
                 </ivc:ImageViewer>
                 <!-- ROI 预览视图 -->
-                <ivc:ImageViewer ImageSource="{Binding RoiPreviewImage}" IsToolbarVisible="False">
+                <ivc:ImageViewer ImageSource="{Binding RoiPreviewImage}">
                     <ivc:ImageViewer.Style>
                         <Style TargetType="ivc:ImageViewer">
                             <Setter Property="Visibility" Value="Collapsed" />
@@ -95,12 +95,30 @@
             </Grid>
         </Border>
 
-        <!-- 左：配方列表（可搜索，浮动窄栏——图像主导布局下列表压到最小可用宽） -->
-        <Border Width="200" Margin="12" VerticalAlignment="Top" MaxHeight="640" Panel.ZIndex="20"
+        <!-- 列表收起时的「配方」重新打开按钮 -->
+        <Button HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12"
+                Content="配方" Padding="14,8" FontWeight="SemiBold"
+                Panel.ZIndex="30"
+                Command="{Binding ToggleListPanelCommand}">
+            <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsListPanelVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
+
+        <!-- 左：配方列表（可搜索，浮动窄栏——与相机管理页列表同构，可折叠） -->
+        <Border Width="220" Margin="12" VerticalAlignment="Top" MaxHeight="640" Panel.ZIndex="20"
                 HorizontalAlignment="Left"
                 Background="#F01E2836"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                BorderThickness="1" CornerRadius="8">
+                BorderThickness="1" CornerRadius="8"
+                Visibility="{Binding IsListPanelVisible,
+                    Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -112,10 +130,16 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <ui:TextBlock Text="配方" FontTypography="BodyStrong" VerticalAlignment="Center" />
                     <ui:Button Grid.Column="1" Content="新建" Padding="8,3" FontSize="11"
                                Command="{Binding NewCommand}" />
+                    <ui:Button Grid.Column="2" Content="刷新" Margin="6,0,0,0" Padding="8,3" FontSize="11"
+                               ToolTip="F5" Command="{Binding RefreshCommand}" />
+                    <Button Grid.Column="3" Content="收起" Padding="10,4" FontSize="12" Margin="6,0,0,0"
+                            Command="{Binding ToggleListPanelCommand}" />
                 </Grid>
                 <TextBox Grid.Row="1" Margin="10,0,10,6" Padding="5,3" FontSize="11"
                          Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
@@ -125,7 +149,7 @@
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <StackPanel Margin="2" Width="158">
+                            <StackPanel Margin="2" Width="178">
                                 <StackPanel Orientation="Horizontal">
                                     <ui:TextBlock Text="{Binding Name}" FontTypography="BodyStrong"
                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
@@ -170,16 +194,8 @@
                                Foreground="#E8A33D" Margin="0,0,0,6"
                                Visibility="{Binding HasUnsavedChanges,
                                    Converter={StaticResource BoolToVisibilityConverter}}" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <ui:Button Content="打开目录" Padding="8,4" FontSize="11"
-                                   Command="{Binding OpenFolderCommand}" />
-                        <ui:Button Grid.Column="1" Content="刷新" Margin="6,0,0,0" Padding="8,4" FontSize="11"
-                                   ToolTip="F5" Command="{Binding RefreshCommand}" />
-                    </Grid>
+                    <ui:Button Content="打开目录" Padding="8,4" FontSize="11"
+                               Command="{Binding OpenFolderCommand}" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -212,6 +228,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <!-- 面板头：标题 + 消息 + 收起 -->
@@ -234,22 +251,28 @@
                     <StackPanel>
 
                         <!-- 基本信息 -->
-                        <StackPanel Margin="0,0,0,10">
-                            <ui:TextBlock FontTypography="BodyStrong" Text="基本信息" Margin="0,0,0,8" />
+                        <ui:CardExpander Header="基本信息" IsExpanded="False" Margin="0,0,0,8">
+                            <StackPanel Margin="0,6,0,2">
                             <UniformGrid Columns="2">
                                 <StackPanel Margin="0,0,8,8">
                                     <TextBlock Text="名称（字母/数字/_/-）" Margin="0,0,0,4" FontSize="12" />
                                     <TextBox Text="{Binding Editor.Name, UpdateSourceTrigger=PropertyChanged}"
-                                             IsEnabled="{Binding IsNew}" />
+                                             ToolTip="已有配方改名后保存：写入新文件并删除旧名（PLC 请改用新名称或序列号）" />
                                 </StackPanel>
-                                <StackPanel Margin="0,0,0,8">
+                                <StackPanel Margin="0,0,8,8">
+                                    <TextBlock Text="序列号（PLC 触发，0=未分配）" Margin="0,0,0,4" FontSize="12" />
+                                    <ui:NumberBox Value="{Binding Editor.SerialNumber}" Minimum="0" Maximum="9999"
+                                                  SmallChange="1" SpinButtonPlacementMode="Compact"
+                                                  ToolTip="PLC 用 #1 或 1 触发；0 表示未分配。改完后点保存才会写入配方文件。" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,8,8">
                                     <TextBlock Text="相机" Margin="0,0,0,4" FontSize="12" />
-                                    <ComboBox ItemsSource="{Binding CameraIds}"
+                                    <ComboBox ItemsSource="{Binding CameraIds}" ToolTip="选择本配方使用的相机 Id"
                                               SelectedItem="{Binding Editor.CameraId}" />
                                 </StackPanel>
                                 <StackPanel Margin="0,0,8,8">
                                     <TextBlock Text="工位 Id（标定档案）" Margin="0,0,0,4" FontSize="12" />
-                                    <ComboBox ItemsSource="{Binding StationIds}"
+                                    <ComboBox ItemsSource="{Binding StationIds}" ToolTip="选择标定档案对应的工位 Id（可手输）"
                                               SelectedItem="{Binding Editor.StationId, UpdateSourceTrigger=PropertyChanged}"
                                               IsEditable="True" />
                                 </StackPanel>
@@ -267,13 +290,14 @@
                                         FontSize="11" MinHeight="38" TextWrapping="Wrap"
                                         PlaceholderText="描述（备注，不参与推理）"
                                         ToolTip="描述（备注，不参与推理）" />
-                            <CheckBox Content="启用该配方（停用触发返回 1001，文件保留）" FontSize="11"
+                            <CheckBox Content="启用该配方（停用触发返回 1015，文件保留）" FontSize="11"
                                       Margin="0,8,0,0" IsChecked="{Binding Editor.Enabled}" />
-                        </StackPanel>
+                            </StackPanel>
+                        </ui:CardExpander>
 
                         <!-- 推理与角度 -->
-                        <StackPanel Margin="0,0,0,10">
-                            <ui:TextBlock FontTypography="BodyStrong" Text="推理与角度" Margin="0,0,0,8" />
+                        <ui:CardExpander Header="推理与角度" IsExpanded="False" Margin="0,0,0,8">
+                            <StackPanel Margin="0,6,0,2">
                             <TextBlock Text="{Binding AngleModeHint}" FontSize="11" TextWrapping="Wrap"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                        Margin="0,0,0,8"
@@ -283,20 +307,41 @@
                                 <StackPanel Margin="0,0,8,8">
                                     <TextBlock Text="角度模式" Margin="0,0,0,4" FontSize="12" />
                                     <!-- SelectionChanged 触发 ViewModel 联动（更新按模式显隐的派生属性） -->
-                                    <ComboBox ItemsSource="{Binding AngleModeOptions}"
+                                    <ComboBox ItemsSource="{Binding AngleModeOptions}" ToolTip="角度计算模式：决定如何由像素角度换算物理角度"
                                               DisplayMemberPath="Label" SelectedValuePath="Value"
                                               SelectedValue="{Binding Editor.AngleMode}"
                                               SelectionChanged="AngleMode_SelectionChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,0,0,8">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ShowRotationCompensation}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
                                     <TextBlock Text="旋转中心补偿" Margin="0,0,0,4" FontSize="12" />
-                                    <ComboBox ItemsSource="{Binding RotationOptions}"
+                                    <ComboBox ItemsSource="{Binding RotationOptions}" ToolTip="旋转中心补偿策略"
                                               DisplayMemberPath="Label" SelectedValuePath="Value"
                                               SelectedValue="{Binding Editor.RotationCompensation}" />
                                 </StackPanel>
+                                <!-- 双BLOB模式纯图像处理不用模型：隐藏主模型选择（UniformGrid 该行独占，隐藏不留空洞） -->
                                 <StackPanel Margin="0,0,0,8">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDualBlobMode}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
                                     <TextBlock Text="主模型（.onnx）" Margin="0,0,0,4" FontSize="12" />
-                                    <ComboBox ItemsSource="{Binding ModelFiles}"
+                                    <ComboBox ItemsSource="{Binding ModelFiles}" ToolTip="主推理模型（.onnx）；必填"
                                               SelectedItem="{Binding PrimaryModel, UpdateSourceTrigger=PropertyChanged}"
                                               IsEditable="True" />
                                 </StackPanel>
@@ -314,19 +359,40 @@
                                     </Style>
                                 </StackPanel.Style>
                                 <TextBlock Text="次模型（B 特征 .onnx）" Margin="0,0,0,4" FontSize="12" />
-                                <ComboBox ItemsSource="{Binding ModelFiles}"
+                                <ComboBox ItemsSource="{Binding ModelFiles}" ToolTip="次模型（B 特征 .onnx，可选）"
                                           SelectedItem="{Binding SecondaryModel, UpdateSourceTrigger=PropertyChanged}"
                                           IsEditable="True" />
                             </StackPanel>
                             <!-- 按角度模式动态显隐：WrapPanel 保证隐藏后其余项自动补位不留空洞 -->
                             <WrapPanel>
+                                <!-- 置信度/IoU 仅模型推理用，双BLOB模式隐藏（WrapPanel 自动补位） -->
                                 <StackPanel Margin="0,0,8,8" Width="118">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDualBlobMode}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
                                     <TextBlock Text="检测置信度" Margin="0,0,0,4" FontSize="11" />
                                     <ui:NumberBox Value="{Binding Editor.Confidence}"
                                                   Minimum="0" Maximum="1" SmallChange="0.05"
                                                   SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
                                 <StackPanel Margin="0,0,8,8" Width="118">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDualBlobMode}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
                                     <TextBlock Text="IoU" Margin="0,0,0,4" FontSize="11" />
                                     <ui:NumberBox Value="{Binding Editor.Iou}"
                                                   Minimum="0" Maximum="1" SmallChange="0.05"
@@ -402,7 +468,7 @@
                                                   SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
                                 <!-- 配对距离：仅双模型模式 -->
-                                <StackPanel Margin="0,0,0,8" Width="118">
+                                <StackPanel Margin="0,0,8,8" Width="118">
                                     <StackPanel.Style>
                                         <Style TargetType="StackPanel">
                                             <Setter Property="Visibility" Value="Collapsed" />
@@ -420,7 +486,142 @@
                                                   SpinButtonPlacementMode="Compact"
                                                   ToolTip="A/B 一对一就近配对的最大像素距离；多目标间距接近时可能配错" />
                                 </StackPanel>
+                                <!-- 窗口配对（主从级联）：仅双模型模式 -->
+                                <StackPanel Margin="0,0,16,8" VerticalAlignment="Bottom">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDualMode}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <CheckBox Content="窗口配对（主从）" Margin="0,0,0,10"
+                                              IsChecked="{Binding Editor.DualModel.CropWindowPairing}"
+                                              VerticalAlignment="Bottom"
+                                              ToolTip="A 全图检测，B 只在 A 外扩窗口内检测：多目标不跨目标配错，B 推理更快；窗口重叠的密集目标仍可能选错" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,8,8" Width="118">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDualMode}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <TextBlock Text="窗口外扩系数" Margin="0,0,0,4" FontSize="11"
+                                               ToolTip="A 包围盒四边各外扩（边长×该值），仅窗口配对生效" />
+                                    <ui:NumberBox Value="{Binding Editor.DualModel.CropExpandRatio}"
+                                                  Minimum="0.1" Maximum="5" SmallChange="0.2"
+                                                  SpinButtonPlacementMode="Compact"
+                                                  ToolTip="A 包围盒四边各外扩（边长×该值），仅窗口配对生效" />
+                                </StackPanel>
                             </WrapPanel>
+
+                            <!-- 双BLOB参数：仅 DualBlobCenterLine 模式（阈值分割+连通域，无需模型） -->
+                            <StackPanel Margin="0,0,0,8">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsDualBlobMode}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <ui:TextBlock FontTypography="BodyStrong" Text="BLOB 设置" Margin="0,0,0,6" />
+                                <WrapPanel>
+                                    <StackPanel Margin="0,0,16,8" Orientation="Horizontal">
+                                        <CheckBox Content="暗BLOB" IsChecked="{Binding Editor.Blob.DetectDark}"
+                                                  VerticalAlignment="Center"
+                                                  ToolTip="勾选检测暗目标（阈值取反）；不勾检测亮目标" />
+                                        <CheckBox Content="Otsu 自动阈值" Margin="16,0,0,0"
+                                                  IsChecked="{Binding Editor.Blob.UseOtsu}"
+                                                  VerticalAlignment="Center"
+                                                  ToolTip="勾选自动计算阈值（忽略固定阈值）；光照稳定时建议固定阈值更稳" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8" Width="118">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ShowBlobFixedThreshold}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <TextBlock Text="固定阈值" Margin="0,0,0,4" FontSize="11"
+                                                   ToolTip="Otsu 开启时忽略" />
+                                        <ui:NumberBox Value="{Binding Editor.Blob.Threshold}"
+                                                      Minimum="0" Maximum="255" SmallChange="5"
+                                                      SpinButtonPlacementMode="Compact"
+                                                      ToolTip="Otsu 开启时忽略" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8" Width="118">
+                                        <TextBlock Text="开运算核(px)" Margin="0,0,0,4" FontSize="11"
+                                                   ToolTip="≤1 关闭；主次BLOB轻微粘连时先用开运算分离" />
+                                        <ui:NumberBox Value="{Binding Editor.Blob.OpenKernelSize}"
+                                                      Minimum="0" Maximum="31" SmallChange="2"
+                                                      SpinButtonPlacementMode="Compact"
+                                                      ToolTip="≤1 关闭；主次BLOB轻微粘连时先用开运算分离" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8" Width="118">
+                                        <TextBlock Text="主面积下限" Margin="0,0,0,4" FontSize="11" />
+                                        <ui:NumberBox Value="{Binding Editor.Blob.MinArea}"
+                                                      Minimum="1" Maximum="100000000" SmallChange="100"
+                                                      SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8" Width="118">
+                                        <TextBlock Text="主面积上限" Margin="0,0,0,4" FontSize="11" />
+                                        <ui:NumberBox Value="{Binding Editor.Blob.MaxArea}"
+                                                      Minimum="1" Maximum="100000000" SmallChange="1000"
+                                                      SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8" Width="118">
+                                        <TextBlock Text="次面积下限" Margin="0,0,0,4" FontSize="11" />
+                                        <ui:NumberBox Value="{Binding Editor.Blob.SecondaryMinArea}"
+                                                      Minimum="1" Maximum="100000000" SmallChange="10"
+                                                      SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8" Width="118">
+                                        <TextBlock Text="次面积上限" Margin="0,0,0,4" FontSize="11" />
+                                        <ui:NumberBox Value="{Binding Editor.Blob.SecondaryMaxArea}"
+                                                      Minimum="1" Maximum="100000000" SmallChange="1000"
+                                                      SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8" Width="118">
+                                        <TextBlock Text="窗口外扩系数" Margin="0,0,0,4" FontSize="11"
+                                                   ToolTip="主BLOB包围盒四边各外扩（边长×该值），圈定次BLOB搜索窗口" />
+                                        <ui:NumberBox Value="{Binding Editor.Blob.CropExpandRatio}"
+                                                      Minimum="0.1" Maximum="5" SmallChange="0.2"
+                                                      SpinButtonPlacementMode="Compact"
+                                                      ToolTip="主BLOB包围盒四边各外扩（边长×该值），圈定次BLOB搜索窗口" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8" Width="118">
+                                        <TextBlock Text="最小间距(px)" Margin="0,0,0,4" FontSize="11"
+                                                   ToolTip="主次质心最小间距，防止把主BLOB边缘碎块配成次BLOB" />
+                                        <ui:NumberBox Value="{Binding Editor.Blob.MinPairDistancePx}"
+                                                      Minimum="0" Maximum="100000" SmallChange="5"
+                                                      SpinButtonPlacementMode="Compact"
+                                                      ToolTip="主次质心最小间距，防止把主BLOB边缘碎块配成次BLOB" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8" Width="118">
+                                        <TextBlock Text="最大间距(px)" Margin="0,0,0,4" FontSize="11"
+                                                   ToolTip="主次质心最大间距，超过不配对" />
+                                        <ui:NumberBox Value="{Binding Editor.Blob.MaxPairDistancePx}"
+                                                      Minimum="1" Maximum="100000" SmallChange="50"
+                                                      SpinButtonPlacementMode="Compact"
+                                                      ToolTip="主次质心最大间距，超过不配对" />
+                                    </StackPanel>
+                                </WrapPanel>
+                            </StackPanel>
 
                             <!-- 分割+精修参数：仅 MaskTemplate 模式 -->
                             <StackPanel Margin="0,0,0,8">
@@ -442,7 +643,7 @@
                                 </DockPanel>
                                 <StackPanel Margin="0,0,0,6">
                                     <TextBlock Text="精修方法" Margin="0,0,0,4" FontSize="12" />
-                                    <ComboBox ItemsSource="{Binding RefineMethodOptions}"
+                                    <ComboBox ItemsSource="{Binding RefineMethodOptions}" ToolTip="模板精修方法"
                                               DisplayMemberPath="Label" SelectedValuePath="Value"
                                               SelectedValue="{Binding Editor.Template.RefineMethod}"
                                               SelectionChanged="AngleMode_SelectionChanged" />
@@ -519,20 +720,17 @@
                                        Margin="0,4,0,0"
                                        Visibility="{Binding RotationCenterHint,
                                            Converter={StaticResource NonEmptyToVisibilityConverter}}" />
-                        </StackPanel>
+                            </StackPanel>
+                        </ui:CardExpander>
 
                         <!-- 检测区域 ROI -->
-                        <StackPanel Margin="0,0,0,10">
-                            <Grid Margin="0,0,0,6">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <ui:TextBlock FontTypography="BodyStrong" Text="检测区域（ROI）" VerticalAlignment="Center" />
-                                <CheckBox Grid.Column="1" Content="启用（缺省全图）" FontSize="11"
-                                          IsChecked="{Binding UseRoi}" Margin="12,0,0,0"
-                                          VerticalAlignment="Center" />
-                            </Grid>
+                        <ui:CardExpander Header="检测区域（ROI）" IsExpanded="False" Margin="0,0,0,8">
+                            <StackPanel Margin="0,6,0,2">
+                            <CheckBox Content="启用（缺省全图）" FontSize="11" Margin="0,0,0,8"
+                                      IsChecked="{Binding UseRoi}" />
+                            <StackPanel
+                                Visibility="{Binding UseRoi,
+                                    Converter={StaticResource BoolToVisibilityConverter}}">
                             <UniformGrid Columns="4">
                                 <StackPanel Margin="0,0,8,8">
                                     <TextBlock Text="X" Margin="0,0,0,4" FontSize="11" ToolTip="左上角 X（0~1 相对比例）" />
@@ -568,20 +766,15 @@
                                            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                            Text="预览显示在主图像区（ROI 预览标签）；结果坐标自动偏移回全图" />
                             </Grid>
-                        </StackPanel>
+                            </StackPanel>
+                            </StackPanel>
+                        </ui:CardExpander>
 
                         <!-- 光源 -->
-                        <StackPanel Margin="0,0,0,10">
-                            <Grid Margin="0,0,0,6">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <ui:TextBlock FontTypography="BodyStrong" Text="光源" VerticalAlignment="Center" />
-                                <CheckBox Grid.Column="1" Content="启用（取图前点亮）" FontSize="11"
-                                          IsChecked="{Binding UseLighting}" Margin="12,0,0,0"
-                                          VerticalAlignment="Center" />
-                            </Grid>
+                        <ui:CardExpander Header="光源" IsExpanded="False" Margin="0,0,0,8">
+                            <StackPanel Margin="0,6,0,2">
+                            <CheckBox Content="启用（取图前点亮）" FontSize="11" Margin="0,0,0,8"
+                                      IsChecked="{Binding UseLighting}" />
                             <StackPanel>
                                 <StackPanel.Style>
                                     <Style TargetType="StackPanel">
@@ -596,7 +789,7 @@
                                 <UniformGrid Columns="4">
                                     <StackPanel Margin="0,0,8,8">
                                         <TextBlock Text="控制器" Margin="0,0,0,4" FontSize="11" />
-                                        <ComboBox ItemsSource="{Binding LightControllerIds}"
+                                        <ComboBox ItemsSource="{Binding LightControllerIds}" ToolTip="选择本配方联动的光源控制器 Id"
                                                   SelectedItem="{Binding SelectedLightControllerId,
                                                       UpdateSourceTrigger=PropertyChanged}"
                                                   IsEditable="True" />
@@ -623,26 +816,36 @@
                                 <CheckBox Content="取图完成后熄灯（常亮场景可取消）" FontSize="11"
                                           IsChecked="{Binding LightTurnOffAfterGrab}" Margin="0,2,0,0" />
                             </StackPanel>
-                        </StackPanel>
+                            </StackPanel>
+                        </ui:CardExpander>
+                    </StackPanel>
+                </ScrollViewer>
 
+                <!-- 操作脚条：固定在面板底部不随参数滚动，保存/测试触发随时可点 -->
+                <Border Grid.Row="2" Padding="12,10"
+                        BorderThickness="0,1,0,0"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                    <StackPanel>
                         <!-- 操作 -->
-                        <CheckBox Content="测试时上报拍照位姿（末端相机必须勾选，否则 1014）"
-                                  IsChecked="{Binding IncludeTriggerPose}" FontSize="11" Margin="0,0,0,4" />
-                        <UniformGrid Columns="3" Margin="0,0,0,8">
+                        <CheckBox IsChecked="{Binding IncludeTriggerPose}" FontSize="11" Margin="0,0,0,4"
+                                  ToolTip="末端相机（OnArm）工位测试触发必须上报拍照位姿，否则返回 ERR 1014">
+                            <TextBlock Text="测试时上报拍照位姿（末端相机必须勾选，否则 1014）"
+                                       TextWrapping="Wrap" />
+                        </CheckBox>
+                        <UniformGrid Columns="3" Margin="0,0,0,8"
+                                     Visibility="{Binding ShowTriggerPoseFields,
+                                         Converter={StaticResource BoolToVisibilityConverter}}">
                             <StackPanel Margin="0,0,6,0">
                                 <TextBlock Text="X mm" FontSize="10" />
-                                <ui:NumberBox Value="{Binding TriggerPoseX}" SmallChange="0.1"
-                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                                <ui:NumberBox Value="{Binding TriggerPoseX}" SmallChange="0.1" />
                             </StackPanel>
                             <StackPanel Margin="0,0,6,0">
                                 <TextBlock Text="Y mm" FontSize="10" />
-                                <ui:NumberBox Value="{Binding TriggerPoseY}" SmallChange="0.1"
-                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                                <ui:NumberBox Value="{Binding TriggerPoseY}" SmallChange="0.1" />
                             </StackPanel>
                             <StackPanel>
                                 <TextBlock Text="RZ °" FontSize="10" />
-                                <ui:NumberBox Value="{Binding TriggerPoseRz}" SmallChange="0.1"
-                                              IsEnabled="{Binding IncludeTriggerPose}" />
+                                <ui:NumberBox Value="{Binding TriggerPoseRz}" SmallChange="0.1" />
                             </StackPanel>
                         </UniformGrid>
                         <Grid>
@@ -665,9 +868,9 @@
                         </Grid>
                         <TextBlock FontSize="10" Margin="0,8,0,0" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                   Text="测试触发仍用磁盘旧配方（未保存修改有提示）；保存即热加载，触发立即生效。Ctrl+滚轮缩放图像 / 中键平移 / 右键菜单更多。" />
+                                   Text="测试触发仍用磁盘旧配方（未保存修改有提示）；保存即热加载，触发立即生效。滚轮缩放图像，中键或右键拖动画布。" />
                     </StackPanel>
-                </ScrollViewer>
+                </Border>
             </Grid>
         </Border>
     </Grid>

@@ -3,8 +3,6 @@ using System.Linq;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Infrastructure.Inference;
-using SkiaSharp;
-using YoloDotNet.Models;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -269,10 +267,10 @@ public class ModelManagerRaceTests : IDisposable
             release.Wait(TimeSpan.FromSeconds(5));
         };
 
-        using var bmp = new SKBitmap(8, 8);
+        using var image = VisionImage.AllocateZero(8, 8, 3);
         var runTask = Task.Run(() => session.Run<int>(e =>
         {
-            e.RunObjectDetection(bmp, 0.5, 0.5);
+            e.RunObjectDetection(image, 0.5, 0.5);
             return 0;
         }));
         Assert.True(entered.Wait(TimeSpan.FromSeconds(2)), "推理未启动");
@@ -319,23 +317,25 @@ public class ModelManagerRaceTests : IDisposable
     /// <summary>可控时序的假引擎：OnRun 钩子模拟推理临界区，DisposedCount 记录释放。</summary>
     private sealed class FakeEngine : IInferenceEngine
     {
+        public InferenceTask? DetectedTask => null;
+
         public Action? OnRun;
 
         public int DisposedCount;
 
-        public IReadOnlyList<ObjectDetection> RunObjectDetection(SKBitmap image, double confidence = 0.25, double iou = 0.45)
+        public IReadOnlyList<ObjectDetectionResult> RunObjectDetection(VisionImage image, double confidence = 0.25, double iou = 0.45)
         {
             OnRun?.Invoke();
             return [];
         }
 
-        public IReadOnlyList<Segmentation> RunSegmentation(SKBitmap image, double confidence = 0.25, double pixelConfidence = 0.5, double iou = 0.45)
+        public IReadOnlyList<InstanceSegmentation> RunSegmentation(VisionImage image, double confidence = 0.25, double pixelConfidence = 0.5, double iou = 0.45)
         {
             OnRun?.Invoke();
             return [];
         }
 
-        public IReadOnlyList<PoseEstimation> RunPoseEstimation(SKBitmap image, double confidence = 0.25, double iou = 0.45)
+        public IReadOnlyList<PoseDetectionResult> RunPoseEstimation(VisionImage image, double confidence = 0.25, double iou = 0.45)
         {
             OnRun?.Invoke();
             return [];

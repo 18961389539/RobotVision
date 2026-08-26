@@ -11,7 +11,7 @@ public class ProtocolTests
     {
         var result = VisionResult.Success("A01",
             [new RobotPose(12.3456, -7.89, 15.25)], 0);
-        Assert.Equal("OK,A01,1,12.346,-7.890,15.250,0", TcpServerManager.FormatReply(result));
+        Assert.Equal("OK,12.346,-7.890,15.250,A01,1,0", TcpServerManager.FormatReply(result));
     }
 
     [Fact]
@@ -22,7 +22,7 @@ public class ProtocolTests
             new RobotPose(1, 2, 3),
             new RobotPose(4, 5, 6),
         ], 123.4);
-        Assert.Equal("OK,A01,2,1.000,2.000,3.000,4.000,5.000,6.000,123", TcpServerManager.FormatReply(result));
+        Assert.Equal("OK,1.000,2.000,3.000,4.000,5.000,6.000,A01,2,123", TcpServerManager.FormatReply(result));
     }
 
     [Fact]
@@ -37,8 +37,15 @@ public class ProtocolTests
     [Fact]
     public void FormatReply_FailureSanitizesCommasAndNewlines()
     {
+        var result = VisionResult.Fail("A01", VisionErrorCode.NoTargetFound, "no target,second\nline", 5);
+        Assert.Equal("ERR,1007,no target second line", TcpServerManager.FormatReply(result));
+    }
+
+    [Fact]
+    public void FormatReply_StripsNonAsciiFromBusinessMessage()
+    {
         var result = VisionResult.Fail("A01", VisionErrorCode.NoTargetFound, "未检出,目标\n第二行", 5);
-        Assert.Equal("ERR,1007,未检出 目标 第二行", TcpServerManager.FormatReply(result));
+        Assert.Equal("ERR,1007,  ", TcpServerManager.FormatReply(result));
     }
 
     [Fact]
@@ -62,9 +69,9 @@ public class ProtocolTests
     [Fact]
     public void FormatReply_BusinessError_KeepsSanitizedMessage()
     {
-        // 业务错误（非 InternalError）保留可读消息，逗号/换行被消毒
-        var result = VisionResult.Fail("A01", VisionErrorCode.NotCalibrated, "工位未标定,请先标定\nst1", 5);
-        Assert.Equal("ERR,1004,工位未标定 请先标定 st1", TcpServerManager.FormatReply(result));
+        // 业务错误（非 InternalError）保留可读 ASCII 消息，逗号/换行被消毒，非 ASCII 被剥离
+        var result = VisionResult.Fail("A01", VisionErrorCode.NotCalibrated, "station not calibrated,run first\nst1", 5);
+        Assert.Equal("ERR,1004,station not calibrated run first st1", TcpServerManager.FormatReply(result));
     }
 
     // ---- 改进 6：NaN/Infinity 防御 ----
@@ -102,22 +109,31 @@ public class ProtocolTests
         Assert.Equal(expected, TcpServerManager.FormatStatus(state));
     }
 
-    // ---- TRIGGER 扩展格式（TRIGGER,配方名,X,Y,RZ）----
+    // ---- 触发行格式（配方名 / 序列号,X,Y,RZ）----
 
     [Fact]
-    public void ParseTriggerArgument_LegacyOneSegment_PosesNull()
+    public void ParseTriggerLine_LegacyOneSegment_PosesNull()
     {
-        var (name, pose, error) = TcpServerManager.ParseTriggerArgument("A01");
-        Assert.Equal("A01", name);
-        Assert.Null(pose); // 旧格式：无位姿（OnArm 已记录示教位姿时由管线返回 1014）
+        var (key, pose, error) = TcpServerManager.ParseTriggerLine("A01");
+        Assert.Equal("A01", key);
+        Assert.Null(pose);
         Assert.Null(error);
     }
 
     [Fact]
-    public void ParseTriggerArgument_FourSegments_PosesParsed()
+    public void ParseTriggerLine_SerialWithHashPrefix()
     {
-        var (name, pose, error) = TcpServerManager.ParseTriggerArgument("A01, 100.25 , -50.5, 45.0");
-        Assert.Equal("A01", name);
+        var (key, pose, error) = TcpServerManager.ParseTriggerLine("#3");
+        Assert.Equal("3", key);
+        Assert.Null(pose);
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void ParseTriggerLine_FourSegments_PosesParsed()
+    {
+        var (key, pose, error) = TcpServerManager.ParseTriggerLine("A01, 100.25 , -50.5, 45.0");
+        Assert.Equal("A01", key);
         Assert.Null(error);
         Assert.NotNull(pose);
         Assert.Equal(100.25, pose!.X, 9);
@@ -126,12 +142,12 @@ public class ProtocolTests
     }
 
     [Theory]
-    [InlineData("A01,1.0")]                 // 2 段
-    [InlineData("A01,1.0,2.0")]             // 3 段
-    [InlineData("A01,1.0,2.0,3.0,4.0")]     // 5 段
-    public void ParseTriggerArgument_WrongSegmentCount_ReturnsError(string argument)
+    [InlineData("A01,1.0")]
+    [InlineData("A01,1.0,2.0")]
+    [InlineData("A01,1.0,2.0,3.0,4.0")]
+    public void ParseTriggerLine_WrongSegmentCount_ReturnsError(string line)
     {
-        var (_, _, error) = TcpServerManager.ParseTriggerArgument(argument);
+        var (_, _, error) = TcpServerManager.ParseTriggerLine(line);
         Assert.Equal("TRIGGER_ARGUMENT_COUNT", error);
     }
 
@@ -139,17 +155,31 @@ public class ProtocolTests
     [InlineData("A01,NaN,2.0,3.0")]
     [InlineData("A01,1.0,Infinity,3.0")]
     [InlineData("A01,1.0,2.0,abc")]
-    public void ParseTriggerArgument_NonFiniteOrNonNumeric_ReturnsError(string argument)
+    public void ParseTriggerLine_NonFiniteOrNonNumeric_ReturnsError(string line)
     {
-        var (_, _, error) = TcpServerManager.ParseTriggerArgument(argument);
+        var (_, _, error) = TcpServerManager.ParseTriggerLine(line);
         Assert.Equal("INVALID_POSE_NUMBER", error);
     }
 
     [Fact]
-    public void ParseTriggerArgument_EmptyRecipeInFourSegments_ReturnsError()
+    public void ParseTriggerLine_EmptyRecipeInFourSegments_ReturnsError()
     {
-        var (_, _, error) = TcpServerManager.ParseTriggerArgument(",1.0,2.0,3.0");
+        var (_, _, error) = TcpServerManager.ParseTriggerLine(",1.0,2.0,3.0");
         Assert.Equal("MISSING_RECIPE", error);
+    }
+
+    [Fact]
+    public void ParseTriggerLine_EmptyLine_ReturnsMissingRecipe()
+    {
+        var (_, _, error) = TcpServerManager.ParseTriggerLine("");
+        Assert.Equal("MISSING_RECIPE", error);
+    }
+
+    [Fact]
+    public void ParseTriggerLine_LegacyTriggerPrefix_ReturnsSegmentError()
+    {
+        var (_, _, error) = TcpServerManager.ParseTriggerLine("TRIGGER,A01");
+        Assert.Equal("TRIGGER_ARGUMENT_COUNT", error);
     }
 
     [Fact]

@@ -43,6 +43,26 @@ dotnet build RobotVision.sln
 dotnet test RobotVision.sln
 ```
 
+### 测试矩阵
+
+| 项目 | 类型 | 覆盖范围 |
+|---|---|---|
+| `tests/RobotVision.Tests` | 单元测试（xunit + FsCheck 属性测试） | 角度几何、配方加载/校验、标定（内参/外参/旋转中心/多项式）、TCP 协议解析、相机（File/Virtual/Basler/GigE）、光源、模型并发、失败留存、队列/超时语义、日志解析；属性测试覆盖 NaN/Infinity/退化几何/协议往返 |
+| `tests/RobotVision.Wpf.Tests` | UI 层测试（ViewModel，不依赖 UI 线程） | 主监控页（相机/配方下拉、日志过滤、触发失败横幅）、配方页（列表/搜索/新建/复制/脏标记）、设置页（脏标记/保存/热重启/恢复默认）、标定页（档案映射/质量文本）、日志页（文件列表/加载/级别与关键词过滤/清空）、失败现场画廊（加载/筛选/按钮文案） |
+| `tests/ImageViewerControl.Tests` | UI 控件层测试 | 撤销/重做管理器（容量上限/异常入栈/PropertyChanged）、ROI 几何服务（环形钳制/多边形闭合/包围盒）、ROI 命令（状态替换/标签）、ROI 持久化（序列化往返/未知类型跳过/文件 IO）、插件注册表（内置发现/重复注册/反注册/绘制工具排序） |
+| `tests/RobotVision.IntegrationTests` | 端到端集成测试 | 真实 TCP socket ↔ 服务（PING/STATUS/触发/错误码/白名单/序列号/路径穿越）、VisionService 全链路（1001~1016 语义、OnArm 位姿校验、快照订阅）、DI 容器解析与 RuntimeSync 热应用、并发压力（多连接/排队/死锁免疫）、FlaUI UI 自动化冒烟（`RV_UI_TEST=1` 启用） |
+| `benchmarks/RobotVision.Benchmarks` | BenchmarkDotNet 基准 | 角度几何、协议解析/应答格式化、标定变换/旋转补偿、ROI 序列化/反序列化。运行：`dotnet run -c Release --project benchmarks/RobotVision.Benchmarks`（可加 `--filter *AngleGeometry*` 缩小范围） |
+
+**环境门控测试**（默认跳过，避免 CI/无硬件环境误报）：
+- 真实相机硬件冒烟：`RV_HARDWARE_TEST=1`（见 `HardwareCameraSmokeTests`）
+- WPF 宿主 UI 自动化：`RV_UI_TEST=1`（须先 `dotnet build`，桌面会话中运行）
+
+**真实模型链路**：集成测试复用仓库 `models/a01_kpt.onnx`（39MB）+ `data/replay/people.jpg`，
+覆盖取图 → 去畸变 → 真实推理 → 位姿变换 → 应答的完整链路；模型缺失时相关用例自动降级为校验失败路径。
+
+**覆盖率**：`dotnet test tests/<项目> --collect:"XPlat Code Coverage"` 生成 Cobertura 报告
+（coverlet.collector 已内置），可用 ReportGenerator 转 HTML 查看。
+
 ## 运行
 
 ```powershell
@@ -83,13 +103,13 @@ Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资�
 ### 推理链路验证记录（2026-08-22）
 
 使用 YoloDotNet 官方仓库的 `yolov11s-pose.onnx`（38MB，SHA1 与上游 git blob 一致）+
-`people.jpg` 测试图完成端到端验证：`TRIGGER,A01 → OK,A01,8,x,y,角度×8,耗时ms`，
+`people.jpg` 测试图完成端到端验证：`A01 → OK,x,y,角度×8,A01,8,耗时ms`，
 关键点连线几何与原始检测输出吻合（鼻尖/左眼中点即输出坐标，连线角即输出角度）。
 首次请求 726ms（含模型加载与预热），后续稳定在 122~134ms（CPU 推理）。
 当前 `data/calibration/cam_file.intrinsic.json` 为零畸变占位档案（1280×853），
 仅用于链路验证；现场部署时须用真实标定替换。
 
-## TCP 协议（UTF-8 编码的 ASCII 子集，`\n` 结尾）
+## TCP 协议（ASCII；请求有无换行均可，应答以 `\n` 结尾）
 
 完整协议规范（含 PLC 集成指引、时序与处置流程）见 `docs/PLC-TRIGGER-Protocol.md`。
 
@@ -97,8 +117,8 @@ Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资�
 |---|---|---|
 | `PING` | `PONG` | 心跳（仅证明连接存活，不反映管线忙闲） |
 | `STATUS` | `OK,ready\|busy,队列深度,队列上限,最近耗时ms` | 管线状态查询（PLC 触发前预判） |
-| `TRIGGER,配方名` | `OK,配方名,目标数,x,y,角度[,...],耗时ms` | 触发一次完整流程（v1 格式） |
-| `TRIGGER,配方名,X,Y,RZ` | 同上 | 触发并上报拍照位姿（相机装末端的工位必须用；
+| `配方名` 或 `序列号`（`3` / `#3`） | `OK,x,y,角度[,...],配方名,目标数,耗时ms` | 触发一次完整流程（不带位姿） |
+| `键,X,Y,RZ`（键=配方名或序列号） | 同上 | 带拍照位姿触发（末端相机工位必须；
 与 OnArm 外参档案比对，不一致返回 1012） |
 | 出错 | `ERR,错误码,消息` | 见下表 |
 
@@ -109,18 +129,18 @@ Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资�
 **超时语义与重试策略**：`1010 排队超时` = 请求在排队阶段超时放弃，管线未受影响，可立即重试；
 `1008 处理超时` = 推理已开始但调用方超时，任务在后台跑完释放槽位（防僵尸设计），
 立即重试可能再次排队超时。客户端收到 1008 后建议：先发 `STATUS` 确认返回 `ready`
-（或等待 ≥ 2×TimeoutMs）再重发 `TRIGGER`。
+（或等待 ≥ 2×TimeoutMs）再重发触发行。
 
-**目标数字段**：应答第 3 段固定为检出目标数，PLC 无需先数字段即可定位位姿三元组；
-也为将来"0 目标返回空 OK（count=0）"预留了非破坏性扩展（当前 0 目标仍返回 ERR 1007）。
-注意这是对旧版 `OK,配方名,x,y,...` 的**破坏性协议变更**，PLC 解析侧需同步更新。
+**目标数字段**：坐标三元组紧跟 `OK`；配方名与目标数在耗时前（倒数第 2 段为 N）。
+PLC 可顺序读坐标，或用尾部 N 校验；也为将来"0 目标返回空 OK（count=0）"预留扩展（当前 0 目标仍返回 ERR 1007）。
 
-错误码：1000 未知命令 / 1001 配方不存在（含无效配方）/ 1002 相机未注册 / 1003 取图失败 /
+错误码：1000 未知命令 / 1001 配方不存在（配方名错/文件缺）/ 1002 相机未注册 / 1003 取图失败 /
 1004 未标定（含 stationId 缺失且未开调试直通）/ 1005 模型不可用 / 1006 光源控制器未注册 /
 1007 未检出目标 / 1008 处理超时（已进入推理，后台跑完释放）/ 1009 排队超限（Busy）/
 1010 排队超时（未进入推理，已放弃排队）/ 1011 相机初始化失败（pylon 运行库缺失/设备打开失败）/
 1012 拍照位姿不一致（OnArm 工位，TRIGGER 上报位姿与外参标定位姿超容差，容差见 PoseCheck 段）/
-1013 TRIGGER 参数格式错误（段数/数值非法）/ 1099 内部错误。
+1013 TRIGGER 参数格式错误（段数/数值非法）/ 1014 OnArm 未上报拍照位姿 /
+1015 配方被停用 / 1016 配方参数或引用校验失败 / 1099 内部错误（含配方文件 IO 故障）。
 
 配方名只允许字母、数字、下划线、中划线——`TRIGGER,..\xxx` 之类的路径穿越探测
 一律按 1001 拒绝。启动时预加载全部配方并校验（cameraId/models/阈值/keypoint 索引等），

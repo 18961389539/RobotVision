@@ -17,13 +17,15 @@ public sealed record LightListItem(string Id, string Type, string Status, bool R
 /// 支持添加控制器（类型从 LightControllerTypeRegistry 下拉选择，None 为调试兜底）
 /// 与删除控制器，与相机管理页同构。
 /// </summary>
-public partial class LightingsViewModel : ObservableObject
+public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
 {
     private readonly AppConfig _cfg;
     private readonly LightingManager _lighting;
     private readonly LightingConfigStore _store;
     private readonly RecipeLoader _recipes;
     private readonly LightControllerTypeRegistry _registry;
+
+    public Action? FlushPendingEdits { get; set; }
 
     public ObservableCollection<LightListItem> Items { get; } = [];
 
@@ -68,6 +70,13 @@ public partial class LightingsViewModel : ObservableObject
     /// <summary>新建区是否需要显示 Serial 参数。</summary>
     public bool IsNewSerial => string.Equals(NewType, "Serial", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>新建区是否为 None（显示说明，无需填连接参数）。</summary>
+    public bool IsNewNone => string.Equals(NewType, "None", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>新建 Network 且协议为 Tcp 时才需填重连次数。</summary>
+    public bool IsNewTcp => IsNewNetwork
+        && string.Equals(NewProtocol, "Tcp", StringComparison.OrdinalIgnoreCase);
+
     // ---- 新建 Serial 专属参数 ----
 
     [ObservableProperty]
@@ -97,6 +106,14 @@ public partial class LightingsViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IsNewNetwork));
         OnPropertyChanged(nameof(IsNewSerial));
+        OnPropertyChanged(nameof(IsNewNone));
+        OnPropertyChanged(nameof(IsNewTcp));
+        OnPropertyChanged(nameof(NewTypeHint));
+    }
+
+    partial void OnNewProtocolChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsNewTcp));
     }
 
     public double BrightnessMax => 255;
@@ -114,6 +131,21 @@ public partial class LightingsViewModel : ObservableObject
     public bool IsSerial => Selected is not null
         && string.Equals(Selected.Type, "Serial", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>选中光源是否为 None（虚拟控制器，无连接参数）。</summary>
+    public bool IsNone => Selected is not null && Selected.IsNoop;
+
+    /// <summary>编辑 Network 且协议为 Tcp 时显示 TCP 重连次数。</summary>
+    public bool IsEditTcp => IsNetwork
+        && string.Equals(EditProtocol, "Tcp", StringComparison.OrdinalIgnoreCase);
+
+    public string NewTypeHint => NewType switch
+    {
+        "None" => "无操作虚拟控制器：配方联调时占位，开灯不会点亮硬件。",
+        "Serial" => "RS232/RS485 串口控制器：填写 COM 口与波特率。",
+        "Network" => "UDP/TCP 网络控制器：填写 host:port；UDP 可填本机绑定端口。",
+        _ => string.IsNullOrWhiteSpace(NewType) ? "" : $"类型 {NewType}：按工厂注册表要求填写参数。",
+    };
+
     // ---- Serial 专属参数（编辑区绑定） ----
 
     [ObservableProperty]
@@ -128,6 +160,7 @@ public partial class LightingsViewModel : ObservableObject
     private string _editEndpoint = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsEditTcp))]
     private string _editProtocol = "Tcp";
 
     [ObservableProperty]
@@ -231,6 +264,8 @@ public partial class LightingsViewModel : ObservableObject
         // 无论选中与否都通知类型面板可见性重新计算
         OnPropertyChanged(nameof(IsNetwork));
         OnPropertyChanged(nameof(IsSerial));
+        OnPropertyChanged(nameof(IsNone));
+        OnPropertyChanged(nameof(IsEditTcp));
 
         if (value is null)
             return;
@@ -259,6 +294,7 @@ public partial class LightingsViewModel : ObservableObject
             EditBaudRate = config.BaudRate is >= 1200 and <= 921600 ? config.BaudRate : 9600;
         }
 
+        OnPropertyChanged(nameof(IsEditTcp));
         Message = value.Registered
             ? (value.IsNoop
                 ? $"{value.Id} 是无操作控制器（None）：开灯不会点亮任何硬件，仅用于配方联调"
@@ -270,6 +306,7 @@ public partial class LightingsViewModel : ObservableObject
     [RelayCommand]
     private void SaveSelected()
     {
+        this.Commit();
         if (Selected is null)
         {
             Message = "保存失败：请先选择光源";
@@ -329,6 +366,7 @@ public partial class LightingsViewModel : ObservableObject
     [RelayCommand]
     private void Add()
     {
+        this.Commit();
         var id = NewId.Trim();
         var type = NewType?.Trim() ?? "";
         if (id.Length == 0)
@@ -443,6 +481,7 @@ public partial class LightingsViewModel : ObservableObject
     [RelayCommand]
     private void TurnOn()
     {
+        this.Commit();
         if (Selected is not { Registered: true } item)
         {
             Message = "请选择已注册的光源控制器";

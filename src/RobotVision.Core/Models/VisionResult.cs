@@ -32,6 +32,14 @@ public enum VisionErrorCode
     /// <summary>OnArm 工位已记录示教位姿，但 TRIGGER 未上报 X,Y,RZ（v1 格式或界面空位姿）。
     /// 拒绝执行以免在未校验拍照点的情况下输出错位坐标。</summary>
     PoseRequired = 1014,
+
+    /// <summary>配方存在但被停用（Enabled=false）。处置：在界面上启用后重试。
+    /// 与 1001（名字错/文件缺）区分：停用是明确的运维动作，不应让 PLC 按"配方名错了"报警。</summary>
+    RecipeDisabled = 1015,
+
+    /// <summary>配方文件存在但参数/引用校验失败（cameraId 空、模型缺失、阈值越界等）。
+    /// 处置：打开配方页修正配置。与 1001 区分：名字是对的，内容不合法。</summary>
+    InvalidRecipeConfig = 1016,
 }
 
 /// <summary>

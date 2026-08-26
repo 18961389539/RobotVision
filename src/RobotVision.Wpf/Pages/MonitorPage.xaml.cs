@@ -14,6 +14,7 @@ public partial class MonitorPage : Page
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         DataContext = App.Services.GetRequiredService(typeof(MainViewModel));
+        NumberBoxCommit.Bind(this, DataContext as MainViewModel);
         Loaded += (_, _) =>
         {
             SetMonitorActive(true);

@@ -2,6 +2,7 @@ using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
+using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Cameras;
 using Xunit;
@@ -36,13 +37,15 @@ public class VirtualCameraTests
         // 640×480 / 40px 格 → 棋盘 8×6 格 → 内角点 7×5
         using var camera = new VirtualCamera("v", 640, 480, "Chessboard", chessCellPx: 40);
 
-        using var frame = camera.Grab().Image;
-        Assert.Equal(3, frame.Channels());
-        Assert.Equal(480, frame.Rows);
-        Assert.Equal(640, frame.Cols);
+        using var grabbed = camera.Grab();
+        var frame = grabbed.Image;
+        Assert.Equal(3, frame.Channels);
+        Assert.Equal(480, frame.Height);
+        Assert.Equal(640, frame.Width);
 
+        using var mat = VisionImageCv.AsMat(frame);
         using var gray = new Mat();
-        Cv2.CvtColor(frame, gray, ColorConversionCodes.BGR2GRAY);
+        Cv2.CvtColor(mat, gray, ColorConversionCodes.BGR2GRAY);
         Assert.True(Cv2.FindChessboardCornersSB(gray, new Size(7, 5), out _),
             "虚拟棋盘格应能被角点检测识别（内参标定可用）");
     }
@@ -52,8 +55,10 @@ public class VirtualCameraTests
     {
         using var camera = new VirtualCamera("v", 640, 480, "Chessboard", chessCellPx: 40);
 
-        using var a = camera.Grab().Image;
-        using var b = camera.Grab().Image;
+        using var ga = camera.Grab();
+        using var gb = camera.Grab();
+        using var a = VisionImageCv.AsMat(ga.Image);
+        using var b = VisionImageCv.AsMat(gb.Image);
         using var diff = new Mat();
         Cv2.Absdiff(a, b, diff);
         Assert.True(Cv2.Mean(diff).Val0 > 0, "连续两帧应有姿态变化");
@@ -64,9 +69,11 @@ public class VirtualCameraTests
     {
         using var camera = new VirtualCamera("v", 640, 480, "Shapes");
 
-        using var a = camera.Grab().Image;
-        using var b = camera.Grab().Image;
-        Assert.False(a.Empty());
+        using var ga = camera.Grab();
+        using var gb = camera.Grab();
+        using var a = VisionImageCv.AsMat(ga.Image);
+        using var b = VisionImageCv.AsMat(gb.Image);
+        Assert.False(ga.Image.IsEmpty);
         using var diff = new Mat();
         Cv2.Absdiff(a, b, diff);
         Assert.True(Cv2.Mean(diff).Val0 > 0);
@@ -77,7 +84,8 @@ public class VirtualCameraTests
     {
         using var camera = new VirtualCamera("v", 640, 480, "Bars");
 
-        using var frame = camera.Grab().Image;
+        using var grabbed = camera.Grab();
+        using var frame = VisionImageCv.AsMat(grabbed.Image);
         // 第一根条纹内部取 ROI：无噪声时标准差应为 0
         using var roi = frame[new Rect(5, 10, 20, frame.Rows - 20)];
         Cv2.MeanStdDev(roi, out _, out var std);
@@ -89,7 +97,8 @@ public class VirtualCameraTests
     {
         using var camera = new VirtualCamera("v", 640, 480, "Bars", noiseSigma: 20);
 
-        using var frame = camera.Grab().Image;
+        using var grabbed = camera.Grab();
+        using var frame = VisionImageCv.AsMat(grabbed.Image);
         using var roi = frame[new Rect(5, 10, 20, frame.Rows - 20)];
         Cv2.MeanStdDev(roi, out _, out var std);
         Assert.True(std.Val0 > 1, $"加噪后纯色条带应有显著波动，实测 std={std.Val0}");
@@ -126,7 +135,8 @@ public class VirtualCameraTests
         {
             for (var i = 0; i < ChessboardIntrinsicCalibrator.MinImageCount + 2; i++)
             {
-                using var frame = camera.Grab().Image;
+                using var grabbed = camera.Grab();
+                using var frame = VisionImageCv.AsMat(grabbed.Image);
                 Cv2.ImWrite(Path.Combine(dir, $"f{i:D2}.png"), frame);
             }
 
@@ -169,7 +179,8 @@ public class VirtualCameraTests
         const int frames = 12;
         for (var i = 0; i < frames; i++)
         {
-            using var frame = camera.Grab().Image;
+            using var grabbed = camera.Grab();
+            using var frame = VisionImageCv.AsMat(grabbed.Image);
             using var gray = new Mat();
             Cv2.CvtColor(frame, gray, ColorConversionCodes.BGR2GRAY);
             if (Cv2.FindChessboardCornersSB(gray, new Size(9, 6), out _))
@@ -191,7 +202,8 @@ public class VirtualCameraTests
         {
             for (var i = 0; i < ChessboardIntrinsicCalibrator.MinImageCount + 2; i++)
             {
-                using var frame = camera.Grab().Image;
+                using var grabbed = camera.Grab();
+                using var frame = VisionImageCv.AsMat(grabbed.Image);
                 Cv2.ImWrite(Path.Combine(dir, $"f{i:D2}.png"), frame);
             }
 

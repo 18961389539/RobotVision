@@ -3,12 +3,20 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using OpenCvSharp;
+using RobotVision.Core.Models;
+using RobotVision.Infrastructure;
 
 namespace RobotVision.WpfHost;
 
 /// <summary>Mat → 冻结 BitmapSource 转换（可在任意线程调用，产物可跨线程使用）。</summary>
 public static class ImageConverter
 {
+    public static BitmapSource ToBitmapSource(VisionImage image)
+    {
+        using var mat = VisionImageCv.AsMat(image);
+        return ToBitmapSource(mat);
+    }
+
     public static BitmapSource ToBitmapSource(Mat bgr)
     {
         Mat bgra;

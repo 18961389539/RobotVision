@@ -3,76 +3,149 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       Title="系统信息"
+      VerticalAlignment="Stretch"
       Background="{DynamicResource ApplicationBackgroundBrush}">
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="8">
-            <ui:Card Margin="0,0,0,8" Padding="12">
+
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+
+        <!-- 原生 TextBlock 默认前景为黑色，深色卡片上不可读 -->
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground"
+                    Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+
+        <!-- 信息行卡片（替代 DataGrid，与通信监控页同构） -->
+        <Style x:Key="InfoRow" TargetType="Border">
+            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Background"
+                    Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush"
+                    Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+
+        <!-- 分组面板 -->
+        <Style x:Key="SectionPanel" TargetType="Border">
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Background"
+                    Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush"
+                    Value="{DynamicResource CardBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </Page.Resources>
+
+    <Grid Margin="8">
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalAlignment="Stretch"
+                      HorizontalAlignment="Stretch">
+            <StackPanel MaxWidth="920">
+
+            <!-- 运行状态：迷你指标卡 -->
+            <Border Style="{StaticResource SectionPanel}">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Subtitle" Text="运行状态" Margin="0,0,0,10" />
+                    <ui:TextBlock FontTypography="Subtitle" Text="运行状态" Margin="0,0,0,12" />
                     <UniformGrid Columns="3">
-                        <StackPanel Margin="0,0,10,4">
-                            <TextBlock Text="TCP 服务" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                            <ui:TextBlock FontTypography="BodyStrong" Text="{Binding TcpStatus}" />
+                        <StackPanel Margin="0,0,12,0">
+                            <TextBlock Text="TCP 服务" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <ui:TextBlock FontTypography="BodyStrong" Text="{Binding TcpStatus}"
+                                          Margin="0,4,0,0" TextWrapping="Wrap" />
                         </StackPanel>
-                        <StackPanel Margin="0,0,10,4">
-                            <TextBlock Text="推理管线" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                            <ui:TextBlock FontTypography="BodyStrong" Text="{Binding QueueStatus}" />
-                            <TextBlock Text="{Binding HealthStatus}" FontSize="11" Margin="0,2,0,0"
+                        <StackPanel Margin="0,0,12,0">
+                            <TextBlock Text="推理管线" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <ui:TextBlock FontTypography="BodyStrong" Text="{Binding QueueStatus}"
+                                          Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding HealthStatus}" FontSize="11" Margin="0,4,0,0"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap" />
                         </StackPanel>
-                        <StackPanel Margin="0,0,0,4">
-                            <TextBlock Text="资产" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                            <ui:TextBlock FontTypography="BodyStrong" Text="{Binding RecipeStatus}" />
+                        <StackPanel>
+                            <TextBlock Text="资产" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <ui:TextBlock FontTypography="BodyStrong" Text="{Binding RecipeStatus}"
+                                          Margin="0,4,0,0" TextWrapping="Wrap" />
                         </StackPanel>
                     </UniformGrid>
                 </StackPanel>
-            </ui:Card>
+            </Border>
 
-            <ui:Card Margin="0,0,0,8" Padding="12">
+            <!-- 数据目录 -->
+            <Border Style="{StaticResource SectionPanel}">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Subtitle" Text="数据目录（点击行末按钮打开）" Margin="0,0,0,10" />
-                    <DataGrid ItemsSource="{Binding Directories}"
-                              AutoGenerateColumns="False" IsReadOnly="True"
-                              HeadersVisibility="Column" CanUserAddRows="False"
-                              GridLinesVisibility="Horizontal">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="名称" Binding="{Binding Key}" Width="120" />
-                            <DataGridTextColumn Header="路径" Binding="{Binding Value}" Width="*" />
-                            <DataGridTemplateColumn Header="" Width="90">
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <ui:Button Content="打开" FontSize="12"
+                    <ui:TextBlock FontTypography="Subtitle" Text="数据目录" Margin="0,0,0,4" />
+                    <TextBlock Text="点击行末按钮在资源管理器中打开" FontSize="11" Margin="0,0,0,10"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                    <ItemsControl ItemsSource="{Binding Directories}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource InfoRow}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Key}" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Value}"
+                                                   Margin="10,0,10,0" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding Value}"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <ui:Button Grid.Column="2" Content="打开" Padding="10,4" FontSize="11"
                                                    CommandParameter="{Binding}"
-                                                   Command="{Binding DataContext.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" />
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                        </DataGrid.Columns>
-                    </DataGrid>
+                                                   Command="{Binding DataContext.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=Page}}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
-            </ui:Card>
+            </Border>
 
-            <ui:Card Margin="0,0,0,8" Padding="12">
+            <!-- 配置摘要 -->
+            <Border Style="{StaticResource SectionPanel}">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Subtitle" Text="配置摘要（可修改项见「服务设置」页）"
-                                  Margin="0,0,0,10" />
-                    <DataGrid ItemsSource="{Binding Settings}"
-                              AutoGenerateColumns="False" IsReadOnly="True"
-                              HeadersVisibility="Column" CanUserAddRows="False"
-                              GridLinesVisibility="Horizontal">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="项" Binding="{Binding Key}" Width="160" />
-                            <DataGridTextColumn Header="值" Binding="{Binding Value}" Width="*" />
-                        </DataGrid.Columns>
-                    </DataGrid>
+                    <ui:TextBlock FontTypography="Subtitle" Text="配置摘要" Margin="0,0,0,4" />
+                    <TextBlock Text="可修改项见「服务设置」页" FontSize="11" Margin="0,0,0,10"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                    <ItemsControl ItemsSource="{Binding Settings}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource InfoRow}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="148" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Key}" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Value}"
+                                                   Margin="10,0,0,0" VerticalAlignment="Center"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
-            </ui:Card>
+            </Border>
 
-            <ui:Card Padding="12">
+            <!-- 相机资产 -->
+            <Border Style="{StaticResource SectionPanel}" Margin="0">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Subtitle" Text="相机资产（配置全部相机，未注册项橙色标出）"
-                                  Margin="0,0,0,10" />
+                    <ui:TextBlock FontTypography="Subtitle" Text="相机资产" Margin="0,0,0,4" />
+                    <TextBlock Text="配置中的全部相机；未注册项以琥珀色标出" FontSize="11" Margin="0,0,0,10"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                     <ItemsControl ItemsSource="{Binding CameraBadges}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -81,15 +154,42 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border CornerRadius="3" Padding="8,3" Margin="0,0,8,4"
-                                        Background="#33FFFFFF" BorderThickness="1"
+                                <Border CornerRadius="6" Padding="10,6" Margin="0,0,8,6"
+                                        Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                        BorderThickness="1"
                                         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Registered}" Value="False">
+                                                    <Setter Property="BorderBrush"
+                                                            Value="{DynamicResource SystemFillColorCautionBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="{Binding Id}" FontSize="12" VerticalAlignment="Center" />
-                                        <TextBlock Text="未注册" FontSize="10" Margin="6,0,0,0"
-                                                   VerticalAlignment="Center" Foreground="#E8A33D">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
+                                        <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill"
+                                                            Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Registered}" Value="False">
+                                                            <Setter Property="Fill"
+                                                                    Value="{DynamicResource SystemFillColorCautionBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                        <TextBlock Text="{Binding Id}" FontSize="12" FontWeight="SemiBold"
+                                                   Margin="8,0,0,0" VerticalAlignment="Center" />
+                                        <Border Margin="8,0,0,0" Padding="5,1" CornerRadius="3"
+                                                Background="{DynamicResource SystemFillColorCautionBrush}"
+                                                VerticalAlignment="Center">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
                                                     <Setter Property="Visibility" Value="Collapsed" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding Registered}" Value="False">
@@ -97,15 +197,19 @@
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
+                                            </Border.Style>
+                                            <TextBlock Text="未注册" FontSize="10" FontWeight="Bold"
+                                                       Foreground="#0D1117" />
+                                        </Border>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
-            </ui:Card>
+            </Border>
+
         </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+    </Grid>
 </Page>

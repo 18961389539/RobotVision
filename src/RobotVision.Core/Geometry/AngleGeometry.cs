@@ -1,33 +1,22 @@
-using OpenCvSharp;
+using RobotVision.Core.Models;
 
 namespace RobotVision.Core.Geometry;
 
 /// <summary>
-/// 角度几何的纯函数集合（可独立单元测试）。
+/// 角度几何的纯函数集合（可独立单元测试，无第三方库）。
 /// 约定：图像坐标系 y 轴向下，角度单位为度，逆时针为正（Atan2 语义）。
 /// </summary>
 public static class AngleGeometry
 {
-    /// <summary>
-    /// 轮廓最小外接矩形的长边方向，归一化到 [0,180)。
-    /// 注意：接近正方形的目标长宽可能互换，长宽比 &lt; 1.5 时不建议使用该模式。
-    /// </summary>
-    public static (Point2d Center, double AngleDeg) LongAxisFromMinAreaRect(IReadOnlyList<Point2f> contour)
-    {
-        var rect = Cv2.MinAreaRect(contour);
-
-        // OpenCV >= 4.5 约定 angle ∈ (0, 90]，且不保证 Width 对应长边，
-        // 统一换算为长边方向后再归一化。
-        var deg = rect.Size.Width >= rect.Size.Height ? rect.Angle : rect.Angle + 90.0;
-
-        return (new Point2d(rect.Center.X, rect.Center.Y), NormalizeDeg(deg));
-    }
+    /// <summary>两点连线角度（A→B 方向），归一化到 (-180, 180]。</summary>
+    public static (ImagePoint Center, double AngleDeg) FromTwoPoints(ImagePoint a, ImagePoint b) =>
+        FromTwoPoints(a.X, a.Y, b.X, b.Y);
 
     /// <summary>两点连线角度（A→B 方向），归一化到 (-180, 180]。</summary>
-    public static (Point2d Center, double AngleDeg) FromTwoPoints(Point2d a, Point2d b)
+    public static (ImagePoint Center, double AngleDeg) FromTwoPoints(double ax, double ay, double bx, double by)
     {
-        var center = new Point2d((a.X + b.X) / 2.0, (a.Y + b.Y) / 2.0);
-        var deg = Math.Atan2(b.Y - a.Y, b.X - a.X) * 180.0 / Math.PI;
+        var center = new ImagePoint((ax + bx) / 2.0, (ay + by) / 2.0);
+        var deg = Math.Atan2(by - ay, bx - ax) * 180.0 / Math.PI;
         return (center, NormalizeSignedDeg(deg));
     }
 

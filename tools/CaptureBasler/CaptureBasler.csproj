@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup>
+    <PylonRoot Condition="'$(PYLON_ROOT)' != ''">$(PYLON_ROOT)</PylonRoot>
+    <PylonRoot Condition="'$(PylonRoot)' == '' and Exists('D:\Program Files\Basler\pylon')">D:\Program Files\Basler\pylon</PylonRoot>
+    <PylonRoot Condition="'$(PylonRoot)' == '' and Exists('C:\Program Files\Basler\pylon')">C:\Program Files\Basler\pylon</PylonRoot>
+    <PylonManagedDll Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Development\Assemblies\Basler.Pylon\net8.0\x64\Basler.Pylon.dll</PylonManagedDll>
+    <PylonRuntimeDir Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Runtime\x64</PylonRuntimeDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" />
+    <PackageReference Include="Basler.Pylon.NET.x64" NoWarn="NU1701" GeneratePathProperty="true"
+                      Condition="'$(PylonManagedDll)' == '' or !Exists('$(PylonManagedDll)')" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\RobotVision.Infrastructure\RobotVision.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('$(PylonManagedDll)')">
+    <Reference Include="Basler.Pylon">
+      <HintPath>$(PylonManagedDll)</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('$(PylonManagedDll)')">
+    <Reference Include="Basler.Pylon">
+      <HintPath>$(PkgBasler_Pylon_NET_x64)\lib\native\Basler.Pylon.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup Condition="Exists('$(PylonRuntimeDir)')">
+    <None Include="$(PylonRuntimeDir)\*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
+  </ItemGroup>
+</Project>

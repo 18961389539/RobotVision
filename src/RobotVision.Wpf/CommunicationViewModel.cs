@@ -43,7 +43,7 @@ public sealed record RequestRow(
     string Request, string Reply, bool Ok, double ElapsedMs)
 {
     public string TimeText => Time.ToString("HH:mm:ss.fff");
-    public string Result => Ok ? "OK" : "ERR";
+    public string Result => Reply == "处理中" ? "…" : Ok ? "OK" : "ERR";
     public string ElapsedText => $"{ElapsedMs:0} ms";
     public string ReplyTrimmed => Reply.Length <= 96 ? Reply : Reply[..96] + "…";
 }
@@ -73,6 +73,10 @@ public partial class CommunicationViewModel : ObservableObject
 
     public ObservableCollection<RecipeStatsRow> StatsRows { get; } = [];
 
+    public bool HasRequests => Requests.Count > 0;
+
+    public bool HasStats => StatsRows.Count > 0;
+
     [ObservableProperty] private string _serviceStatus = "";
     [ObservableProperty] private string _summaryText = "";
     [ObservableProperty] private string _statsSummary = "";
@@ -92,6 +96,9 @@ public partial class CommunicationViewModel : ObservableObject
     /// <summary>触发平均耗时（按配方统计）。</summary>
     [ObservableProperty] private string _avgMsText = "—";
 
+    /// <summary>最近一条 TCP 行（含处理中），避免只看「运行统计」时误以为没有报文。</summary>
+    [ObservableProperty] private string _lastTcpLineText = "尚无 TCP 请求";
+
     public CommunicationViewModel(TcpServerManager tcp, VisionService vision)
     {
         _tcp = tcp;
@@ -99,8 +106,13 @@ public partial class CommunicationViewModel : ObservableObject
         foreach (var snapshot in _tcp.GetClients())
             Clients.Add(new ClientRow(snapshot));
 
+        foreach (var record in _tcp.GetRecentRequests())
+            Requests.Add(ToRow(record));
+        NotifyLists();
+
         _tcp.ClientConnected += OnClientConnected;
         _tcp.ClientDisconnected += OnClientDisconnected;
+        _tcp.RequestStarted += OnRequestStarted;
         _tcp.RequestProcessed += OnRequestProcessed;
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -128,6 +140,24 @@ public partial class CommunicationViewModel : ObservableObject
         }
     });
 
+    private void OnRequestStarted(TcpRequestRecord record) => Dispatch(() =>
+    {
+        var row = Clients.FirstOrDefault(c => c.Id == record.ClientId);
+        if (row is not null)
+        {
+            row.LastRequest = record.Request;
+            row.LastRequestAt = record.Time;
+        }
+
+        Requests.Insert(0, new RequestRow(
+            record.Time, record.ClientId, record.Client,
+            record.Request, "处理中", false, 0));
+        while (Requests.Count > MaxRequestRows)
+            Requests.RemoveAt(Requests.Count - 1);
+        LastTcpLineText = $"{record.Request} → 处理中";
+        NotifyLists();
+    });
+
     private void OnRequestProcessed(TcpRequestRecord record) => Dispatch(() =>
     {
         var row = Clients.FirstOrDefault(c => c.Id == record.ClientId);
@@ -140,12 +170,32 @@ public partial class CommunicationViewModel : ObservableObject
             row.LastRequestAt = record.Time;
         }
 
-        Requests.Insert(0, new RequestRow(
-            record.Time, record.ClientId, record.Client,
-            record.Request, record.Reply, record.Ok, record.ElapsedMs));
-        while (Requests.Count > MaxRequestRows)
-            Requests.RemoveAt(Requests.Count - 1);
+        var pending = Requests.FirstOrDefault(r =>
+            r.Time == record.Time && r.ClientId == record.ClientId && r.Reply == "处理中");
+        var completed = ToRow(record);
+        if (pending is not null)
+        {
+            var index = Requests.IndexOf(pending);
+            if (index >= 0)
+                Requests[index] = completed;
+        }
+        else
+        {
+            Requests.Insert(0, completed);
+            while (Requests.Count > MaxRequestRows)
+                Requests.RemoveAt(Requests.Count - 1);
+        }
+
+        LastTcpLineText = FormatLastLine(completed);
+        NotifyLists();
     });
+
+    private static RequestRow ToRow(TcpRequestRecord record) => new(
+        record.Time, record.ClientId, record.Client,
+        record.Request, record.Reply, record.Ok, record.ElapsedMs);
+
+    private static string FormatLastLine(RequestRow row) =>
+        $"{row.Request} → {row.ReplyTrimmed}";
 
     private void RefreshStatus()
     {
@@ -187,6 +237,7 @@ public partial class CommunicationViewModel : ObservableObject
 
         SuccessRateText = total == 0 ? "—" : $"{(double)ok / total:P1}";
         AvgMsText = total == 0 ? "—" : $"{avg:0} ms";
+        OnPropertyChanged(nameof(HasStats));
     }
 
     [RelayCommand]
@@ -198,7 +249,12 @@ public partial class CommunicationViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ClearRequests() => Requests.Clear();
+    private void ClearRequests()
+    {
+        Requests.Clear();
+        LastTcpLineText = "尚无 TCP 请求";
+        NotifyLists();
+    }
 
     [RelayCommand]
     private void ToggleService()
@@ -220,6 +276,13 @@ public partial class CommunicationViewModel : ObservableObject
             }
         }
         RefreshStatus();
+    }
+
+    private void NotifyLists()
+    {
+        if (Requests.Count > 0)
+            LastTcpLineText = FormatLastLine(Requests[0]);
+        OnPropertyChanged(nameof(HasRequests));
     }
 
     private static void Dispatch(Action action)

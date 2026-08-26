@@ -4,8 +4,8 @@ using RobotVision.Core.Abstractions;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
-using YoloDotNet.Extensions;
-using YoloDotNet.Models;
+using RobotVision.Infrastructure;
+using RobotVision.Infrastructure.Geometry;
 
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
@@ -23,7 +23,7 @@ public sealed class MaskTemplateStrategy(ModelManager models) : IAngleStrategy
     /// <summary>转正裁剪边距：为旋转模板滑窗留余量（相对矩形边长）。</summary>
     private const double CropMarginRatio = 0.3;
 
-    public List<PixelPose> Compute(Mat undistorted, RecipeConfig recipe, CancellationToken ct = default)
+    public List<PixelPose> Compute(VisionImage undistorted, RecipeConfig recipe, CancellationToken ct = default)
     {
         var useRefineTemplate = recipe.Template.RefineMethod == SegmentRefineMethod.Template;
         if (useRefineTemplate && string.IsNullOrEmpty(recipe.Template.TemplateImageBase64))
@@ -34,57 +34,58 @@ public sealed class MaskTemplateStrategy(ModelManager models) : IAngleStrategy
             : null;
         try
         {
-            // 推理与匹配都在 ROI 内完成（小图匹配快），坐标最后统一偏移回全图。
-            // roiOwned 仅在配置 ROI 时存在（视图 Dispose 不影响原图数据）；ROI 为空直接用原图。
-            using var bitmap = RoiHelper.ToBitmap(undistorted, recipe.Roi, out var ox, out var oy);
-            Mat? roiOwned = recipe.Roi is null ? null : RoiHelper.Crop(undistorted, recipe.Roi, out _, out _);
-            var roiView = roiOwned ?? undistorted;
+            using var roiImage = RoiHelper.CropToVisionImage(undistorted, recipe.Roi, out var ox, out var oy);
+            var input = roiImage ?? undistorted;
+            using var full = VisionImageCv.AsMat(undistorted);
+            Mat? roiOwned = recipe.Roi is null ? null : RoiHelper.Crop(full, recipe.Roi, out _, out _);
+            var roiView = roiOwned ?? full;
             try
             {
                 var session = models.Open(recipe.Models[0], InferenceTask.Segmentation);
                 var results = session.Run(y =>
-                    y.RunSegmentation(bitmap, recipe.Confidence, recipe.Segmentation.PixelConfidence, recipe.Iou), ct);
+                    y.RunSegmentation(input, recipe.Confidence, recipe.Segmentation.PixelConfidence, recipe.Iou), ct);
 
                 var poses = new List<PixelPose>();
                 foreach (var segmentation in results)
                 {
-                    var box = segmentation.BoundingBox;
+                    var box = segmentation.Box;
                     if ((double)box.Width * box.Height < MinMaskAreaPx)
                         continue;
 
-                    // 精修分支：模板匹配（吃原图纹理，可判头尾）/ 直线拟合（吃掩码轮廓，弱纹理）/
-                    // 质心-内孔连线（吃掩码孔洞几何，有方向，与纹理无关）
+                    var contour = segmentation.ContourLocal;
+                    if (contour.Count < 4)
+                        continue;
+                    var points = new Point2f[contour.Count];
+                    for (var i = 0; i < contour.Count; i++)
+                        points[i] = new Point2f((float)(contour[i].X + box.Left), (float)(contour[i].Y + box.Top));
+
                     PixelPose pose;
                     if (template is not null)
                     {
-                        var contour = segmentation.GetContourPoints();
-                        if (contour.Length < 4)
-                            continue;
-                        var points = new Point2f[contour.Length];
-                        for (var i = 0; i < contour.Length; i++)
-                            points[i] = new Point2f(contour[i].X + box.Left, contour[i].Y + box.Top);
                         pose = RefineByTemplate(roiView, points, template, recipe, segmentation.Confidence);
                     }
                     else if (recipe.Template.RefineMethod == SegmentRefineMethod.CentroidHoleLine)
                     {
                         var r = MaskTemplateMatcher.RefineByCentroidHoleLine(
-                            segmentation.BitPackedPixelMask, box.Width, box.Height);
+                            segmentation.BitPackedMask, box.Width, box.Height);
                         pose = r is null
-                            ? FallbackCoarse(segmentation, segConfidence: segmentation.Confidence)
+                            ? FallbackCoarse(points, segmentation.Confidence)
                             : new PixelPose(r.Centroid.X + box.Left, r.Centroid.Y + box.Top,
                                 r.AngleDeg, segmentation.Confidence);
                     }
                     else
                     {
-                        var contour = segmentation.GetContourPoints();
-                        if (contour.Length < 4)
-                            continue;
-                        var points = new Point2f[contour.Length];
-                        for (var i = 0; i < contour.Length; i++)
-                            points[i] = new Point2f(contour[i].X + box.Left, contour[i].Y + box.Top);
                         pose = RefineByLineFit(points, segmentation.Confidence);
                     }
-                    poses.Add(new PixelPose(pose.Cx + ox, pose.Cy + oy, pose.AngleDeg, pose.Score));
+                    poses.Add(new PixelPose(pose.Cx + ox, pose.Cy + oy, pose.AngleDeg, pose.Score)
+                    {
+                        Overlay = new PoseOverlay
+                        {
+                            Contour = points.Select(p => new PixelPoint(p.X + ox, p.Y + oy)).ToArray(),
+                            Boxes = [new PixelRect(box.Left + ox, box.Top + oy, box.Width, box.Height)],
+                            Label = segmentation.Label,
+                        },
+                    });
                 }
 
                 return poses.OrderByDescending(p => p.Score).ToList();
@@ -100,15 +101,11 @@ public sealed class MaskTemplateStrategy(ModelManager models) : IAngleStrategy
         }
     }
 
-    /// <summary>兜底粗结果：外轮廓 minAreaRect（无方向 [0,180)），孔检测失败/基线不足时使用。</summary>
-    private static PixelPose FallbackCoarse(Segmentation segmentation, double segConfidence)
+    /// <summary>兜底粗结果：外轮廓 minAreaRect（无方向 [0,180)），孔检测失败/基线不足时使用。
+    /// 轮廓点由调用方传入（已在循环顶部提取并校验点数 ≥4）。</summary>
+    private static PixelPose FallbackCoarse(Point2f[] contourPoints, double segConfidence)
     {
-        var box = segmentation.BoundingBox;
-        var contour = segmentation.GetContourPoints();
-        var points = new Point2f[contour.Length];
-        for (var i = 0; i < contour.Length; i++)
-            points[i] = new Point2f(contour[i].X + box.Left, contour[i].Y + box.Top);
-        var (center, angle) = AngleGeometry.LongAxisFromMinAreaRect(points);
+        var (center, angle) = MinAreaRectGeometry.LongAxis(contourPoints);
         return new PixelPose(center.X, center.Y, angle, segConfidence);
     }
 
@@ -116,7 +113,7 @@ public sealed class MaskTemplateStrategy(ModelManager models) : IAngleStrategy
     /// 角度无方向语义 [0,180)；带宽不足由 Matcher 内部兜底粗角度。</summary>
     private static PixelPose RefineByLineFit(Point2f[] contour, double segConfidence)
     {
-        var (_, coarseAngle) = AngleGeometry.LongAxisFromMinAreaRect(contour);
+        var (_, coarseAngle) = MinAreaRectGeometry.LongAxis(contour);
         var (angle, center) = MaskTemplateMatcher.RefineByLineFit(contour, coarseAngle);
         return new PixelPose(center.X, center.Y, angle, segConfidence);
     }
@@ -127,7 +124,7 @@ public sealed class MaskTemplateStrategy(ModelManager models) : IAngleStrategy
         Mat roiView, Point2f[] contour, Mat template, RecipeConfig recipe, double segConfidence)
     {
         // 粗结果（回退兜底）：长边角 + 矩形中心
-        var (coarseCenter, coarseAngle) = AngleGeometry.LongAxisFromMinAreaRect(contour);
+        var (coarseCenter, coarseAngle) = MinAreaRectGeometry.LongAxis(contour);
 
         UprightCropResult crop;
         try

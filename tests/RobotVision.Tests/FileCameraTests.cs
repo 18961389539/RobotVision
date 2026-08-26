@@ -32,7 +32,7 @@ public class FileCameraTests : IDisposable
     {
         using var camera = new FileCamera("cam", _dir);
         using var frame = camera.Grab();
-        Assert.False(frame.Image.Empty());
+        Assert.False(frame.Image.IsEmpty);
         Assert.True(frame.CapturedAtUtc <= DateTime.UtcNow);
         Assert.Equal(CameraKind.File, camera.Kind);
         Assert.Equal("cam", camera.Id);
@@ -70,7 +70,7 @@ public class FileCameraTests : IDisposable
 
             using var camera = new FileCamera("cam", cnDir);
             using var frame = camera.Grab();
-            Assert.False(frame.Image.Empty());
+            Assert.False(frame.Image.IsEmpty);
             Assert.Equal(32, frame.Image.Width);
         }
         finally

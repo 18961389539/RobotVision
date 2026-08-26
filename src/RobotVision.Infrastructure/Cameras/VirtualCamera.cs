@@ -2,6 +2,7 @@ using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
+using RobotVision.Infrastructure;
 
 namespace RobotVision.Infrastructure.Cameras;
 
@@ -107,7 +108,7 @@ public sealed class VirtualCamera : ICamera
                 _conversionBuffer.ConvertTo(frame, MatType.CV_8UC3);
             }
 
-            return new CameraFrame(frame, DateTime.UtcNow);
+            return new CameraFrame(VisionImageCv.FromMat(frame, ownsMat: true), DateTime.UtcNow);
         }
     }
 

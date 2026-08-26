@@ -10,6 +10,7 @@ public partial class SettingsPage : Page
     {
         InitializeComponent();
         DataContext = App.Services.GetRequiredService(typeof(SettingsViewModel));
+        NumberBoxCommit.Bind(this, DataContext as SettingsViewModel);
         // 进入页面：重新同步运行时配置（丢弃未保存残留、反映外部改动），再启动状态轮询
         Loaded += (_, _) =>
         {

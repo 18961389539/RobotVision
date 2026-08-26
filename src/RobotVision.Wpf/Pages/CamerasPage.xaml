@@ -15,47 +15,72 @@
     </Page.Resources>
 
     <Grid Margin="8">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="220" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
 
-        <!-- 左：相机列表。用标准 Border 替代 ui:Card —— WPF-UI Card 的默认 Style
-             VerticalAlignment=Center + 模板行为使局部 VerticalAlignment=Stretch 不生效
-             （实测 Card 悬空居中）；Border 无此怪癖，Stretch 可靠撑满整列。 -->
-        <Border Grid.Row="0" Grid.Column="0" Margin="0,0,8,0" Padding="8"
-                VerticalAlignment="Stretch"
-                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{DynamicResource CardBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="{DynamicResource ControlCornerRadius}">
+        <!-- 主导图像区：完整 ImageViewer -->
+        <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
+            <ivc:ImageViewer ImageSource="{Binding PreviewImage}" />
+        </Border>
+
+        <!-- 预览角标（实时预览 / 测试取图 语义） -->
+        <Border Background="#66000000" CornerRadius="3" Padding="6,2" Margin="10"
+                HorizontalAlignment="Left" VerticalAlignment="Top" Panel.ZIndex="30"
+                Visibility="{Binding PreviewVisible,
+                    Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock Text="{Binding PreviewCaption}" FontSize="11" Foreground="White" />
+        </Border>
+
+        <!-- 列表收起时的「相机」重新打开按钮 -->
+        <Button HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12"
+                Content="相机" Padding="14,8" FontWeight="SemiBold"
+                Panel.ZIndex="30"
+                Command="{Binding ToggleListPanelCommand}">
+            <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsListPanelVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
+
+        <!-- 左：相机列表浮动面板（可折叠，与右侧参数栏同构） -->
+        <Border Width="220" HorizontalAlignment="Left" VerticalAlignment="Top"
+                MaxHeight="640" Margin="12" Panel.ZIndex="20"
+                Background="#F01E2836"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8"
+                Visibility="{Binding IsListPanelVisible,
+                    Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
+                    <RowDefinition Height="*" MaxHeight="440" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Grid Margin="4,0,4,8">
+                <Grid Margin="10,10,10,6">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <ui:TextBlock Text="相机" FontTypography="BodyStrong" VerticalAlignment="Center" />
-                    <ui:Button Grid.Column="1" Content="新建" Margin="8,0,0,0"
+                    <ui:Button Grid.Column="1" Content="新建" Padding="8,3" FontSize="11"
                                Command="{Binding NewCommand}" />
-                    <ui:Button Grid.Column="2" Content="刷新" Margin="4,0,0,0" ToolTip="F5"
-                               Command="{Binding RefreshCommand}" />
+                    <ui:Button Grid.Column="2" Content="刷新" Margin="6,0,0,0" Padding="8,3" FontSize="11"
+                               ToolTip="F5" Command="{Binding RefreshCommand}" />
+                    <Button Grid.Column="3" Content="收起" Padding="10,4" FontSize="12" Margin="6,0,0,0"
+                            Command="{Binding ToggleListPanelCommand}" />
                 </Grid>
 
-                <ListBox Grid.Row="1" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}">
+                <ListBox Grid.Row="1" Margin="4,0,4,4" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <StackPanel Margin="2">
+                            <StackPanel Margin="2" Width="178">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -126,71 +151,58 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
 
-                <StackPanel Grid.Row="2" Margin="4,8,4,4">
-                    <TextBlock Text="{Binding UnsavedHint}" FontSize="11" TextWrapping="Wrap"
-                               Foreground="{DynamicResource SystemFillColorCautionBrush}"
-                               Margin="0,0,0,6"
+                <StackPanel Grid.Row="2" Margin="10,4,10,10">
+                    <TextBlock Text="{Binding UnsavedHint}" FontSize="10" TextWrapping="Wrap"
+                               Foreground="#E8A33D" Margin="0,0,0,6"
                                Visibility="{Binding HasUnsavedChanges,
                                    Converter={StaticResource BoolToVisibilityConverter}}" />
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- 右：图像主导 + 参数浮动面板（方案2） -->
-        <Grid Grid.Row="0" Grid.Column="1">
+        <!-- 面板收起时的「参数」重新打开按钮 -->
+        <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
+                Content="参数" Padding="14,8" FontWeight="SemiBold"
+                Panel.ZIndex="30"
+                Command="{Binding ToggleParamPanelCommand}">
+            <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsParamPanelVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
 
-            <!-- 主导图像区：占满右栏，ImageViewer 支持缩放/平移/右键菜单 -->
-            <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
-                <ivc:ImageViewer ImageSource="{Binding PreviewImage}" IsToolbarVisible="False" />
-            </Border>
+        <!-- 右：参数浮动面板（可折叠） -->
+        <Border HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                Width="352" Margin="12" Panel.ZIndex="20"
+                Background="#F01E2836"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8"
+                Visibility="{Binding IsParamPanelVisible,
+                    Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-            <!-- 预览角标（实时预览 / 测试取图 语义） -->
-            <Border Background="#66000000" CornerRadius="3" Padding="6,2" Margin="10"
-                    HorizontalAlignment="Left" VerticalAlignment="Top" Panel.ZIndex="30"
-                    Visibility="{Binding PreviewVisible,
-                        Converter={StaticResource BoolToVisibilityConverter}}">
-                <TextBlock Text="{Binding PreviewCaption}" FontSize="11" Foreground="White" />
-            </Border>
+                <!-- 面板头：标题 + 收起 -->
+                <Grid Margin="12,12,12,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Text="参数面板" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="收起" Padding="10,4" FontSize="12"
+                            Command="{Binding ToggleParamPanelCommand}" />
+                </Grid>
 
-            <!-- 面板收起时的"参数"重新打开按钮 -->
-            <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
-                    Content="参数" Padding="14,8" FontWeight="SemiBold"
-                    Panel.ZIndex="30"
-                    Command="{Binding ToggleParamPanelCommand}">
-                <Button.Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsParamPanelVisible}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Button.Style>
-            </Button>
-
-            <!-- 参数浮动面板（右上角，可折叠） -->
-            <Border HorizontalAlignment="Right" VerticalAlignment="Top"
-                    Width="352" Margin="12" Panel.ZIndex="20"
-                    Background="#F01E2836"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8"
-                    Visibility="{Binding IsParamPanelVisible,
-                        Converter={StaticResource BoolToVisibilityConverter}}">
-                <ScrollViewer MaxHeight="720" VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="12">
-
-                        <!-- 面板头：标题 + 收起 -->
-                        <Grid Margin="0,0,0,10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <ui:TextBlock Text="参数面板" FontTypography="BodyStrong" VerticalAlignment="Center" />
-                            <Button Grid.Column="1" Content="收起" Padding="10,4" FontSize="12"
-                                    Command="{Binding ToggleParamPanelCommand}" />
-                        </Grid>
-
-                        <!-- 取图 / 实时预览 -->
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12">
+                    <StackPanel>
                         <Grid Margin="0,0,0,12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -202,11 +214,22 @@
                             <ui:Button Grid.Column="1" Content="{Binding PreviewButtonText}" Margin="8,0,0,0"
                                        Command="{Binding TogglePreviewCommand}" />
                             <ui:Button Grid.Column="3" Content="打开目录" Margin="8,0,0,0"
-                                       Command="{Binding OpenFolderCommand}" />
+                                       Command="{Binding OpenFolderCommand}">
+                                <ui:Button.Style>
+                                    <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ShowOpenFolderButton}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ui:Button.Style>
+                            </ui:Button>
                         </Grid>
 
                         <!-- 基本信息 -->
-                        <ui:CardExpander Header="基本信息" IsExpanded="True" Margin="0,0,0,6">
+                        <ui:CardExpander Header="基本信息" IsExpanded="False" Margin="0,0,0,6">
                             <StackPanel Margin="0,10,0,0">
                                 <UniformGrid Columns="2">
                                     <StackPanel Margin="0,0,10,8">
@@ -217,7 +240,9 @@
                                     <StackPanel Margin="0,0,0,8">
                                         <TextBlock Text="类型" Margin="0,0,0,4" />
                                         <ComboBox ItemsSource="{Binding TypeOptions}"
-                                                  SelectedItem="{Binding EditType}" />
+                                                  SelectedItem="{Binding EditType}"
+                                                  SelectionChanged="EditType_SelectionChanged"
+                                                  ToolTip="相机类型（Basler/模拟器等），决定下方可调参数" />
                                     </StackPanel>
                                 </UniformGrid>
                                 <ui:TextBlock FontSize="11"
@@ -227,9 +252,24 @@
                             </StackPanel>
                         </ui:CardExpander>
 
-                        <!-- 类型参数 -->
-                        <ui:CardExpander Header="类型参数" IsExpanded="True" Margin="0,0,0,6">
+                        <!-- 类型参数（标题与字段随 EditType 切换） -->
+                        <ui:CardExpander Header="{Binding TypeParamsHeader}" IsExpanded="False" Margin="0,0,0,6">
                             <StackPanel Margin="0,10,0,0">
+                                <TextBlock Text="{Binding TypeParamsHint}" FontSize="11" TextWrapping="Wrap"
+                                           Margin="0,0,0,10"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsUnknownType}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+
                                 <!-- File -->
                                 <StackPanel
                                     Visibility="{Binding IsFile,
@@ -252,9 +292,9 @@
                                     </StackPanel>
                                 </StackPanel>
 
-                                <!-- Basler -->
+                                <!-- Basler / GigEVision -->
                                 <StackPanel
-                                    Visibility="{Binding IsBasler,
+                                    Visibility="{Binding IsHardwareCamera,
                                         Converter={StaticResource BoolToVisibilityConverter}}">
                                     <Grid Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
@@ -262,27 +302,42 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
-                                            <TextBlock Text="序列号（留空 = 自动绑定第一台）" Margin="0,0,0,4" />
-                                            <TextBox Text="{Binding EditDeviceId, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBlock Text="序列号或 IP（留空 = 自动绑定第一台）" Margin="0,0,0,4" />
+                                            <TextBox Text="{Binding EditDeviceId, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="Basler 相机序列号或 IP；留空则自动绑定第一台已枚举设备" />
                                         </StackPanel>
-                                        <ui:Button Grid.Column="1" Content="枚举设备" Margin="8,26,0,0"
-                                                   Command="{Binding EnumerateBaslerCommand}" />
+                                        <ui:Button Grid.Column="1" Content="{Binding EnumerateDevicesLabel}" Margin="8,26,0,0"
+                                                   Command="{Binding EnumerateBaslerCommand}">
+                                            <ui:Button.Style>
+                                                <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding CanEnumerateDevices}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ui:Button.Style>
+                                        </ui:Button>
                                     </Grid>
                                     <StackPanel Margin="0,0,0,8"
                                                 Visibility="{Binding HasBaslerDevices,
                                                     Converter={StaticResource BoolToVisibilityConverter}}">
-                                        <TextBlock Text="本机相机（选中自动填入序列号）" Margin="0,0,0,4" />
+                                        <TextBlock Text="{Binding EnumeratedDevicesCaption}" Margin="0,0,0,4" />
                                         <ComboBox ItemsSource="{Binding BaslerDevices}"
-                                                  SelectedItem="{Binding SelectedBaslerDevice}" />
+                                                  SelectedItem="{Binding SelectedBaslerDevice}"
+                                                  ToolTip="从已枚举的 Basler 设备中选择；先点「枚举设备」刷新列表" />
                                     </StackPanel>
                                     <UniformGrid Columns="2">
                                         <StackPanel Margin="0,0,10,8">
                                             <TextBlock Text="曝光（µs，空=不下发）" Margin="0,0,0,4" />
-                                            <TextBox Text="{Binding EditExposureUs, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBox Text="{Binding EditExposureUs, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="单次曝光时间（微秒）。越大越亮但运动模糊风险升高；留空=不下发，沿用相机当前值" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,8">
                                             <TextBlock Text="增益（dB，空=不下发）" Margin="0,0,0,4" />
-                                            <TextBox Text="{Binding EditGain, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBox Text="{Binding EditGain, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="增益（dB）。提高亮度但放大噪声；留空=不下发，沿用相机当前值" />
                                         </StackPanel>
                                     </UniformGrid>
                                     <StackPanel>
@@ -298,32 +353,40 @@
                                     <UniformGrid Columns="2">
                                         <StackPanel Margin="0,0,10,8">
                                             <TextBlock Text="宽（px）" Margin="0,0,0,4" />
-                                            <TextBox Text="{Binding EditWidth, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBox Text="{Binding EditWidth, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="采集分辨率宽（像素）" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,8">
                                             <TextBlock Text="高（px）" Margin="0,0,0,4" />
-                                            <TextBox Text="{Binding EditHeight, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBox Text="{Binding EditHeight, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="采集分辨率高（像素）" />
                                         </StackPanel>
                                     </UniformGrid>
                                     <UniformGrid Columns="2">
-                                        <StackPanel Margin="0,0,10,8">
-                                            <TextBlock Text="图案" Margin="0,0,0,4" />
-                                            <ComboBox ItemsSource="{Binding PatternOptions}"
-                                                      SelectedItem="{Binding EditPattern}" />
+                                        <StackPanel Margin="0,0,10,8"
+                                                    Visibility="{Binding ShowChessCellField,
+                                                        Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <TextBlock Text="棋盘格单元（px）" Margin="0,0,0,4" />
+                                            <TextBox Text="{Binding EditCellPx, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="棋盘格单格边长（像素），用于标定像素当量" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,8">
-                                            <TextBlock Text="棋盘格单元（px）" Margin="0,0,0,4" />
-                                            <TextBox Text="{Binding EditCellPx, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBlock Text="图案" Margin="0,0,0,4" />
+                                        <ComboBox ItemsSource="{Binding PatternOptions}"
+                                                  SelectedItem="{Binding EditPattern}"
+                                                  ToolTip="标定板图案类型（棋盘格/圆点等）" />
                                         </StackPanel>
                                     </UniformGrid>
                                     <UniformGrid Columns="2">
                                         <StackPanel Margin="0,0,10,8">
                                             <TextBlock Text="模拟曝光延时（ms）" Margin="0,0,0,4" />
-                                            <TextBox Text="{Binding EditIntervalMs, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBox Text="{Binding EditIntervalMs, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="模拟相机取图时的曝光延时（ms），仅模拟器生效" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,8">
                                             <TextBlock Text="高斯噪声 σ" Margin="0,0,0,4" />
-                                            <TextBox Text="{Binding EditNoiseSigma, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBox Text="{Binding EditNoiseSigma, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="叠加到模拟图像的高斯噪声标准差 σ；0 = 无噪声" />
                                         </StackPanel>
                                     </UniformGrid>
                                     <ui:TextBlock FontSize="11"
@@ -345,7 +408,7 @@
                         </ui:CardExpander>
 
                         <!-- 运行时调光 -->
-                        <ui:CardExpander Header="运行时调光（已注册相机）" Margin="0,0,0,6"
+                        <ui:CardExpander Header="运行时调光（已注册相机）" IsExpanded="False" Margin="0,0,0,6"
                                      Visibility="{Binding HasLiveExposureControl,
                                          Converter={StaticResource BoolToVisibilityConverter}}">
                             <StackPanel Margin="0,10,0,0">
@@ -433,7 +496,7 @@
 
                     </StackPanel>
                 </ScrollViewer>
-            </Border>
-        </Grid>
+            </Grid>
+        </Border>
     </Grid>
 </Page>

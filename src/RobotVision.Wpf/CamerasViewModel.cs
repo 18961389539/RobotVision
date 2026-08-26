@@ -149,6 +149,13 @@ public partial class CamerasViewModel : ObservableObject
     /// <summary>预览按钮文案：切换 实时预览 / 停止预览。</summary>
     public string PreviewButtonText => IsPreviewing ? "停止预览" : "实时预览";
 
+    /// <summary>相机列表浮动面板展开状态（与右侧参数面板同构，图像主导布局）。</summary>
+    [ObservableProperty]
+    private bool _isListPanelVisible = true;
+
+    [RelayCommand]
+    private void ToggleListPanel() => IsListPanelVisible = !IsListPanelVisible;
+
     /// <summary>参数浮动面板展开状态（方案2：图像主导 + 可折叠参数抽屉）。</summary>
     [ObservableProperty]
     private bool _isParamPanelVisible = true;
@@ -278,29 +285,97 @@ public partial class CamerasViewModel : ObservableObject
 
     public bool IsFile => string.Equals(EditType, "File", StringComparison.OrdinalIgnoreCase);
     public bool IsBasler => string.Equals(EditType, "Basler", StringComparison.OrdinalIgnoreCase);
+    public bool IsGigEVision => string.Equals(EditType, "GigEVision", StringComparison.OrdinalIgnoreCase);
     public bool IsVirtual => string.Equals(EditType, "Virtual", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>当前类型无内置编辑面板（外部工厂注册的类型）→ 显示通用提示卡片。</summary>
-    public bool IsUnknownType => !IsFile && !IsBasler && !IsVirtual;
+    /// <summary>Basler / GigEVision 共用序列号、曝光、增益、超时编辑面板。</summary>
+    public bool IsHardwareCamera => IsBasler || IsGigEVision;
 
-    partial void OnEditTypeChanged(string value)
+    /// <summary>当前类型无内置编辑面板（外部工厂注册的类型）→ 显示通用提示卡片。</summary>
+    public bool IsUnknownType => !IsFile && !IsBasler && !IsGigEVision && !IsVirtual;
+
+    /// <summary>类型参数区标题（随 EditType 变化）。</summary>
+    public string TypeParamsHeader => EditType switch
+    {
+        "File" => "File 回放",
+        "Basler" => "Basler（pylon）",
+        "GigEVision" => "GigE Vision",
+        "Virtual" => "Virtual 仿真",
+        _ => string.IsNullOrWhiteSpace(EditType) ? "类型参数" : $"{EditType} 参数",
+    };
+
+    /// <summary>当前类型一行说明（显示在类型参数区顶部）。</summary>
+    public string TypeParamsHint => EditType switch
+    {
+        "File" => "从目录循环读图，适合离线调试；无需真实相机。",
+        "Basler" => "需安装 pylon 运行库；可枚举本机相机后点选序列号。",
+        "GigEVision" => "纯托管 GigE 协议，不依赖 pylon；请确认网卡 IP 与 UDP 防火墙。",
+        "Virtual" => "程序生成测试图，无需硬件；可用于标定/流程联调。",
+        _ => "该类型由外部工厂注册，高级参数请编辑 appsettings.json。",
+    };
+
+    /// <summary>当前类型是否支持设备枚举（File/Virtual 无）。</summary>
+    public bool CanEnumerateDevices =>
+        IsHardwareCamera && _registry.CanEnumerateDevices(EditType);
+
+    /// <summary>「打开目录」仅 File 回放有效。</summary>
+    public bool ShowOpenFolderButton => IsFile;
+
+    /// <summary>棋盘格单元格大小仅 Virtual + Chessboard 图案需要。</summary>
+    public bool ShowChessCellField =>
+        IsVirtual && string.Equals(EditPattern, "Chessboard", StringComparison.OrdinalIgnoreCase);
+
+    public string EnumerateDevicesLabel =>
+        IsGigEVision ? "发现 GigE" : "枚举设备";
+
+    public string EnumeratedDevicesCaption =>
+        IsGigEVision ? "本机 GigE 相机（选中填入序列号/IP）" : "本机 Basler 相机（选中填入序列号）";
+
+    private void NotifyTypePanelProperties()
     {
         OnPropertyChanged(nameof(IsFile));
         OnPropertyChanged(nameof(IsBasler));
+        OnPropertyChanged(nameof(IsGigEVision));
+        OnPropertyChanged(nameof(IsHardwareCamera));
         OnPropertyChanged(nameof(IsVirtual));
         OnPropertyChanged(nameof(IsUnknownType));
+        OnPropertyChanged(nameof(TypeParamsHeader));
+        OnPropertyChanged(nameof(TypeParamsHint));
+        OnPropertyChanged(nameof(CanEnumerateDevices));
+        OnPropertyChanged(nameof(ShowOpenFolderButton));
+        OnPropertyChanged(nameof(ShowChessCellField));
+        OnPropertyChanged(nameof(EnumerateDevicesLabel));
+        OnPropertyChanged(nameof(EnumeratedDevicesCaption));
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
+    }
+
+    partial void OnEditTypeChanged(string value)
+    {
+        NotifyTypePanelProperties();
         // 切换类型时把其他类型的字段重置为默认，避免残留值误存进新类型配置
         ResetFieldsForOtherTypes();
+        BaslerDevices.Clear();
+        HasBaslerDevices = false;
+        SelectedBaslerDevice = null;
     }
+
+    partial void OnEditPatternChanged(string value)
+    {
+        OnPropertyChanged(nameof(ShowChessCellField));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(UnsavedHint));
+    }
+
+    /// <summary>ComboBox 切换类型时若绑定未触发 PropertyChanged，由页面 code-behind 调用。</summary>
+    public void OnEditTypeSelectionChanged() => NotifyTypePanelProperties();
 
     /// <summary>重置非当前类型的编辑字段（EditIntervalMs 为 File/Virtual 共用，保留）。</summary>
     private void ResetFieldsForOtherTypes()
     {
         if (!IsFile)
             EditFolder = "";
-        if (!IsBasler)
+        if (!IsHardwareCamera)
         {
             EditDeviceId = "";
             EditExposureUs = "";
@@ -345,6 +420,9 @@ public partial class CamerasViewModel : ObservableObject
         _switching = true;
         Selected = Items.FirstOrDefault(i => i.Id == Selected?.Id) ?? Items.FirstOrDefault();
         _switching = false;
+        // Refresh 在 _switching 内改 Selected 会跳过 OnSelectedChanged，须显式同步编辑区与调光面板
+        if (Selected is not null)
+            ApplySelectedItem(Selected);
         Message = $"共 {Items.Count} 台相机";
     }
 
@@ -357,7 +435,7 @@ public partial class CamerasViewModel : ObservableObject
 
     private static string Summarize(CameraConfig c) => c.Type switch
     {
-        "Basler" => string.IsNullOrWhiteSpace(c.DeviceId) ? "自动选择第一台" : $"SN {c.DeviceId}",
+        "Basler" or "GigEVision" => string.IsNullOrWhiteSpace(c.DeviceId) ? "自动选择第一台" : $"SN/IP {c.DeviceId}",
         "Virtual" => $"{c.Width}×{c.Height} · {c.Pattern}",
         _ => c.Folder,
     };
@@ -377,6 +455,8 @@ public partial class CamerasViewModel : ObservableObject
         }
         if (string.Equals(c.Type, "Basler", StringComparison.OrdinalIgnoreCase))
             return "pylon 未安装或相机未连接";
+        if (string.Equals(c.Type, "GigEVision", StringComparison.OrdinalIgnoreCase))
+            return "网口未发现 GigE Vision 相机";
         return "初始化失败";
     }
 
@@ -450,7 +530,7 @@ public partial class CamerasViewModel : ObservableObject
         }
 
         // 超时预算校验：GrabTimeoutMs 必须小于总超时 TimeoutMs，且为正数
-        if (string.Equals(entry.Type, "Basler", StringComparison.OrdinalIgnoreCase))
+        if (IsHardwareType(entry.Type))
         {
             if (entry.GrabTimeoutMs <= 0)
             {
@@ -512,6 +592,7 @@ public partial class CamerasViewModel : ObservableObject
         switch (EditType)
         {
             case "Basler":
+            case "GigEVision":
                 entry.DeviceId = EditDeviceId.Trim();
                 entry.ExposureTimeUs = ParseOptional(EditExposureUs, "曝光时间");
                 entry.Gain = ParseOptional(EditGain, "增益");
@@ -626,20 +707,18 @@ public partial class CamerasViewModel : ObservableObject
             BitmapSource source;
             if (_cameras.TryGet(id, out var existing) && existing is not null)
             {
-                // 已注册：直接用运行时实例（与产线链路同一实例，避免重复连接同一台相机）
                 source = await Task.Run(() =>
                 {
-                    using var frame = existing.Grab();
+                    using var frame = _cameras.Grab(id);
                     return ImageConverter.ToBitmapSource(frame.Image);
                 });
             }
             else
             {
-                // 未注册：按当前编辑内容临时构造（先试后存）
                 source = await Task.Run(() =>
                 {
                     using var camera = CreateCamera(entry);
-                    using var frame = camera.Grab();
+                    using var frame = _cameras.Grab(camera);
                     return ImageConverter.ToBitmapSource(frame.Image);
                 });
             }
@@ -681,7 +760,9 @@ public partial class CamerasViewModel : ObservableObject
         _previewTimer.Start();
     }
 
-    private void StopPreview()
+    /// <summary>停止实时预览。页面离开时（Unloaded）也必须调用——定时器属于进程级单例
+    /// ViewModel，不随页面销毁，不停就会在后台持续 Grab 占用相机。</summary>
+    public void StopPreview()
     {
         _previewTimer.Stop();
         _previewTickBusy = false;
@@ -726,7 +807,7 @@ public partial class CamerasViewModel : ObservableObject
             {
                 source = await Task.Run(() =>
                 {
-                    using var frame = existing.Grab();
+                    using var frame = _cameras.Grab(id);
                     return ImageConverter.ToBitmapSource(frame.Image);
                 });
             }
@@ -735,7 +816,7 @@ public partial class CamerasViewModel : ObservableObject
                 source = await Task.Run(() =>
                 {
                     using var camera = CreateCamera(entry);
-                    using var frame = camera.Grab();
+                    using var frame = _cameras.Grab(camera);
                     return ImageConverter.ToBitmapSource(frame.Image);
                 });
             }
@@ -762,21 +843,22 @@ public partial class CamerasViewModel : ObservableObject
         HasBaslerDevices = false;
         try
         {
-            Message = "枚举 Basler 设备中…";
-            // 设备枚举能力经工厂注册表查询（IDeviceEnumerableFactory），不依赖具体品牌类；
-            // pylon 枚举可能耗时（网络相机超时），后台执行避免冻结 UI
-            var devices = await Task.Run(() => _registry.EnumerateDevices("Basler"));
+            Message = "枚举设备中…";
+            var type = EditType;
+            var devices = await Task.Run(() => _registry.EnumerateDevices(type));
             foreach (var d in devices)
                 BaslerDevices.Add(d);
             HasBaslerDevices = devices.Count > 0;
             SelectedBaslerDevice = BaslerDevices.FirstOrDefault();
             Message = devices.Count > 0
-                ? $"发现 {devices.Count} 台 Basler 相机，选择后自动填入序列号"
-                : "未发现 Basler 相机（检查 pylon 安装、相机供电与网线）";
+                ? $"发现 {devices.Count} 台设备，选择后自动填入序列号/IP"
+                : string.Equals(type, "GigEVision", StringComparison.OrdinalIgnoreCase)
+                    ? "未发现 GigE Vision 相机（检查网线、IP 网段与 UDP 防火墙）"
+                    : "未发现 Basler 相机。若 pylon Viewer 能看到，请先完全退出 Viewer 再枚举，并填写序列号";
         }
         catch (Exception ex)
         {
-            Message = $"枚举 Basler 设备失败: {ex.Message}（检查 pylon 运行库安装）";
+            Message = $"枚举设备失败: {ex.Message}";
         }
     }
 
@@ -882,7 +964,7 @@ public partial class CamerasViewModel : ObservableObject
             {
                 exposure.TrySetExposureTimeUs(ExposureUs);
                 exposure.TrySetGain(Gain);
-                using var frame = camera.Grab();
+                using var frame = _cameras.Grab(id);
                 return ImageConverter.ToBitmapSource(frame.Image);
             });
             PreviewImage = source;
@@ -911,9 +993,9 @@ public partial class CamerasViewModel : ObservableObject
             return;
 
         var entry = _cfg.Cameras.FirstOrDefault(c => string.Equals(c.Id, id, StringComparison.OrdinalIgnoreCase));
-        if (entry is null || !string.Equals(entry.Type, "Basler", StringComparison.OrdinalIgnoreCase))
+        if (entry is null || !IsHardwareType(entry.Type))
         {
-            Message = $"相机 {id} 不是 Basler 类型，无法写回光度参数";
+            Message = $"相机 {id} 不支持写回光度参数";
             return;
         }
 
@@ -967,6 +1049,12 @@ public partial class CamerasViewModel : ObservableObject
             return;
         }
 
+        ApplySelectedItem(value);
+    }
+
+    /// <summary>选中项 → 编辑区 + 运行时调光面板（Refresh 与 OnSelectedChanged 共用）。</summary>
+    private void ApplySelectedItem(CameraListItem value)
+    {
         IsNew = false;
         PreviewImage = null;
         PreviewCaption = "";
@@ -998,11 +1086,22 @@ public partial class CamerasViewModel : ObservableObject
         if (live is not null)
             // pylon 参数读取可能阻塞（断线/网络延迟），后台执行避免选中即卡 UI
             _ = LoadLiveParamsCore(live, value.Id);
-        else
-            Message = value.Registered
-                ? ""
-                : $"{value.Id} 未注册（" + (string.Equals(config.Type, "Basler", StringComparison.OrdinalIgnoreCase)
-                    ? "未安装 pylon、相机未连接或序列号不符"
-                    : "目录不存在或没有图片") + "）";
+        else if (value.Registered && IsHardwareType(config.Type))
+            Message = $"{value.Id} 已注册但无法调光（初始化占位或类型不支持 IExposureControl）";
+        else if (!value.Registered)
+            Message = $"{value.Id} 未注册（" + UnregisteredHint(config.Type) + "）";
     }
+
+    private static bool IsHardwareType(string type) =>
+        string.Equals(type, "Basler", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, "GigEVision", StringComparison.OrdinalIgnoreCase);
+
+    private static string UnregisteredHint(string type) => type switch
+    {
+        _ when string.Equals(type, "Basler", StringComparison.OrdinalIgnoreCase)
+            => "未安装 pylon、相机未连接或序列号不符",
+        _ when string.Equals(type, "GigEVision", StringComparison.OrdinalIgnoreCase)
+            => "网口未发现相机、IP 网段不符或 UDP 被防火墙拦截",
+        _ => "目录不存在或没有图片",
+    };
 }

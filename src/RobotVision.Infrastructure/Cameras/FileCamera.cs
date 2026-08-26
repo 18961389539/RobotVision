@@ -2,6 +2,7 @@ using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
+using RobotVision.Infrastructure;
 
 namespace RobotVision.Infrastructure.Cameras;
 
@@ -68,7 +69,7 @@ public sealed class FileCamera : ICamera
             file = _files[_index++];
         }
 
-        return new CameraFrame(ReadImage(file), DateTime.UtcNow);
+        return new CameraFrame(VisionImageCv.FromMat(ReadImage(file), ownsMat: true), DateTime.UtcNow);
     }
 
     /// <summary>

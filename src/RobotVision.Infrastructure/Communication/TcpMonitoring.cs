@@ -33,6 +33,13 @@ public sealed class TcpSession
         }
     }
 
+    /// <summary>行已读到、处理尚未完成：先刷新「最近请求」，便于监控页在取图/推理期间也能看到。</summary>
+    internal void NoteIncoming(string request)
+    {
+        Volatile.Write(ref _lastRequest, request);
+        Interlocked.Exchange(ref _lastRequestTicks, DateTime.Now.Ticks);
+    }
+
     internal void RecordRequest(string request, long bytesIn, long bytesOut)
     {
         Interlocked.Increment(ref _requests);

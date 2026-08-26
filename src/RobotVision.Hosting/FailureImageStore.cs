@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenCvSharp;
 using RobotVision.Core.Models;
+using RobotVision.Infrastructure;
 
 namespace RobotVision.Hosting;
 
@@ -90,6 +91,14 @@ public sealed class FailureImageStore
 
     /// <summary>最近一次留存时间（进程内）。</summary>
     public DateTime? LastSavedAt { get { lock (_sync) return _lastSaveTime; } }
+
+    public void Save(string recipeName, VisionImage image, VisionResult failure, FailureContext? context = null)
+    {
+        if (image.IsEmpty)
+            return;
+        using var mat = VisionImageCv.AsMat(image);
+        Save(recipeName, mat, failure, context);
+    }
 
     /// <summary>
     /// 提交一次失败留存（尽力而为）：克隆（或 1007 缩图）在调用线程完成并立即返回，

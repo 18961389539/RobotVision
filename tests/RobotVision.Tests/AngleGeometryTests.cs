@@ -1,5 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
+using RobotVision.Core.Models;
+using RobotVision.Infrastructure.Geometry;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -14,7 +16,7 @@ public class AngleGeometryTests
     public void MinAreaRect_ReturnsLongAxisAngle(double rotateDeg)
     {
         var points = RotatedRectPoints(500, 400, 300, 100, rotateDeg);
-        var (center, angle) = AngleGeometry.LongAxisFromMinAreaRect(points);
+        var (center, angle) = MinAreaRectGeometry.LongAxis(points);
 
         Assert.Equal(500, center.X, 1);
         Assert.Equal(400, center.Y, 1);
@@ -27,7 +29,7 @@ public class AngleGeometryTests
     [Fact]
     public void FromTwoPoints_CenterIsMidpoint()
     {
-        var (center, _) = AngleGeometry.FromTwoPoints(new Point2d(10, 20), new Point2d(30, 60));
+        var (center, _) = AngleGeometry.FromTwoPoints(new ImagePoint(10, 20), new ImagePoint(30, 60));
         Assert.Equal(20, center.X, 1e-9);
         Assert.Equal(40, center.Y, 1e-9);
     }
@@ -39,7 +41,7 @@ public class AngleGeometryTests
     [InlineData(10, 10, 0, 0, -135)]  // 对角线
     public void FromTwoPoints_AngleDirection(double ax, double ay, double bx, double by, double expected)
     {
-        var (_, angle) = AngleGeometry.FromTwoPoints(new Point2d(ax, ay), new Point2d(bx, by));
+        var (_, angle) = AngleGeometry.FromTwoPoints(new ImagePoint(ax, ay), new ImagePoint(bx, by));
         Assert.Equal(expected, angle, 1e-6);
     }
 

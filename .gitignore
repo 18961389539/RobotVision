@@ -16,3 +16,6 @@ data/*
 !data/calibration/
 !data/calibration/**
 models/*.onnx
+
+# CodeGraph 本地索引数据库（工具数据，不入库）
+.codegraph/

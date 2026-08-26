@@ -1,5 +1,6 @@
 using System.Text.Json;
 using RobotVision.Hosting;
+using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
@@ -114,7 +115,7 @@ file sealed class StubCamera(string id) : ICamera
     public CameraKind Kind => CameraKind.File;
     public bool Disposed { get; private set; }
     public CameraFrame Grab(CancellationToken ct = default) =>
-        new(new Mat(4, 4, MatType.CV_8UC3, Scalar.All(0)), DateTime.UtcNow);
+        new(VisionImageCv.FromMat(new Mat(4, 4, MatType.CV_8UC3, Scalar.All(0)), ownsMat: true), DateTime.UtcNow);
     public void Dispose() => Disposed = true;
 }
 
@@ -171,4 +172,87 @@ public class CameraManagerLifecycleTests
         Assert.False(manager.TryGet("missing", out var miss));
         Assert.Null(miss);
     }
+
+    [Fact]
+    public async Task GrabAsync_SameId_SerializesConcurrentCalls()
+    {
+        using var manager = new CameraManager();
+        var tracker = new GrabTracker();
+        var cam = new CountingCamera("cam", TimeSpan.FromMilliseconds(80), tracker);
+        manager.Register(cam);
+
+        var t1 = manager.GrabAsync("cam");
+        var t2 = manager.GrabAsync("cam");
+        var frames = await Task.WhenAll(t1, t2);
+        foreach (var frame in frames)
+            frame.Dispose();
+
+        Assert.Equal(1, tracker.MaxInFlight);
+        Assert.Equal(2, tracker.GrabCount);
+    }
+
+    [Fact]
+    public async Task GrabAsync_TempCamera_SharesGateWithRegisteredId()
+    {
+        using var manager = new CameraManager();
+        var tracker = new GrabTracker();
+        var registered = new CountingCamera("cam", TimeSpan.FromMilliseconds(80), tracker);
+        var temp = new CountingCamera("cam", TimeSpan.FromMilliseconds(80), tracker);
+        manager.Register(registered);
+
+        var t1 = manager.GrabAsync("cam");
+        var t2 = manager.GrabAsync(temp);
+        var frames = await Task.WhenAll(t1, t2);
+        foreach (var frame in frames)
+            frame.Dispose();
+
+        Assert.Equal(1, tracker.MaxInFlight);
+        Assert.Equal(2, tracker.GrabCount);
+    }
+}
+
+/// <summary>跨实例共享的取图并发计数。</summary>
+file sealed class GrabTracker
+{
+    private int _inFlight;
+    private int _grabCount;
+
+    public int MaxInFlight { get; private set; }
+
+    public int GrabCount => _grabCount;
+
+    public void Enter()
+    {
+        var n = Interlocked.Increment(ref _inFlight);
+        lock (this)
+            MaxInFlight = Math.Max(MaxInFlight, n);
+        Interlocked.Increment(ref _grabCount);
+    }
+
+    public void Leave() => Interlocked.Decrement(ref _inFlight);
+}
+
+/// <summary>慢取图桩：经共享 tracker 记录并发 Grab 峰值。</summary>
+file sealed class CountingCamera(string id, TimeSpan delay, GrabTracker tracker) : ICamera
+{
+    public string Id { get; } = id;
+    public CameraKind Kind => CameraKind.File;
+
+    public CameraFrame Grab(CancellationToken ct = default)
+    {
+        tracker.Enter();
+        try
+        {
+            Thread.Sleep(delay);
+            return new CameraFrame(
+                VisionImageCv.FromMat(new Mat(4, 4, MatType.CV_8UC3, Scalar.All(0)), ownsMat: true),
+                DateTime.UtcNow);
+        }
+        finally
+        {
+            tracker.Leave();
+        }
+    }
+
+    public void Dispose() { }
 }

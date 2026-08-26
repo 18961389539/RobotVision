@@ -11,44 +11,69 @@
     </Page.Resources>
 
     <Grid Margin="8">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="340" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
 
-        <!-- 左：模型文件列表 -->
-        <Grid Grid.Column="0" Margin="0,0,8,0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+        <!-- 主导图像区：完整 ImageViewer（ROI / 测量 / 分析工具栏） -->
+        <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
+            <ivc:ImageViewer ImageSource="{Binding ResultImage}" />
+        </Border>
 
-            <ui:Card Grid.Row="0" Margin="0,0,0,8" Padding="12">
-                <Grid>
+        <!-- 推理状态/结果角标（左上角，半透明黑底白字） -->
+        <Border Background="#66000000" CornerRadius="3" Padding="8,4" Margin="10"
+                HorizontalAlignment="Left" VerticalAlignment="Top" Panel.ZIndex="30">
+            <TextBlock Text="{Binding TestResult}" FontSize="11" Foreground="White"
+                       TextWrapping="Wrap" MaxWidth="520" />
+        </Border>
+
+        <!-- 列表收起时的「模型」重新打开按钮 -->
+        <Button HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12"
+                Content="模型" Padding="14,8" FontWeight="SemiBold"
+                Panel.ZIndex="30"
+                Command="{Binding ToggleListPanelCommand}">
+            <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsListPanelVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
+
+        <!-- 左：模型列表浮动面板（可折叠，与相机/配方页同构） -->
+        <Border Width="340" HorizontalAlignment="Left" VerticalAlignment="Top"
+                MaxHeight="640" Margin="12" Panel.ZIndex="20"
+                Background="#F01E2836"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8"
+                Visibility="{Binding IsListPanelVisible,
+                    Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" MaxHeight="400" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid Margin="10,10,10,6">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <ui:TextBlock FontTypography="BodyStrong" Text="ONNX 模型" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="{Binding Message}" Margin="16,0,0,0"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                               ToolTip="{Binding Message}"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    <ui:Button Grid.Column="2" Content="刷新" Command="{Binding RefreshCommand}" />
-                    <ui:Button Grid.Column="3" Content="打开模型目录" Margin="8,0,0,0"
-                               Command="{Binding OpenFolderCommand}" />
+                    <ui:TextBlock Text="ONNX 模型" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                    <ui:Button Grid.Column="1" Content="刷新" Padding="8,3" FontSize="11"
+                               Command="{Binding RefreshCommand}" />
+                    <Button Grid.Column="2" Content="收起" Padding="10,4" FontSize="12" Margin="6,0,0,0"
+                            Command="{Binding ToggleListPanelCommand}" />
                 </Grid>
-            </ui:Card>
 
-            <!-- 方案 B：模型文件卡片流（ListBox + WrapPanel，替代 DataGrid 白底） -->
-            <Border Grid.Row="1" Padding="6"
-                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{DynamicResource CardBorderBrush}"
-                    BorderThickness="1" CornerRadius="4">
-                <ListBox ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile}"
+                <TextBlock Grid.Row="1" Text="{Binding Message}" Margin="10,0,10,6"
+                           FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding Message}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                <ListBox Grid.Row="2" Margin="4,0,4,4" ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile}"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          Background="Transparent" BorderThickness="0">
                     <ListBox.ItemContainerStyle>
@@ -118,78 +143,71 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
-            </Border>
 
-            <!-- 卸载操作：模型文件被替换后需重新加载新会话（Unload 后下次推理自动重建） -->
-            <Grid Grid.Row="2" Margin="0,8,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <ui:Button Content="卸载选中" Command="{Binding UnloadCommand}" />
-                <ui:Button Grid.Column="1" Content="全部卸载" Margin="8,0,0,0"
-                           Command="{Binding UnloadAllCommand}" />
-                <ui:TextBlock Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"
-                              FontSize="11" TextWrapping="Wrap"
-                              Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                              Text="替换 .onnx 后先卸载再推理，避免继续使用旧会话；会话数超上限时自动回收最久未用的" />
+                <StackPanel Grid.Row="3" Margin="10,4,10,10">
+                    <ui:Button Content="打开模型目录" Padding="8,4" FontSize="11" Margin="0,0,0,8"
+                               HorizontalAlignment="Left"
+                               Command="{Binding OpenFolderCommand}" />
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:Button Content="卸载选中" Padding="8,4" FontSize="11"
+                                   Command="{Binding UnloadCommand}" />
+                        <ui:Button Grid.Column="1" Content="全部卸载" Margin="8,0,0,0" Padding="8,4" FontSize="11"
+                                   Command="{Binding UnloadAllCommand}" />
+                    </Grid>
+                    <TextBlock FontSize="10" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                               Text="替换 .onnx 后先卸载再推理，避免继续使用旧会话；会话数超上限时自动回收最久未用的" />
+                </StackPanel>
             </Grid>
-        </Grid>
+        </Border>
 
-        <!-- 右：图像主导 + 参数浮动面板（方案 A，与相机页同构） -->
-        <Grid Grid.Column="1">
+        <!-- 面板收起时的「参数」重新打开按钮 -->
+        <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
+                Content="参数" Padding="14,8" FontWeight="SemiBold"
+                Panel.ZIndex="30"
+                Command="{Binding ToggleParamPanelCommand}">
+            <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsParamPanelVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
 
-            <!-- 主导图像区：占满右栏，ImageViewer 支持缩放/平移/像素信息 -->
-            <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
-                <ivc:ImageViewer ImageSource="{Binding ResultImage}" IsToolbarVisible="False" />
-            </Border>
+        <!-- 右：参数浮动面板（可折叠） -->
+        <Border HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                Width="352" Margin="12" Panel.ZIndex="20"
+                Background="#F01E2836"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8"
+                Visibility="{Binding IsParamPanelVisible,
+                    Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-            <!-- 推理状态/结果角标（左上角，半透明黑底白字） -->
-            <Border Background="#66000000" CornerRadius="3" Padding="8,4" Margin="10"
-                    HorizontalAlignment="Left" VerticalAlignment="Top" Panel.ZIndex="30">
-                <TextBlock Text="{Binding TestResult}" FontSize="11" Foreground="White"
-                           TextWrapping="Wrap" MaxWidth="520" />
-            </Border>
+                <!-- 面板头：标题 + 收起 -->
+                <Grid Margin="12,12,12,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Text="模型测试" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="收起" Padding="10,4" FontSize="12"
+                            Command="{Binding ToggleParamPanelCommand}" />
+                </Grid>
 
-            <!-- 面板收起时的"参数"重新打开按钮 -->
-            <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
-                    Content="参数" Padding="14,8" FontWeight="SemiBold"
-                    Panel.ZIndex="30"
-                    Command="{Binding ToggleParamPanelCommand}">
-                <Button.Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsParamPanelVisible}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Button.Style>
-            </Button>
-
-            <!-- 参数浮动面板（右上角，可折叠） -->
-            <Border HorizontalAlignment="Right" VerticalAlignment="Top"
-                    Width="352" Margin="12" Panel.ZIndex="20"
-                    Background="#F01E2836"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8"
-                    Visibility="{Binding IsParamPanelVisible,
-                        Converter={StaticResource BoolToVisibilityConverter}}">
-                <ScrollViewer MaxHeight="720" VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="12">
-
-                        <!-- 面板头：标题 + 收起 -->
-                        <Grid Margin="0,0,0,10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <ui:TextBlock Text="模型测试" FontTypography="BodyStrong" VerticalAlignment="Center" />
-                            <Button Grid.Column="1" Content="收起" Padding="10,4" FontSize="12"
-                                    Command="{Binding ToggleParamPanelCommand}" />
-                        </Grid>
-
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,12">
+                    <StackPanel>
                         <!-- 模型与任务 -->
                         <ui:CardExpander Header="模型与任务" IsExpanded="True" Margin="0,0,0,6">
                             <StackPanel Margin="0,10,0,0">
@@ -197,51 +215,86 @@
                                     <TextBlock Text="模型" Margin="0,0,0,4" />
                                     <TextBox Text="{Binding SelectedFile.Name, Mode=OneWay}" IsReadOnly="True" />
                                 </StackPanel>
-                                <UniformGrid Columns="2">
-                                    <StackPanel Margin="0,0,10,8">
-                                        <TextBlock Text="推理任务" Margin="0,0,0,4" />
-                                        <ComboBox ItemsSource="{Binding TaskOptions}"
-                                                  SelectedValuePath="Value"
-                                                  SelectedValue="{Binding SelectedTask}"
-                                                  DisplayMemberPath="Label" />
+                                <StackPanel Margin="0,0,0,8">
+                                    <TextBlock Text="推理任务" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{Binding TaskOptions}"
+                                              SelectedValuePath="Value"
+                                              SelectedValue="{Binding SelectedTask}"
+                                              DisplayMemberPath="Label"
+                                              ToolTip="选择该模型的推理任务类型（检测/分类/分割等）" />
+                                </StackPanel>
+                                <ui:CardExpander Header="高级参数" IsExpanded="False" Margin="0,0,0,8">
+                                    <StackPanel Margin="0,10,0,0">
+                                        <TextBlock Text="{Binding TaskParamsHint}" FontSize="11" TextWrapping="Wrap"
+                                                   Margin="0,0,0,8"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                        <WrapPanel>
+                                            <StackPanel Margin="0,0,10,8" Width="148"
+                                                        Visibility="{Binding ShowConfidence,
+                                                            Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <TextBlock Text="置信度阈值" Margin="0,0,0,4" />
+                                                <ui:NumberBox Value="{Binding Confidence}" Minimum="0.01" Maximum="0.99"
+                                                              SmallChange="0.05" SpinButtonPlacementMode="Compact" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,10,8" Width="148"
+                                                        Visibility="{Binding ShowIou,
+                                                            Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <TextBlock Text="IoU 阈值" Margin="0,0,0,4" />
+                                                <ui:NumberBox Value="{Binding Iou}" Minimum="0.01" Maximum="0.99"
+                                                              SmallChange="0.05" SpinButtonPlacementMode="Compact" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,0,8" Width="148"
+                                                        Visibility="{Binding ShowPixelConfidence,
+                                                            Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <TextBlock Text="像素阈值（分割）" Margin="0,0,0,4" />
+                                                <ui:NumberBox Value="{Binding PixelConfidence}" Minimum="0.01" Maximum="0.99"
+                                                              SmallChange="0.05" SpinButtonPlacementMode="Compact" />
+                                            </StackPanel>
+                                        </WrapPanel>
                                     </StackPanel>
-                                    <StackPanel Margin="0,0,0,8">
-                                        <TextBlock Text="IoU 阈值" Margin="0,0,0,4" />
-                                        <ui:NumberBox Value="{Binding Iou}" Minimum="0.01" Maximum="0.99"
-                                                      SmallChange="0.05" SpinButtonPlacementMode="Compact" />
-                                    </StackPanel>
-                                    <StackPanel Margin="0,0,10,8">
-                                        <TextBlock Text="置信度阈值" Margin="0,0,0,4" />
-                                        <ui:NumberBox Value="{Binding Confidence}" Minimum="0.01" Maximum="0.99"
-                                                      SmallChange="0.05" SpinButtonPlacementMode="Compact" />
-                                    </StackPanel>
-                                    <StackPanel Margin="0,0,0,8">
-                                        <TextBlock Text="像素阈值（分割）" Margin="0,0,0,4" />
-                                        <ui:NumberBox Value="{Binding PixelConfidence}" Minimum="0.01" Maximum="0.99"
-                                                      SmallChange="0.05" SpinButtonPlacementMode="Compact" />
-                                    </StackPanel>
-                                </UniformGrid>
+                                </ui:CardExpander>
                                 <ui:TextBlock FontSize="11" TextWrapping="Wrap"
                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                               Text="测试推理不经过配方/相机/标定链路，直接验证模型输出；与产线共享会话缓存，互不并发" />
                             </StackPanel>
                         </ui:CardExpander>
 
-                        <!-- 测试图片 -->
-                        <ui:CardExpander Header="测试图片" IsExpanded="True" Margin="0,0,0,6">
+                        <!-- 测试图片目录 -->
+                        <ui:CardExpander Header="测试图片目录" IsExpanded="True" Margin="0,0,0,6">
                             <StackPanel Margin="0,10,0,0">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBox Text="{Binding TestImagePath, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBox Text="{Binding TestImageFolder, UpdateSourceTrigger=PropertyChanged}"
+                                           ToolTip="目录内所有 bmp/jpg/png/tif 将批量推理" />
                                     <ui:Button Grid.Column="1" Content="浏览..." Margin="8,0,0,0"
-                                               Command="{Binding BrowseTestImageCommand}" />
+                                               Command="{Binding BrowseTestImageFolderCommand}" />
+                                    <ui:Button Grid.Column="2" Content="打开" Margin="8,0,0,0"
+                                               Command="{Binding OpenTestImageFolderCommand}" />
+                                </Grid>
+                                <TextBlock Text="{Binding TestImageFolderHint}" FontSize="11" Margin="0,6,0,0"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:Button Content="上一张" Padding="8,4"
+                                               Command="{Binding ShowPrevFolderResultCommand}" />
+                                    <ui:Button Grid.Column="1" Content="下一张" Margin="8,0,0,0" Padding="8,4"
+                                               Command="{Binding ShowNextFolderResultCommand}" />
+                                    <TextBlock Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                               Text="{Binding FolderResultPosition}" />
                                 </Grid>
                                 <ui:TextBlock FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                              Text="默认打开上次图片所在目录；结果图叠加模型原始输出（框/掩码/关键点）" />
+                                              Text="开始推理将遍历目录内全部图片；可用上一张/下一张查看各张结果" />
                             </StackPanel>
                         </ui:CardExpander>
 
@@ -270,7 +323,7 @@
 
                     </StackPanel>
                 </ScrollViewer>
-            </Border>
-        </Grid>
+            </Grid>
+        </Border>
     </Grid>
 </Page>

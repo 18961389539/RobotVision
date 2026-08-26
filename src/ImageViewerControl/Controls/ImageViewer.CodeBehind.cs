@@ -44,8 +44,15 @@ namespace ImageViewer.Controls
             _imageViewStateController.HandleRootGridSizeChanged();
         }
 
+        private Window? _hostWindow;
+
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
+            ApplyToolbarPreference();
+            _hostWindow = Window.GetWindow(this);
+            if (_hostWindow is not null)
+                _hostWindow.PreviewKeyDown += OnHostWindowPreviewKeyDown;
+
             _controlComposition.SessionController.StartAutoSave();
             _externalImageSourceBindingController.Refresh();
             _imageSourceController.HandleLoaded();
@@ -53,6 +60,12 @@ namespace ImageViewer.Controls
 
         private async void OnUnloaded(object sender, RoutedEventArgs e)
         {
+            if (_hostWindow is not null)
+            {
+                _hostWindow.PreviewKeyDown -= OnHostWindowPreviewKeyDown;
+                _hostWindow = null;
+            }
+
             _viewportOverlayRefreshScheduler.StopScheduling();
             _analysisRefreshScheduler.StopScheduling();
             _controlComposition.SessionController.StopAutoSave();
@@ -172,6 +185,13 @@ namespace ImageViewer.Controls
                 return;
             }
 
+            if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.T)
+            {
+                ToggleFloatingToolbar();
+                e.Handled = true;
+                return;
+            }
+
             _interactionController.HandleKeyDown(e);
         }
 
@@ -180,10 +200,34 @@ namespace ImageViewer.Controls
         private void OnContextMenuOpened(object sender, RoutedEventArgs e)
         {
             menuSearchBox.Text = string.Empty;
+            showFloatingToolbarMenuItem.IsChecked = IsToolbarVisible;
             _contextMenuController.HandleOpened();
             menuSearchBox.Dispatcher.BeginInvoke(
                 () => menuSearchBox.Focus(),
                 DispatcherPriority.Input);
+        }
+
+        private void OnToggleFloatingToolbarClick(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuItem menuItem)
+                IsToolbarVisible = menuItem.IsChecked;
+
+            Focus();
+            UpdateContextMenuState();
+        }
+
+        private void OnHostWindowPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (!IsVisible || !IsMouseOver)
+                return;
+
+            if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.T)
+            {
+                ToggleFloatingToolbar();
+                Focus();
+                UpdateContextMenuState();
+                e.Handled = true;
+            }
         }
 
         private void OnMenuSearchTextChanged(object sender, TextChangedEventArgs e)

@@ -25,9 +25,15 @@
                 </Grid.ColumnDefinitions>
                 <ui:TextBlock FontTypography="BodyStrong" Text="{Binding ServiceStatus}"
                               VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding SummaryText}" Margin="16,0,0,0"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding SummaryText}"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding SummaryText}" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding SummaryText}"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="{Binding LastTcpLineText}" FontFamily="Consolas" FontSize="12"
+                               Margin="0,2,0,0" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding LastTcpLineText}"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                </StackPanel>
                 <ui:Button Grid.Column="2" Content="{Binding ToggleButtonLabel}"
                            Command="{Binding ToggleServiceCommand}" />
                 <ui:Button Grid.Column="3" Content="清空记录" Margin="8,0,0,0"
@@ -65,8 +71,88 @@
             </UniformGrid>
         </ui:Card>
 
-        <!-- 方案 A：三张表 Tab 收纳（各自全尺寸，无固定 230px 挤压） -->
-        <TabControl Grid.Row="2">
+        <!-- 默认打开「请求历史」：PING / 未知序列号等不会进入「运行统计」 -->
+        <TabControl Grid.Row="2" SelectedIndex="0">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="请求历史" />
+                        <TextBlock Text="{Binding Requests.Count}" Margin="6,0,0,0"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid>
+                    <TextBlock Text="暂无 TCP 请求。确认顶部为「运行中」。报文可带或不带换行（LF）；未知序列号会显示 ERR,1001，不会出现在「运行统计」。"
+                               TextWrapping="Wrap" Margin="8" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasRequests}" Value="False">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <ListBox ItemsSource="{Binding Requests}" FontFamily="Consolas"
+                             Background="Transparent" BorderThickness="0"
+                             VirtualizingStackPanel.IsVirtualizing="False"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="BorderThickness" Value="0" />
+                                <Setter Property="Padding" Value="4,2" />
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="86" />
+                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="46" />
+                                        <ColumnDefinition Width="64" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding TimeText}" FontSize="11" TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Client}" FontSize="11"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Request}" FontSize="11"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="3" Text="{Binding ReplyTrimmed}" FontSize="11"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Grid.Column="4" Text="{Binding Result}" FontSize="11"
+                                               FontWeight="SemiBold">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Ok}" Value="True">
+                                                        <Setter Property="Foreground" Value="#6BCB77" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Ok}" Value="False">
+                                                        <Setter Property="Foreground" Value="#FF6B6B" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Grid.Column="5" Text="{Binding ElapsedText}" FontSize="11"
+                                               TextAlignment="Right"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </TabItem>
+
             <TabItem>
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal">
@@ -75,9 +161,24 @@
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </TabItem.Header>
-                <!-- 方案 A：配方行 + 成功率进度条（替代 DataGrid） -->
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                    <ItemsControl ItemsSource="{Binding StatsRows}">
+                <!-- 仅统计进入 VisionService 的配方触发；TCP 协议错误（1001 未知序列号等）只在「请求历史」 -->
+                <Grid>
+                    <TextBlock Text="暂无配方触发。此处只统计真正跑过视觉管线的配方；#1 未绑定序列号时只会在「请求历史」出现 ERR,1001。"
+                               TextWrapping="Wrap" Margin="8" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasStats}" Value="False">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                        <ItemsControl ItemsSource="{Binding StatsRows}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Margin="0,0,0,6" Padding="10,7"
@@ -133,6 +234,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+                </Grid>
             </TabItem>
 
             <TabItem>
@@ -194,71 +296,6 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
-            </TabItem>
-
-            <TabItem>
-                <TabItem.Header>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="请求历史" />
-                        <TextBlock Text="{Binding Requests.Count}" Margin="6,0,0,0"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    </StackPanel>
-                </TabItem.Header>
-                <!-- 方案 A：等宽日志流（OK 绿 / ERR 红，替代 DataGrid） -->
-                <ListBox ItemsSource="{Binding Requests}" FontFamily="Consolas"
-                         Background="Transparent" BorderThickness="0"
-                         VirtualizingStackPanel.IsVirtualizing="False"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem">
-                            <Setter Property="Background" Value="Transparent" />
-                            <Setter Property="BorderThickness" Value="0" />
-                            <Setter Property="Padding" Value="4,2" />
-                        </Style>
-                    </ListBox.ItemContainerStyle>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="86" />
-                                    <ColumnDefinition Width="130" />
-                                    <ColumnDefinition Width="150" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="46" />
-                                    <ColumnDefinition Width="64" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="{Binding TimeText}" FontSize="11" TextTrimming="CharacterEllipsis"
-                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                <TextBlock Grid.Column="1" Text="{Binding Client}" FontSize="11"
-                                           TextTrimming="CharacterEllipsis"
-                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                <TextBlock Grid.Column="2" Text="{Binding Request}" FontSize="11"
-                                           TextTrimming="CharacterEllipsis" />
-                                <TextBlock Grid.Column="3" Text="{Binding ReplyTrimmed}" FontSize="11"
-                                           TextTrimming="CharacterEllipsis"
-                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                <TextBlock Grid.Column="4" Text="{Binding Result}" FontSize="11"
-                                           FontWeight="SemiBold">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Ok}" Value="True">
-                                                    <Setter Property="Foreground" Value="#6BCB77" />
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding Ok}" Value="False">
-                                                    <Setter Property="Foreground" Value="#FF6B6B" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                                <TextBlock Grid.Column="5" Text="{Binding ElapsedText}" FontSize="11"
-                                           TextAlignment="Right"
-                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                            </Grid>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
             </TabItem>
         </TabControl>
     </Grid>

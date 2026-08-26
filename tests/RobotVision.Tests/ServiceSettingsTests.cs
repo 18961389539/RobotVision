@@ -49,13 +49,13 @@ public class TcpAccessControlTests : IDisposable
         using var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Loopback, port);
         using var stream = client.GetStream();
-        await stream.WriteAsync(Encoding.UTF8.GetBytes("PING\n"));
+        await stream.WriteAsync(Encoding.ASCII.GetBytes("PING\n"));
         var buffer = new byte[256];
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         try
         {
             var read = await stream.ReadAsync(buffer, timeoutCts.Token);
-            return read > 0 && Encoding.UTF8.GetString(buffer, 0, read).Trim() == "PONG";
+            return read > 0 && Encoding.ASCII.GetString(buffer, 0, read).Trim() == "PONG";
         }
         catch (IOException)
         {
@@ -104,10 +104,10 @@ public class TcpAccessControlTests : IDisposable
         using var first = new TcpClient();
         await first.ConnectAsync(IPAddress.Loopback, _tcp.Port);
         using var firstStream = first.GetStream();
-        await firstStream.WriteAsync(Encoding.UTF8.GetBytes("PING\n"));
+        await firstStream.WriteAsync(Encoding.ASCII.GetBytes("PING\n"));
         var buffer = new byte[256];
         var read = await firstStream.ReadAsync(buffer);
-        Assert.Equal("PONG", Encoding.UTF8.GetString(buffer, 0, read).Trim());
+        Assert.Equal("PONG", Encoding.ASCII.GetString(buffer, 0, read).Trim());
 
         Assert.False(await CanExchangePingAsync(_tcp.Port));
         Assert.Equal(1, _tcp.TotalConnections);
@@ -123,7 +123,7 @@ public class TcpAccessControlTests : IDisposable
         await first.ConnectAsync(IPAddress.Loopback, _tcp.Port);
         using var firstStream = first.GetStream();
         // PONG 往返确保服务端已完成该连接的注册，再收紧上限
-        await firstStream.WriteAsync(Encoding.UTF8.GetBytes("PING\n"));
+        await firstStream.WriteAsync(Encoding.ASCII.GetBytes("PING\n"));
         var buffer = new byte[256];
         await firstStream.ReadAsync(buffer);
 

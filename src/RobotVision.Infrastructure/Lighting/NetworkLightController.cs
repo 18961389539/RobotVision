@@ -176,22 +176,39 @@ public sealed class NetworkLightController : ILightController
         EnsureTcpConnected();
         if (_tcp is null || _tcpStream is null)
             return;
-        _tcpStream.Write(frame, 0, frame.Length);
-        _tcpStream.Flush();
+        try
+        {
+            _tcpStream.Write(frame, 0, frame.Length);
+            _tcpStream.Flush();
+        }
+        catch (Exception)
+        {
+            // 写失败 = 连接已坏（对端断电/半开）：立即作废连接，下次发送强制重连。
+            // 不清理的话 Connected 属性在半开状态下仍可能为 true，之后每帧都静默写进死连接。
+            ResetTcp();
+            throw;
+        }
     }
 
-    /// <summary>确保 TCP 已连接；未连接时按重试次数尝试（参照 ECLightControl.ReconnectTCP）。</summary>
+    /// <summary>确保 TCP 已连接；未连接/半开时按重试次数尝试（参照 ECLightControl.ReconnectTCP）。</summary>
     private void EnsureTcpConnected()
     {
         if (_tcp is { Connected: true } && _tcpStream is not null)
-            return;
+        {
+            // 半开检测：Connected 只反映最后一次 I/O 时的状态；对端异常断开（断电/拔线）
+            // 后它仍为 true。Poll(SelectRead)+Available==0 是已关闭连接的特征。
+            var socket = _tcp.Client;
+            var halfOpen = socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0;
+            if (!halfOpen)
+                return;
+            ResetTcp();
+        }
 
         for (var attempt = 0; attempt <= _reconnectAttempts; attempt++)
         {
             try
             {
-                _tcpStream?.Dispose();
-                _tcp?.Dispose();
+                ResetTcp();
 
                 var client = new TcpClient
                 {
@@ -215,11 +232,18 @@ public sealed class NetworkLightController : ILightController
             }
             catch
             {
-                _tcp?.Dispose();
-                _tcp = null;
-                _tcpStream = null;
+                ResetTcp();
             }
         }
+    }
+
+    /// <summary>作废当前 TCP 连接（调用方须已持有 _sendLock）。</summary>
+    private void ResetTcp()
+    {
+        try { _tcpStream?.Dispose(); } catch { /* 尽力而为 */ }
+        try { _tcp?.Dispose(); } catch { /* 尽力而为 */ }
+        _tcpStream = null;
+        _tcp = null;
     }
 
     private void StartHeartbeat()

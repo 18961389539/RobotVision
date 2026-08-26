@@ -31,11 +31,12 @@
       },
       "Microsoft.Extensions.Logging.Abstractions": {
         "type": "Direct",
-        "requested": "[8.0.2, )",
-        "resolved": "8.0.2",
-        "contentHash": "nroMDjS7hNBPtkZqVBbSiQaQjWRDxITI8Y7XnDs97rqG3EbzVTNLZQf7bIeUJcaHOV8bca47s1Uxq94+2oGdxA==",
+        "requested": "[10.0.5, )",
+        "resolved": "10.0.5",
+        "contentHash": "9HOdqlDtPptVcmKAjsQ/Nr5Rxfq6FMYLdhvZh1lVmeKR738qeYecQD7+ldooXf+u2KzzR1kafSphWngIM3C6ug==",
         "dependencies": {
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2"
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.5",
+          "System.Diagnostics.DiagnosticSource": "10.0.5"
         }
       },
       "CommunityToolkit.Common": {
@@ -442,15 +443,8 @@
       },
       "System.Diagnostics.DiagnosticSource": {
         "type": "Transitive",
-        "resolved": "4.3.0",
-        "contentHash": "tD6kosZnTAGdrEa0tZSuFyunMbt/5KYDnHdndJYGqZoNy00XVXyACd5d6KnE1YgYv3ne2CjtAfNXo/fwEhnKUA==",
-        "dependencies": {
-          "System.Collections": "4.3.0",
-          "System.Diagnostics.Tracing": "4.3.0",
-          "System.Reflection": "4.3.0",
-          "System.Runtime": "4.3.0",
-          "System.Threading": "4.3.0"
-        }
+        "resolved": "10.0.5",
+        "contentHash": "CCbzHQ26L3jskdwHh+4bxxW84lUMIrAAmeSlpO69AlrQV0DKbj1/I+feLaLSuZeqXPr9UlSy0OcgZoXOk2a6/g=="
       },
       "System.Diagnostics.Tools": {
         "type": "Transitive",
@@ -1116,9 +1110,9 @@
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "CentralTransitive",
-        "requested": "[8.0.2, )",
-        "resolved": "8.0.2",
-        "contentHash": "3iE7UF7MQkCv1cxzCahz+Y/guQbTqieyxyaWKhrRO91itI9cOKO76OHeQDahqG4MmW5umr3CcCvGmK92lWNlbg=="
+        "requested": "[10.0.5, )",
+        "resolved": "10.0.5",
+        "contentHash": "iVMtq9eRvzyhx8949EGT0OCYJfXi737SbRVzWXE5GrOgGj5AaZ9eUuxA/BSUfmOMALKn/g8KfFaNQw0eiB3lyA=="
       }
     }
   }

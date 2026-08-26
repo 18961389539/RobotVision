@@ -17,6 +17,7 @@
                            VerticalAlignment="Center"
                            Foreground="White" />
                 <Slider x:Name="sliceSlider"
+                        ToolTip="拖动浏览 3D 体数据的不同切片层（轴向序号 0–N）；与上方状态文字同步"
                         Minimum="0"
                         Maximum="0"
                         IsSnapToTickEnabled="True"

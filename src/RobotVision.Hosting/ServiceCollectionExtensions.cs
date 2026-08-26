@@ -35,7 +35,7 @@ public static class ServiceCollectionExtensions
         // （见文件底部 BootWarningLogService，AddRobotVision 末尾统一注册）。
         var bootWarnings = new List<string>();
 
-        var recipesFolder = cfg.ResolveRecipesFolder();
+        var recipesFolder = cfg.ResolveAndPrepareRecipesFolder();
         var modelsFolder = cfg.ResolveModelsFolder();
         var calibrationFolder = cfg.ResolveCalibrationFolder();
         foreach (var (label, resolved) in new[]
@@ -50,7 +50,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CameraConfigStore>(new CameraConfigStore(cfg));
         services.AddSingleton<LightingConfigStore>(new LightingConfigStore(cfg));
 
-        // 相机工厂注册表：内置 File/Basler/Virtual 已注册，第三方品牌在启动早期
+        // 相机工厂注册表：内置 File/Basler/GigEVision/Virtual 已注册，第三方品牌在启动早期
         // 调 CameraTypeRegistry.Default.Register(...) 一行接入，此处与 UI 均从注册表查询。
         services.AddSingleton(CameraTypeRegistry.Default);
 
@@ -217,12 +217,27 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(sp =>
         {
             var vision = sp.GetRequiredService<VisionService>();
+            var recipes = sp.GetRequiredService<RecipeLoader>();
             return new TcpServerManager(
                 cfg.IpAddress,
                 cfg.TcpPort,
                 cfg.TimeoutMs,
-                // TRIGGER,配方名 → pose=null：OnArm 已记录示教位姿时 1014；带 X,Y,RZ 则 1012 校验
-                (recipe, pose, ct) => sp.GetRequiredService<VisionService>().RunAsync(recipe, pose, ct),
+                (recipeKey, pose, ct) =>
+                {
+                    var (name, resolveError) = recipes.ResolveTriggerKey(recipeKey);
+                    if (resolveError is not null)
+                    {
+                        var code = resolveError switch
+                        {
+                            "INVALID_RECIPE_NAME" or "INVALID_SERIAL" or "TRIGGER_ARGUMENT_COUNT"
+                                or "INVALID_POSE_NUMBER" => VisionErrorCode.InvalidTriggerArgument,
+                            _ => VisionErrorCode.UnknownRecipe,
+                        };
+                        return Task.FromResult(VisionResult.Fail(recipeKey, code, resolveError, 0));
+                    }
+
+                    return vision.RunAsync(name!, pose, ct);
+                },
                 sp.GetRequiredService<ILogger<TcpServerManager>>())
             {
                 MaxConnections = cfg.MaxConnections,

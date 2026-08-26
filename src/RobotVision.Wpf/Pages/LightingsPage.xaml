@@ -18,7 +18,7 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!-- 左：光源控制器列表 -->
+        <!-- 左：光源控制器列表（仅列表，添加/参数在右侧） -->
         <Border Grid.Column="0" Margin="0,0,8,0" Padding="8"
                 VerticalAlignment="Stretch"
                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
@@ -29,7 +29,6 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Grid Margin="4,0,4,8">
@@ -45,139 +44,168 @@
                                Command="{Binding RefreshCommand}" ToolTip="F5" />
                 </Grid>
 
-                <Grid Grid.Row="1">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBox Text="{Binding NewId, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="新控制器 Id（字母/数字/_/-）" VerticalContentAlignment="Center" />
-                        <ComboBox Grid.Column="1" Width="110" Margin="6,0,0,0"
-                                  ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding NewType}"
-                                  VerticalContentAlignment="Center"
-                                  ToolTip="控制器类型（来自工厂注册表，未注册类型不可添加）" />
-                        <ui:Button Grid.Column="2" Content="添加" Margin="6,0,0,0"
-                                   Command="{Binding AddCommand}" />
-                    </Grid>
-
-                    <!-- 新建 Serial 时显示参数子区 -->
-                    <StackPanel Grid.Row="1" Margin="0,0,0,8"
-                                Visibility="{Binding IsNewSerial,
-                                    Converter={StaticResource BoolToVisibilityConverter}}">
-                        <ui:TextBlock Text="串口参数（RS232/RS485）" FontTypography="BodyStrong"
-                                      Margin="0,0,0,6" />
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox Text="{Binding NewPort, UpdateSourceTrigger=PropertyChanged}"
-                                     ToolTip="串口名（如 COM3）" />
-                            <ui:NumberBox Grid.Column="1" Margin="6,0,0,0"
-                                          Value="{Binding NewBaudRate}" Minimum="1200" Maximum="921600"
-                                          SmallChange="9600" SpinButtonPlacementMode="Compact"
-                                          ToolTip="波特率" />
-                        </Grid>
-                    </StackPanel>
-
-                    <StackPanel Grid.Row="1" Margin="0,0,0,8"
-                                Visibility="{Binding IsNewNetwork,
-                                    Converter={StaticResource BoolToVisibilityConverter}}">
-                        <ui:TextBlock Text="网络参数（UDP / TCP）" FontTypography="BodyStrong"
-                                      Margin="0,0,0,6" />
-                        <TextBox Text="{Binding NewEndpoint, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="控制器地址 host:port"
-                                 Margin="0,0,0,6" />
-                        <Grid Margin="0,0,0,6">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <ComboBox Grid.Column="0" SelectedItem="{Binding NewProtocol}" ToolTip="传输协议">
-                                <ComboBoxItem>Tcp</ComboBoxItem>
-                                <ComboBoxItem>Udp</ComboBoxItem>
-                            </ComboBox>
-                            <TextBox Grid.Column="1" Margin="6,0,0,0"
-                                     Text="{Binding NewLocalEndpoint, UpdateSourceTrigger=PropertyChanged}"
-                                     ToolTip="本机绑定（可选，UDP 固定端口用）" />
-                        </Grid>
-                    </StackPanel>
-                    <ListBox Grid.Row="2" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Margin="2">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <ui:TextBlock Text="{Binding Id}" FontTypography="BodyStrong"
-                                                      TextTrimming="CharacterEllipsis" />
-                                        <Ellipse Grid.Column="1" Width="8" Height="8" VerticalAlignment="Center"
-                                                 Margin="6,0,0,0">
-                                            <Ellipse.Style>
-                                                <Style TargetType="Ellipse">
-                                                    <Setter Property="Fill"
-                                                            Value="{DynamicResource SystemFillColorCautionBrush}" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Registered}" Value="True">
-                                                            <Setter Property="Fill"
-                                                                    Value="{DynamicResource SystemFillColorSuccessBrush}" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Ellipse.Style>
-                                        </Ellipse>
-                                        <Border Grid.Column="2"
-                                                Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                                                CornerRadius="3"
-                                                Padding="5,1" Margin="6,0,0,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Type}" FontSize="10" />
-                                        </Border>
-                                        <TextBlock Grid.Column="3" Text="{Binding Status}" FontSize="11"
-                                                   VerticalAlignment="Center" Margin="6,0,0,0">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Foreground"
-                                                            Value="{DynamicResource TextFillColorTertiaryBrush}" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Registered}" Value="True">
-                                                            <Setter Property="Foreground"
-                                                                    Value="{DynamicResource SystemFillColorSuccessBrush}" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </Grid>
-                                    <TextBlock Text="{Binding Summary}" FontSize="11"
-                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Summary}"
-                                               Margin="0,2,0,0" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Grid>
-
-                <ui:TextBlock Grid.Row="2" FontSize="11" Margin="4,8,4,4" TextWrapping="Wrap"
-                              Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                              Text="None = 无操作虚拟控制器（调试兜底，添加后写入 appsettings 的 LightControllers 段）；真实控制器类型由工厂注册表提供" />
+                <ListBox Grid.Row="1" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="2">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:TextBlock Text="{Binding Id}" FontTypography="BodyStrong"
+                                                  TextTrimming="CharacterEllipsis" />
+                                    <Ellipse Grid.Column="1" Width="8" Height="8" VerticalAlignment="Center"
+                                             Margin="6,0,0,0">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill"
+                                                        Value="{DynamicResource SystemFillColorCautionBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Registered}" Value="True">
+                                                        <Setter Property="Fill"
+                                                                Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <Border Grid.Column="2"
+                                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                            CornerRadius="3"
+                                            Padding="5,1" Margin="6,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Type}" FontSize="10" />
+                                    </Border>
+                                    <TextBlock Grid.Column="3" Text="{Binding Status}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="6,0,0,0">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground"
+                                                        Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Registered}" Value="True">
+                                                        <Setter Property="Foreground"
+                                                                Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                                <TextBlock Text="{Binding Summary}" FontSize="11"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding Summary}"
+                                           Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
             </Grid>
         </Border>
 
-        <!-- 右：选中光源参数编辑 + 手动调光 -->
+        <!-- 右：添加 / 编辑 / 手动调光 -->
         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
             <StackPanel>
+                <!-- 添加控制器 -->
+                <ui:Card Margin="0,0,0,8" Padding="12">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ui:TextBlock FontTypography="Subtitle" Text="添加控制器" VerticalAlignment="Center" />
+                            <ui:Button Grid.Column="1" Content="添加" Appearance="Primary"
+                                       Command="{Binding AddCommand}" />
+                        </Grid>
+
+                        <UniformGrid Columns="2" Margin="0,0,0,8">
+                            <StackPanel Margin="0,0,8,0">
+                                <ui:TextBlock Text="控制器 Id（字母/数字/_/-）" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding NewId, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="新控制器 Id，添加后写入 appsettings 的 LightControllers 段" />
+                            </StackPanel>
+                            <StackPanel>
+                                <ui:TextBlock Text="类型" Margin="0,0,0,4" />
+                                <ComboBox ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding NewType}"
+                                          ToolTip="控制器类型（来自工厂注册表）" />
+                            </StackPanel>
+                        </UniformGrid>
+
+                        <ui:TextBlock Text="{Binding NewTypeHint}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                                      Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+
+                        <!-- 新建 Serial 参数 -->
+                        <StackPanel Margin="0,0,0,8"
+                                    Visibility="{Binding IsNewSerial,
+                                        Converter={StaticResource BoolToVisibilityConverter}}">
+                            <ui:TextBlock Text="串口参数（RS232/RS485）" FontTypography="BodyStrong"
+                                          Margin="0,0,0,8" />
+                            <UniformGrid Columns="2">
+                                <StackPanel Margin="0,0,8,0">
+                                    <ui:TextBlock Text="串口名" Margin="0,0,0,4" />
+                                    <TextBox Text="{Binding NewPort, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="如 COM3" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <ui:TextBlock Text="波特率" Margin="0,0,0,4" />
+                                    <ui:NumberBox Value="{Binding NewBaudRate}" Minimum="1200" Maximum="921600"
+                                                  SmallChange="9600" SpinButtonPlacementMode="Compact" />
+                                </StackPanel>
+                            </UniformGrid>
+                        </StackPanel>
+
+                        <!-- 新建 Network 参数 -->
+                        <StackPanel Visibility="{Binding IsNewNetwork,
+                                        Converter={StaticResource BoolToVisibilityConverter}}">
+                            <ui:TextBlock Text="网络参数（UDP / TCP）" FontTypography="BodyStrong"
+                                          Margin="0,0,0,8" />
+                            <ui:TextBlock Text="控制器地址（host:port）" Margin="0,0,0,4" />
+                            <TextBox Text="{Binding NewEndpoint, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="如 192.168.1.50:5000" Margin="0,0,0,8" />
+                            <UniformGrid Columns="2" Margin="0,0,0,8">
+                                <StackPanel Margin="0,0,8,0">
+                                    <ui:TextBlock Text="传输协议" Margin="0,0,0,4" />
+                                    <ComboBox SelectedItem="{Binding NewProtocol}" ToolTip="传输协议：Tcp 可靠连接 / Udp 低延迟广播">
+                                        <ComboBoxItem>Tcp</ComboBoxItem>
+                                        <ComboBoxItem>Udp</ComboBoxItem>
+                                    </ComboBox>
+                                </StackPanel>
+                                <StackPanel>
+                                    <ui:TextBlock Text="本机绑定（可选，UDP 固定端口用）" Margin="0,0,0,4" />
+                                    <TextBox Text="{Binding NewLocalEndpoint, UpdateSourceTrigger=PropertyChanged}"
+                                           ToolTip="本机绑定地址（可选）；UDP 需固定本地端口时填写" />
+                                </StackPanel>
+                            </UniformGrid>
+                            <StackPanel Visibility="{Binding IsNewTcp,
+                                            Converter={StaticResource BoolToVisibilityConverter}}">
+                                <ui:TextBlock Text="TCP 重连次数" Margin="0,0,0,4" />
+                                <ui:NumberBox Value="{Binding NewReconnectAttempts}" Minimum="0" Maximum="20"
+                                              SmallChange="1" SpinButtonPlacementMode="Compact"
+                                              HorizontalAlignment="Left" Width="120" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <ui:TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
+                                      Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                      Text="None = 无操作虚拟控制器（调试兜底）；真实类型由工厂注册表提供。" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- None 说明（无连接参数可编辑） -->
+                <ui:Card Margin="0,0,0,8" Padding="12"
+                         Visibility="{Binding IsNone,
+                             Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel>
+                        <ui:TextBlock FontTypography="Subtitle" Text="虚拟控制器（None）" Margin="0,0,0,8" />
+                        <ui:TextBlock FontSize="11" TextWrapping="Wrap"
+                                      Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                      Text="无硬件连接参数。配方引用后可走完整取图/推理链路；手动开灯仅模拟成功，不会点亮任何光源。" />
+                    </StackPanel>
+                </ui:Card>
+
                 <!-- Network 专属参数（仅选中 Network 光源时显示） -->
                 <ui:Card Margin="0,0,0,8" Padding="12"
                          Visibility="{Binding IsNetwork,
@@ -195,19 +223,21 @@
                         </Grid>
 
                         <ui:TextBlock Text="控制器地址（host:port）" Margin="0,0,0,4" />
-                        <TextBox Text="{Binding EditEndpoint, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBox Text="{Binding EditEndpoint, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="控制器地址，格式 host:port，如 192.168.1.50:5000" />
 
                         <UniformGrid Columns="2" Margin="0,8,0,0">
                             <StackPanel Margin="0,0,8,8">
                                 <ui:TextBlock Text="传输协议" Margin="0,0,0,4" />
-                                <ComboBox SelectedItem="{Binding EditProtocol}">
+                                <ComboBox SelectedItem="{Binding EditProtocol}" ToolTip="传输协议：Tcp 可靠连接 / Udp 低延迟广播">
                                     <ComboBoxItem>Tcp</ComboBoxItem>
                                     <ComboBoxItem>Udp</ComboBoxItem>
                                 </ComboBox>
                             </StackPanel>
                             <StackPanel Margin="0,0,0,8">
                                 <ui:TextBlock Text="本机绑定（可选，UDP 固定端口用）" Margin="0,0,0,4" />
-                                <TextBox Text="{Binding EditLocalEndpoint, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBox Text="{Binding EditLocalEndpoint, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="本机绑定地址（可选）；UDP 需固定本地端口时填写" />
                             </StackPanel>
                         </UniformGrid>
 
@@ -218,7 +248,9 @@
                                               SmallChange="50"
                                               SpinButtonPlacementMode="Compact" />
                             </StackPanel>
-                            <StackPanel Margin="0,0,0,0">
+                            <StackPanel Margin="0,0,0,0"
+                                        Visibility="{Binding IsEditTcp,
+                                            Converter={StaticResource BoolToVisibilityConverter}}">
                                 <ui:TextBlock Text="TCP 重连次数" Margin="0,0,0,4" />
                                 <ui:NumberBox Value="{Binding EditReconnectAttempts}" Minimum="0" Maximum="20"
                                               SmallChange="1"
@@ -276,7 +308,8 @@
                         <UniformGrid Columns="2">
                             <StackPanel Margin="0,0,8,0">
                                 <ui:TextBlock Text="串口名" Margin="0,0,0,4" />
-                                <TextBox Text="{Binding EditPort, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBox Text="{Binding EditPort, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="串口名称，如 COM3" />
                             </StackPanel>
                             <StackPanel>
                                 <ui:TextBlock Text="波特率" Margin="0,0,0,4" />

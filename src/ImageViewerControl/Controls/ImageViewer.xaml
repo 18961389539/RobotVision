@@ -253,6 +253,13 @@
                     <MenuItem x:Name="showRenderStatusMenuItem" Click="OnAnalysisCommandMenuClick" Tag="{x:Static controls:ImageViewerAnalysisMenuTags.ShowRenderStatus}" Header="{localization:UiText MenuShowRenderStatus}" IsEnabled="{Binding MenuState.Analysis.EnableShowRenderStatus}" />
                 </MenuItem>
                 <MenuItem Header="{localization:UiText MenuDisplaySettings}">
+                    <MenuItem x:Name="showFloatingToolbarMenuItem"
+                              Header="{localization:UiText MenuShowFloatingToolbar}"
+                              Click="OnToggleFloatingToolbarClick"
+                              IsCheckable="True"
+                              IsChecked="{Binding IsToolbarVisible, Mode=TwoWay}"
+                              InputGestureText="Ctrl+Shift+T" />
+                    <Separator />
                     <MenuItem x:Name="showPixelGridMenuItem" Header="{localization:UiText MenuShowPixelGrid}" Click="OnViewCommandMenuClick" Tag="{x:Static controls:ImageViewerViewMenuTags.TogglePixelGrid}" IsCheckable="True" IsChecked="{Binding MenuState.View.ShowPixelGridChecked}" />
                     <MenuItem x:Name="showSnapGridMenuItem" Header="{localization:UiText MenuShowSnapGrid}" Click="OnViewCommandMenuClick" Tag="{x:Static controls:ImageViewerViewMenuTags.ToggleSnapGrid}" IsCheckable="True" IsChecked="{Binding MenuState.View.ShowSnapGridChecked}" />
                     <MenuItem x:Name="enableSnapToGridMenuItem" Header="{localization:UiText MenuEnableSnapToGrid}" Click="OnViewCommandMenuClick" Tag="{x:Static controls:ImageViewerViewMenuTags.ToggleSnapToGrid}" IsCheckable="True" IsChecked="{Binding MenuState.View.EnableSnapToGridChecked}" />
@@ -520,6 +527,7 @@
                             <MultiDataTrigger.Conditions>
                                 <Condition Binding="{Binding ImageSource, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="{x:Null}" />
                                 <Condition Binding="{Binding IsImageLoading, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False" />
+                                <Condition Binding="{Binding ShowEmptyStatePanel, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True" />
                             </MultiDataTrigger.Conditions>
                             <Setter Property="Visibility" Value="Visible" />
                         </MultiDataTrigger>
@@ -591,7 +599,7 @@
                 Margin="16"
                 Panel.ZIndex="100"
                 Style="{StaticResource ViewerFloatingPanelStyle}"
-                Visibility="{Binding IsToolbarVisible, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                Visibility="{Binding IsToolbarVisible, RelativeSource={RelativeSource AncestorType={x:Type controls:ImageViewer}}, Converter={StaticResource BooleanToVisibilityConverter}}">
             <StackPanel Width="Auto">
                 <TextBlock Text="{localization:UiText MenuFileAndProjects}" Style="{StaticResource ViewerSectionTitleStyle}" />
                 <WrapPanel>
