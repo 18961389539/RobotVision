@@ -471,4 +471,36 @@ public sealed class RecipeLoaderTests : IDisposable
         Assert.DoesNotContain("A02", loader.ListNames());
         Assert.False(loader.Delete("A02"));
     }
+
+    [Fact]
+    public void AfterMaterialize_FiresOnFirstGetAndSave_NotOnCacheHit()
+    {
+        File.WriteAllText(Path.Combine(_folder, "HOOK.json"), """
+            { "cameraId": "cam", "models": ["m.onnx"], "angleMode": "KeyPointLine", "keypointIndexA": 0, "keypointIndexB": 1 }
+            """);
+        var n = 0;
+        var loader = new RecipeLoader(_folder) { AfterMaterialize = _ => n++ };
+
+        loader.Get("HOOK");
+        loader.Get("HOOK");
+        Assert.Equal(1, n);
+
+        var recipe = loader.Get("HOOK");
+        loader.Save(recipe);
+        Assert.Equal(2, n);
+    }
+
+    [Fact]
+    public void AfterDelete_FiresOnDelete()
+    {
+        File.WriteAllText(Path.Combine(_folder, "HOOK2.json"), """
+            { "cameraId": "cam", "models": ["m.onnx"], "angleMode": "KeyPointLine", "keypointIndexA": 0, "keypointIndexB": 1 }
+            """);
+        var deleted = new List<string>();
+        var loader = new RecipeLoader(_folder) { AfterDelete = deleted.Add };
+        loader.Get("HOOK2");
+
+        Assert.True(loader.Delete("HOOK2"));
+        Assert.Equal(["HOOK2"], deleted);
+    }
 }

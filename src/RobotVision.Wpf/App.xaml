@@ -11,7 +11,7 @@
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
             <local:InverseBoolConverter x:Key="InverseBoolConverter"
-                                        xmlns:local="clr-namespace:RobotVision.WpfHost" />
+                                        xmlns:local="clr-namespace:RobotVision.WpfHost.Shared" />
 
             <!-- WPF-UI NavigationView 会在 Page 外包一层 DynamicScrollViewer。
                  全屏图像页（相机/配方/监控等）须同时禁用外层滚动，否则参数栏内容过高时整页（含 ImageViewer）会一起滚。
@@ -19,6 +19,14 @@
                  设置/关于等表单页不要设 Disabled，保留整页滚动。 -->
             <Style TargetType="Page">
                 <Setter Property="ScrollViewer.CanContentScroll" Value="False" />
+            </Style>
+
+            <!-- 原生 TextBlock 默认前景为黑色（WPF-UI 主题只作用于 ui:TextBlock）。
+                 应用级隐式样式统一为浅色；元素上已写 Foreground 的不受影响
+                 （色块徽标深色字、图像 HUD 白字、次级/三级说明文字等）。 -->
+            <Style TargetType="TextBlock">
+                <Setter Property="Foreground"
+                        Value="{DynamicResource TextFillColorPrimaryBrush}" />
             </Style>
 
             <!-- ===== 全局 DataGrid 风格（隐式样式：所有页面表格自动生效，无需逐页修改） =====

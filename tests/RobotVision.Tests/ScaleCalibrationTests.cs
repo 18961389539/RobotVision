@@ -268,4 +268,42 @@ public class ScaleCalibrationTests : IDisposable
         VisionService.FormatStageMs(StationMappingMode.Extrinsic, 24, 32, 90, 91)
             .Should().Be("取图 24 · 去畸变 8 · 推理 58 · 后处理 1");
     }
+
+    [Fact]
+    public void FormatStageMs_OmitsSubMillisecondBreakdown()
+    {
+        VisionService.FormatStageMs(new PipelineStageMs
+        {
+            Mode = StationMappingMode.Scale,
+            GrabMs = 24,
+            PrepMs = 1,
+            InferMs = 73,
+            PostMs = 1,
+            RecipeMs = 0.2,
+            ConvertMs = 0.4,
+            RefineMs = 0.1,
+        }).Should().Be("取图 24 · 克隆 1 · 推理 73 · 后处理 1");
+    }
+
+    [Fact]
+    public void FormatStageMs_GrabAndInferBreakdown_InParentheses()
+    {
+        VisionService.FormatStageMs(new PipelineStageMs
+        {
+            Mode = StationMappingMode.Scale,
+            GrabMs = 642,
+            PrepMs = 9,
+            InferMs = 350,
+            PostMs = 9,
+            RecipeMs = 3,
+            LightOnMs = 8,
+            StabilizeMs = 50,
+            GateWaitMs = 180,
+            AcquireMs = 390,
+            ConvertMs = 11,
+            SegmentMs = 280,
+            RefineMs = 70,
+        }).Should().Be(
+            "取图 642（配方 3 · 点亮 8 · 稳定 50 · 等锁 180 · 采集 390 · 转图 11） · 克隆 9 · 推理 350（分割 280 · 精修 70） · 后处理 9");
+    }
 }

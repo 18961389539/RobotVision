@@ -28,6 +28,7 @@ public class ResultLogStoreTests : IDisposable
         Enabled = enabled,
         Folder = folder,
         RetainedDays = retainedDays,
+        Sqlite = false,
     };
 
     private static string WaitForFile(string dir, string pattern, int timeoutMs = 5000)
@@ -46,7 +47,7 @@ public class ResultLogStoreTests : IDisposable
     [Fact]
     public void Record_SuccessResult_AppendsJsonLine_WithCoordinates()
     {
-        var store = new ResultLogStore(Config(_folder), NullLogger<ResultLogStore>.Instance);
+        using var store = new ResultLogStore(Config(_folder), NullLogger<ResultLogStore>.Instance);
         var success = VisionResult.Success("A03",
             [new RobotPose(15.023, 20.117, 0.12)], 87.5, [0.92]);
 
@@ -74,7 +75,7 @@ public class ResultLogStoreTests : IDisposable
     [Fact]
     public void Record_FailureResult_UsesErrorCode_NoCoordinates()
     {
-        var store = new ResultLogStore(Config(_folder), NullLogger<ResultLogStore>.Instance);
+        using var store = new ResultLogStore(Config(_folder), NullLogger<ResultLogStore>.Instance);
         var fail = VisionResult.Fail("A03", VisionErrorCode.NoTargetFound, "未检出目标", 45.0);
 
         store.Record(fail);
@@ -91,7 +92,7 @@ public class ResultLogStoreTests : IDisposable
     [Fact]
     public void Record_MultipleResults_AppendMultipleLines()
     {
-        var store = new ResultLogStore(Config(_folder), NullLogger<ResultLogStore>.Instance);
+        using var store = new ResultLogStore(Config(_folder), NullLogger<ResultLogStore>.Instance);
         store.Record(VisionResult.Success("A", [new RobotPose(1, 2, 0)], 10));
         store.Record(VisionResult.Success("A", [new RobotPose(3, 4, 0)], 11));
         store.Record(VisionResult.Fail("B", VisionErrorCode.Busy, "busy", 0));
@@ -112,7 +113,7 @@ public class ResultLogStoreTests : IDisposable
     [Fact]
     public void Record_Disabled_NoFileWritten()
     {
-        var store = new ResultLogStore(Config(_folder, enabled: false), NullLogger<ResultLogStore>.Instance);
+        using var store = new ResultLogStore(Config(_folder, enabled: false), NullLogger<ResultLogStore>.Instance);
 
         store.Record(VisionResult.Success("A", [new RobotPose(1, 2, 0)], 10));
         Thread.Sleep(300);
@@ -123,7 +124,7 @@ public class ResultLogStoreTests : IDisposable
     [Fact]
     public void Record_NullContext_StillWrites()
     {
-        var store = new ResultLogStore(Config(_folder), NullLogger<ResultLogStore>.Instance);
+        using var store = new ResultLogStore(Config(_folder), NullLogger<ResultLogStore>.Instance);
 
         store.Record(VisionResult.Success("A", [new RobotPose(1, 2, 0)], 10));
 
@@ -136,7 +137,7 @@ public class ResultLogStoreTests : IDisposable
     [Fact]
     public void Cleanup_RemovesExpiredDayFiles()
     {
-        var store = new ResultLogStore(Config(_folder, retainedDays: 7), NullLogger<ResultLogStore>.Instance);
+        using var store = new ResultLogStore(Config(_folder, retainedDays: 7), NullLogger<ResultLogStore>.Instance);
         Directory.CreateDirectory(_folder);
         // 造一个 10 天前的日志文件(应在清理范围内)
         var oldFile = Path.Combine(_folder, "results-" + DateTime.Now.AddDays(-10).ToString("yyyy-MM-dd") + ".jsonl");
@@ -157,7 +158,7 @@ public class ResultLogStoreTests : IDisposable
     [Fact]
     public void Cleanup_RetainedDaysZero_KeepsAll()
     {
-        var store = new ResultLogStore(Config(_folder, retainedDays: 0), NullLogger<ResultLogStore>.Instance);
+        using var store = new ResultLogStore(Config(_folder, retainedDays: 0), NullLogger<ResultLogStore>.Instance);
         Directory.CreateDirectory(_folder);
         var oldFile = Path.Combine(_folder, "results-" + DateTime.Now.AddDays(-30).ToString("yyyy-MM-dd") + ".jsonl");
         File.WriteAllText(oldFile, "{}\n");

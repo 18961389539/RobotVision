@@ -1,5 +1,5 @@
 using System.Windows;
-using RobotVision.WpfHost.Pages;
+using RobotVision.WpfHost.Features.Monitor;
 
 namespace RobotVision.WpfHost;
 

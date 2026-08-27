@@ -105,7 +105,7 @@ public sealed class SegmentationOptions
 
 /// <summary>分割精修（MaskTemplate 模式）的精修方法。
 /// Template = 原图模板匹配（吃纹理，可判头尾）；LineFit = 掩码长边鲁棒直线拟合
-/// （吃轮廓几何，弱纹理矩形适用，无 180° 方向语义）。</summary>
+/// （吃轮廓几何，弱纹理矩形适用，无 180° 方向语义）；CaliperTab = 原图卡尺长边 + 凸起极性。</summary>
 public enum SegmentRefineMethod
 {
     /// <summary>模板匹配：亚度精度，180° 头尾可判（需示教模板）。</summary>
@@ -118,6 +118,10 @@ public enum SegmentRefineMethod
     /// <summary>质心-内标连线：掩码质心 → 最大内标（孔或槽）。圆孔走质心→孔心连线（指向孔）；
     /// 细长槽走长轴定角（精度高）+ 偏置侧别定头尾（±1 bit 判决，偏置弱也稳定）。有方向语义。</summary>
     CentroidHoleLine = 2,
+
+    /// <summary>卡尺长边 + 凸起极性：原图 1D 剖面抓两条长边（亚像素），短轴中心取两线中线；
+    /// 头尾看壳体边缘外侧哪一侧更暗。免示教模板；分割只需粗框套住壳体。</summary>
+    CaliperTab = 3,
 }
 
 /// <summary>
@@ -130,7 +134,7 @@ public sealed class TemplateOptions
     /// <summary>精修方法（默认模板匹配；旧配方无此字段自动取默认，行为不变）。</summary>
     public SegmentRefineMethod RefineMethod { get; set; } = SegmentRefineMethod.Template;
 
-    /// <summary>模板图 PNG 的 base64（转正目标裁剪）；空 = 未示教（LineFit 方法不使用）。</summary>
+    /// <summary>模板图 PNG 的 base64（转正目标裁剪）；空 = 未示教（LineFit / CaliperTab / CentroidHoleLine 不使用）。</summary>
     public string TemplateImageBase64 { get; set; } = "";
 
     /// <summary>
@@ -143,8 +147,8 @@ public sealed class TemplateOptions
     /// <summary>模板匹配置信阈值 [0,1]：低于该值放弃精修，回退粗角度（[0,180) 无方向）。</summary>
     public double MatchThreshold { get; set; } = 0.6;
 
-    /// <summary>粗角度基础上的精修搜索范围（度，(0,45]）：minAreaRect 粗角误差通常 &lt;10°。</summary>
-    public double RefineRangeDeg { get; set; } = 8;
+    /// <summary>粗角度基础上的精修搜索范围（度，(0,45]）：默认 ±5°。</summary>
+    public double RefineRangeDeg { get; set; } = 5;
 
     /// <summary>混合判决：边缘图定角度（更准，中纹理目标抖动 σ 1.6°→0.3°）+ 灰度图定头尾。
     /// 灰度直匹配在中等纹理上角度抖动较大；纯边缘匹配会丢头尾（Canny 抹掉不对称特征）。</summary>

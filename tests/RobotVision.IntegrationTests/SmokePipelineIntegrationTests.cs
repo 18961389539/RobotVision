@@ -174,6 +174,17 @@ public class SmokePipelineIntegrationTests : IClassFixture<SmokePipelineIntegrat
         line.Should().Contain("BLOB_LOG");
         line.Should().Contain("\"Code\":0"); // 成功码
         line.Should().Contain("\"X\":15");   // 主质心 150px × 0.1 = 15mm
+
+        var db = _fixture.Server.Provider.GetRequiredService<SqliteResultStore>();
+        var blobQuery = new ResultDbQuery { Recipe = "BLOB_LOG" };
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && db.Count(blobQuery) < 1)
+            Thread.Sleep(50);
+        db.Count(blobQuery).Should().BeGreaterThan(0, "成功触发后 SQLite 应有该配方一行");
+        var row = db.Query(blobQuery).Should().ContainSingle().Subject;
+        row.Code.Should().Be(0);
+        row.X.Should().NotBeNull();
+        row.X!.Value.Should().BeApproximately(15, 0.5);
     }
 
     [Fact]

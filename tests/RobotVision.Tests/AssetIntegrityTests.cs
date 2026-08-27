@@ -62,6 +62,26 @@ public class AssetIntegrityTests : IDisposable
     }
 
     [Fact]
+    public void ComputeSha256_CachesUntilFileMetadataChanges()
+    {
+        var model = Path.Combine(_dir, "cache.onnx");
+        File.WriteAllBytes(model, [1, 2, 3, 4, 5]);
+        var models = new ModelManager(_dir);
+
+        var first = models.ComputeSha256("cache.onnx");
+        Assert.Equal(1, models.Sha256FileReads);
+        Assert.Equal(first, models.ComputeSha256("cache.onnx"));
+        Assert.Equal(1, models.Sha256FileReads);
+
+        File.WriteAllBytes(model, [9, 9, 9]);
+        var second = models.ComputeSha256("cache.onnx");
+        Assert.NotEqual(first, second);
+        Assert.Equal(2, models.Sha256FileReads);
+        Assert.Equal(second, models.ComputeSha256("cache.onnx"));
+        Assert.Equal(2, models.Sha256FileReads);
+    }
+
+    [Fact]
     public void Checker_Disabled_Skips()
     {
         var checker = new AssetIntegrityChecker(

@@ -49,6 +49,16 @@ public sealed class RecipeLoader(string folder)
     /// </summary>
     public Func<RecipeConfig, RecipeReferenceError?>? ReferenceValidator { get; set; }
 
+    /// <summary>
+    /// 配方从磁盘读入或保存写入缓存后调用（LoadAll / Get 首次或文件变更 / Save）。
+    /// 缓存命中不触发。用于预热模板旋转图等；异常由订阅方自行消化，以免阻断加载。
+    /// </summary>
+    public Action<RecipeConfig>? AfterMaterialize { get; set; }
+
+    /// <summary>配方从内存缓存移除后调用（Delete / 改名删旧文件）。</summary>
+    public Action<string>? AfterDelete { get; set; }
+
+
     /// <summary>配方文件是否已存在（供 UI 覆盖确认）。</summary>
     public bool FileExists(string name) =>
         IsValidRecipeName(name) && File.Exists(Path.Combine(folder, name + ".json"));
@@ -113,6 +123,7 @@ public sealed class RecipeLoader(string folder)
         ValidateReferences(recipe);
 
         _cache[name] = new CachedRecipe(recipe, info.LastWriteTimeUtc, info.Length);
+        AfterMaterialize?.Invoke(recipe);
         return recipe.Clone(); // 首次加载同样返回克隆，与缓存命中路径行为一致
     }
 
@@ -438,6 +449,7 @@ public sealed class RecipeLoader(string folder)
 
         var info = new FileInfo(path);
         _cache[recipe.Name] = new CachedRecipe(recipe.Clone(), info.LastWriteTimeUtc, info.Length);
+        AfterMaterialize?.Invoke(recipe);
 
         // 先写新文件再删旧文件：写失败时旧配方仍在。复制/新建不要传 previousName。
         if (string.IsNullOrEmpty(previousName) ||
@@ -511,6 +523,7 @@ public sealed class RecipeLoader(string folder)
             return false;
 
         _cache.TryRemove(name, out _);
+        AfterDelete?.Invoke(name);
         var path = Path.Combine(folder, name + ".json");
         if (!File.Exists(path))
             return false;

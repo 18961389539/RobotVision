@@ -51,6 +51,10 @@
     <ProjectReference Include="..\RobotVision.Core\RobotVision.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="RobotVision.Tests" />
+  </ItemGroup>
+
   <!-- 本机 System32 存在同名旧版 onnxruntime.dll 会抢先加载。
        OpenVINO EP 的 win-x64 原生库放到输出根目录（随项目引用传到 App/Tests）。
        另将 VC++ 2015-2022 运行库 DLL 应用本地部署（native\，许可允许）。 -->

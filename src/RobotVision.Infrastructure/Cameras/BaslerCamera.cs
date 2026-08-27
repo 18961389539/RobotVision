@@ -5,6 +5,7 @@ using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Infrastructure;
+using System.Diagnostics;
 using System.Net;
 using GenICam.Net.GigEVision.Gvcp;
 using ICamera = RobotVision.Core.Abstractions.ICamera;
@@ -26,7 +27,8 @@ namespace RobotVision.Infrastructure.Cameras;
 ///   （Close→Open→重发参数→再 GrabOne），仍失败才返回 1003；
 /// - 软件取图：连接时把 TriggerMode 置 Off、关闭 ExposureAuto/GainAuto，避免相机 UserSet
 ///   残留硬触发导致 GrabOne 一直等到超时；
-/// - 曝光/增益兼容 SFNC 1.x（ExposureTimeAbs / GainRaw）与 2.x+（ExposureTime / Gain）；
+/// - 曝光/增益兼容 SFNC 1.x（ExposureTimeAbs / GainAbs / GainRaw）与 2.x+（ExposureTime / Gain）；
+///   ace GigE 的 Gain 节点常不可写，须走 GainAbs（dB）或 GainRaw；写前切 GainSelector 并关 GainAuto；
 /// - 调光能力经 <see cref="IExposureControl"/> 暴露。
 /// 所有帧统一转为 BGR8 三通道 Mat，与 FileCamera（ImreadModes.Color）行为一致。
 /// </summary>
@@ -183,8 +185,8 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             _camera.Open();
 
             var info = _camera.CameraInfo;
-            _serialNumber = info is null ? _deviceId : info[CameraInfoKey.SerialNumber];
-            _friendlyName = info is null ? "" : info[CameraInfoKey.FriendlyName];
+            _serialNumber = info is null ? _deviceId : info[CameraInfoKey.SerialNumber]!;
+            _friendlyName = info is null ? "" : info[CameraInfoKey.FriendlyName]!;
 
             ApplySoftwareGrabDefaults();
             ApplyGigEStreamDefaults();
@@ -386,6 +388,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} ExposureMode 设置跳过", Id); }
         try { camera.Parameters[PLCamera.ExposureAuto].TrySetValue(PLCamera.ExposureAuto.Off); }
         catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} ExposureAuto 设置跳过", Id); }
+        TrySelectAnalogGain();
         try { camera.Parameters[PLCamera.GainAuto].TrySetValue(PLCamera.GainAuto.Off); }
         catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} GainAuto 设置跳过", Id); }
     }
@@ -427,13 +430,17 @@ public sealed class BaslerCamera : ICamera, IExposureControl
 
     private CameraFrame GrabOneFrame()
     {
+        var grabWatch = Stopwatch.StartNew();
         var result = _camera!.StreamGrabber.GrabOne(_grabTimeoutMs, TimeoutHandling.ThrowException);
+        var acquireMs = grabWatch.Elapsed.TotalMilliseconds;
         using (result)
         {
             if (result is null || !result.GrabSucceeded)
                 throw new VisionException(VisionErrorCode.CameraGrabFailed,
                     $"Basler 相机 {Id} 采集失败: {result?.ErrorDescription ?? "无采集结果"} (code={result?.ErrorCode})");
-            return new CameraFrame(VisionImageCv.FromMat(ToMat(result), ownsMat: true), DateTime.UtcNow);
+            var image = VisionImageCv.FromMat(ToMat(result), ownsMat: true);
+            return new CameraFrame(image, DateTime.UtcNow, acquireMs,
+                grabWatch.Elapsed.TotalMilliseconds - acquireMs);
         }
     }
 
@@ -672,7 +679,9 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         {
             if (!EnsureConnected())
                 return null;
-            return TryGetFloat(PLCamera.Gain) ?? TryGetInteger(PLCamera.GainRaw);
+            return TryGetFloat(PLCamera.Gain)
+                ?? TryGetFloat(PLCamera.GainAbs)
+                ?? TryGetInteger(PLCamera.GainRaw);
         }
     }
 
@@ -692,17 +701,60 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         {
             if (!EnsureConnected())
                 return null;
-            return GetFloatRange(PLCamera.Gain) ?? GetIntegerRange(PLCamera.GainRaw);
+            return GetFloatRange(PLCamera.Gain)
+                ?? GetFloatRange(PLCamera.GainAbs)
+                ?? GetIntegerRange(PLCamera.GainRaw);
         }
     }
 
-    private bool TrySetExposureCore(double valueUs) =>
-        TrySetFloat(PLCamera.ExposureTimeAbs, valueUs)
-        || TrySetFloat(PLCamera.ExposureTime, valueUs);
+    private bool TrySetExposureCore(double valueUs)
+    {
+        if (TrySetFloat(PLCamera.ExposureTimeAbs, valueUs)
+            || TrySetFloat(PLCamera.ExposureTime, valueUs))
+            return true;
+        _log?.LogWarning("Basler 相机 {Id} 曝光 {Value} µs 下发失败（ExposureTimeAbs/ExposureTime 均不可写或超范围）",
+            Id, valueUs);
+        return false;
+    }
 
-    private bool TrySetGainCore(double value) =>
-        TrySetFloat(PLCamera.Gain, value)
-        || TrySetInteger(PLCamera.GainRaw, (long)Math.Round(value));
+    /// <summary>
+    /// 增益按机型回退：SFNC 2 <c>Gain</c>（ace 2/USB/dart）→ SFNC 1 <c>GainAbs</c>（ace GigE，dB）
+    /// → <c>GainRaw</c>（整数）。先切 AnalogAll/All 并关 GainAuto，否则 Gain 常为只读。
+    /// </summary>
+    private bool TrySetGainCore(double value)
+    {
+        TrySelectAnalogGain();
+        try { _camera!.Parameters[PLCamera.GainAuto].TrySetValue(PLCamera.GainAuto.Off); }
+        catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} GainAuto 设置跳过", Id); }
+
+        if (TrySetFloat(PLCamera.Gain, value)
+            || TrySetFloat(PLCamera.GainAbs, value)
+            || TrySetInteger(PLCamera.GainRaw, (long)Math.Round(value)))
+            return true;
+        _log?.LogWarning("Basler 相机 {Id} 增益 {Value} 下发失败（Gain/GainAbs/GainRaw 均不可写或超范围）",
+            Id, value);
+        return false;
+    }
+
+    /// <summary>
+    /// ace GigE 用 AnalogAll，ace 2 / dart 用 All。选错通道时 Gain 节点存在但 IsWritable=false。
+    /// </summary>
+    private void TrySelectAnalogGain()
+    {
+        try
+        {
+            var sel = _camera!.Parameters[PLCamera.GainSelector];
+            if (sel.IsEmpty || !sel.IsWritable)
+                return;
+            if (sel.TrySetValue(PLCamera.GainSelector.AnalogAll))
+                return;
+            sel.TrySetValue(PLCamera.GainSelector.All);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogDebug(ex, "Basler 相机 {Id} GainSelector 设置跳过", Id);
+        }
+    }
 
     /// <summary>
     /// 转换到 Mat。pylon 转换器按紧凑行输出，而 OpenCV Mat 的 RowStep 按 4 字节对齐，
@@ -747,11 +799,9 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         try
         {
             var p = _camera!.Parameters[name];
+            // 空/只读是机型回退链上的正常探测（ace GigE 无 SFNC2 Gain），不要当失败报警
             if (p.IsEmpty || !p.IsWritable)
-            {
-                _log?.LogWarning("Basler 相机 {Id} 参数 {Param} 不可写，下发失败", Id, name.Name);
                 return false;
-            }
             // 超界时拒绝下发并返回 false，让调用方知道值被改（静默 clamp 会让 UI 调光
             // 显示值与实际值不一致且无任何提示）
             var min = p.GetMinimum();
@@ -778,10 +828,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         {
             var p = _camera!.Parameters[name];
             if (p.IsEmpty || !p.IsWritable)
-            {
-                _log?.LogWarning("Basler 相机 {Id} 参数 {Param} 不可写，下发失败", Id, name.Name);
                 return false;
-            }
             var min = p.GetMinimum();
             var max = p.GetMaximum();
             if (value < min || value > max)

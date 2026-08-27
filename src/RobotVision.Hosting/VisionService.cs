@@ -5,6 +5,7 @@ using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Cameras;
+using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
 using RobotVision.Infrastructure.Lighting;
 
@@ -185,6 +186,9 @@ public sealed class VisionService(
         using var processing = Scheduler.BeginExecution();
         VisionImage? undistorted = null;
         double grabMs = 0, undistortMs = 0, inferenceMs = 0;
+        double recipeMs = 0, lightOnMs = 0, stabilizeMs = 0;
+        double gateWaitMs = 0, acquireMs = 0, convertMs = 0;
+        double segmentMs = 0, refineMs = 0;
         FailureContext? failureCtx = null;
         try
         {
@@ -216,10 +220,14 @@ public sealed class VisionService(
                     calibration.VerifyClientPose(recipe.StationId, pose);
             }
 
+            recipeMs = stopwatch.Elapsed.TotalMilliseconds;
+
             // 取图前：点亮光源并等待稳定（配方未配置照明时零开销）
             using var lightingScope = lighting.Apply(recipe.LightControllerId, recipe.Lighting);
+            lightOnMs = stopwatch.Elapsed.TotalMilliseconds - recipeMs;
             if (lightingScope.StabilizeDelayMs > 0)
                 await Task.Delay(lightingScope.StabilizeDelayMs, ct).ConfigureAwait(false);
+            stabilizeMs = stopwatch.Elapsed.TotalMilliseconds - recipeMs - lightOnMs;
 
             // 映射模式：多项式 > 外参 > 比例（无标定板工位的回退：图像平面毫米输出）。
             // 多项式/比例均为单图模式：跳过内参去畸变，推理直接用原图
@@ -228,8 +236,19 @@ public sealed class VisionService(
 
             // 取图走 CameraManager 按 Id 串行门闩（与 UI 预览共用，SDK 非线程安全）。
             // 去畸变在锁外：预览可与 CPU 去畸变重叠，不必再占相机。
-            using var frame = await cameras.GrabAsync(recipe.CameraId, ct).ConfigureAwait(false);
+            var grabTrace = await cameras.GrabTracedAsync(recipe.CameraId, ct).ConfigureAwait(false);
+            using var frame = grabTrace.Frame;
             grabMs = stopwatch.Elapsed.TotalMilliseconds;
+            gateWaitMs = grabTrace.GateWaitMs;
+            if (frame.AcquireMs >= 0.5 || frame.ConvertMs >= 0.5)
+            {
+                acquireMs = frame.AcquireMs;
+                convertMs = frame.ConvertMs;
+            }
+            else
+            {
+                acquireMs = grabTrace.GrabMs;
+            }
             if (mappingMode == StationMappingMode.Polynomial)
             {
                 // 分辨率必须与标定档案一致（归一化坐标错位 = 映射整体失效）
@@ -257,11 +276,36 @@ public sealed class VisionService(
             // 推理：ModelSession 内信号量按模型串行（Yolo 非线程安全），不同模型可并行；
             // 等待模型信号量阶段响应取消（排队超时），ONNX 推理本身不可中断
             var strategy = strategies.Create(recipe);
-            var pixelPoses = await Task.Run(() => strategy.Compute(undistorted, recipe, ct), ct)
-                .ConfigureAwait(false);
+            var infer = await Task.Run(() =>
+            {
+                InferenceStageClock.Reset();
+                var poses = strategy.Compute(undistorted, recipe, ct);
+                var (seg, refine) = InferenceStageClock.Snapshot();
+                return (Poses: poses, SegmentMs: seg, RefineMs: refine);
+            }, ct).ConfigureAwait(false);
+            var pixelPoses = infer.Poses;
+            segmentMs = infer.SegmentMs;
+            refineMs = infer.RefineMs;
             inferenceMs = stopwatch.Elapsed.TotalMilliseconds;
 
             PublishSnapshot(recipeName, undistorted, pixelPoses);
+
+            string Stages(double total) => FormatStageMs(new PipelineStageMs
+            {
+                Mode = mappingMode,
+                GrabMs = grabMs,
+                PrepMs = Math.Max(0, undistortMs - grabMs),
+                InferMs = Math.Max(0, inferenceMs - undistortMs),
+                PostMs = Math.Max(0, total - inferenceMs),
+                RecipeMs = recipeMs,
+                LightOnMs = lightOnMs,
+                StabilizeMs = stabilizeMs,
+                GateWaitMs = gateWaitMs,
+                AcquireMs = acquireMs,
+                ConvertMs = convertMs,
+                SegmentMs = segmentMs,
+                RefineMs = refineMs,
+            });
 
             if (pixelPoses.Count == 0)
             {
@@ -271,7 +315,7 @@ public sealed class VisionService(
                 failureImages.Save(recipeName, undistorted, miss, failureCtx);
                 log.LogInformation("配方 {Recipe}: 未检出目标，总耗时 {Elapsed:0}ms（{Stages}）",
                     recipeName, missElapsed,
-                    FormatStageMs(mappingMode, grabMs, undistortMs, inferenceMs, missElapsed));
+                    Stages(missElapsed));
                 return miss;
             }
 
@@ -294,7 +338,7 @@ public sealed class VisionService(
             var elapsed = stopwatch.Elapsed.TotalMilliseconds;
             log.LogInformation("配方 {Recipe}: 检出 {Count} 个目标，总耗时 {Elapsed:0}ms（{Stages}）",
                 recipeName, robotPoses.Count, elapsed,
-                FormatStageMs(mappingMode, grabMs, undistortMs, inferenceMs, elapsed));
+                Stages(elapsed));
 
             var success = VisionResult.Success(recipeName, robotPoses,
                 stopwatch.Elapsed.TotalMilliseconds, confidences);
@@ -348,19 +392,56 @@ public sealed class VisionService(
 
     /// <summary>
     /// 各阶段耗时（非累计）：取图 / 去畸变或克隆 / 推理 / 后处理。
+    /// 取图、推理括号内为细分（配方/点亮/稳定/等锁/采集/转图，分割/精修），不足 0.5ms 省略。
     /// 比例与多项式工位跳过内参 Remap，只克隆原图，标签用「克隆」以免误以为做了去畸变。
     /// </summary>
     internal static string FormatStageMs(
-        StationMappingMode mode, double grabEndMs, double prepEndMs, double inferEndMs, double totalMs)
+        StationMappingMode mode, double grabEndMs, double prepEndMs, double inferEndMs, double totalMs) =>
+        FormatStageMs(new PipelineStageMs
+        {
+            Mode = mode,
+            GrabMs = grabEndMs,
+            PrepMs = Math.Max(0, prepEndMs - grabEndMs),
+            InferMs = Math.Max(0, inferEndMs - prepEndMs),
+            PostMs = Math.Max(0, totalMs - inferEndMs),
+        });
+
+    internal static string FormatStageMs(PipelineStageMs s)
     {
-        var grab = grabEndMs;
-        var prep = Math.Max(0, prepEndMs - grabEndMs);
-        var infer = Math.Max(0, inferEndMs - prepEndMs);
-        var post = Math.Max(0, totalMs - inferEndMs);
-        var prepName = mode is StationMappingMode.Scale or StationMappingMode.Polynomial
+        var grabHead = $"取图 {s.GrabMs:0}";
+        var grabParts = JoinStageParts(
+            ("配方", s.RecipeMs),
+            ("点亮", s.LightOnMs),
+            ("稳定", s.StabilizeMs),
+            ("等锁", s.GateWaitMs),
+            ("采集", s.AcquireMs),
+            ("转图", s.ConvertMs));
+        if (grabParts.Length > 0)
+            grabHead += $"（{grabParts}）";
+
+        var prepName = s.Mode is StationMappingMode.Scale or StationMappingMode.Polynomial
             ? "克隆"
             : "去畸变";
-        return $"取图 {grab:0} · {prepName} {prep:0} · 推理 {infer:0} · 后处理 {post:0}";
+
+        var inferHead = $"推理 {s.InferMs:0}";
+        var inferParts = JoinStageParts(("分割", s.SegmentMs), ("精修", s.RefineMs));
+        if (inferParts.Length > 0)
+            inferHead += $"（{inferParts}）";
+
+        return $"{grabHead} · {prepName} {s.PrepMs:0} · {inferHead} · 后处理 {s.PostMs:0}";
+    }
+
+    private static string JoinStageParts(params (string Name, double Ms)[] parts)
+    {
+        List<string>? list = null;
+        foreach (var (name, ms) in parts)
+        {
+            if (ms < 0.5)
+                continue;
+            (list ??= new List<string>(parts.Length)).Add($"{name} {ms:0}");
+        }
+
+        return list is null ? "" : string.Join(" · ", list);
     }
 
     /// <summary>失败留存诊断上下文（相机/工位/模型/阈值/触发源，写进 JSON 元数据）。</summary>
@@ -414,4 +495,22 @@ public sealed class VisionService(
             return;
         health.RestoreInto(_metrics);
     }
+}
+
+/// <summary>管线各阶段耗时（毫秒，非累计）。近 0 的细分项不写入日志。</summary>
+internal sealed class PipelineStageMs
+{
+    public StationMappingMode Mode { get; init; }
+    public double GrabMs { get; init; }
+    public double PrepMs { get; init; }
+    public double InferMs { get; init; }
+    public double PostMs { get; init; }
+    public double RecipeMs { get; init; }
+    public double LightOnMs { get; init; }
+    public double StabilizeMs { get; init; }
+    public double GateWaitMs { get; init; }
+    public double AcquireMs { get; init; }
+    public double ConvertMs { get; init; }
+    public double SegmentMs { get; init; }
+    public double RefineMs { get; init; }
 }

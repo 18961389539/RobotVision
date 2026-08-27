@@ -1,9 +1,13 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 
 namespace RobotVision.Infrastructure.Cameras;
+
+/// <summary>按 Id 串行取图的分段结果：门闩等待 vs 持锁采集。</summary>
+public readonly record struct GrabTrace(CameraFrame Frame, double GateWaitMs, double GrabMs);
 
 /// <summary>
 /// 相机管理类：负责相机注册、按 Id 查找与取图。
@@ -106,14 +110,29 @@ public sealed class CameraManager : IDisposable
     }
 
     /// <summary>异步获锁后取图，避免在 UI/管线线程上同步 Wait。</summary>
-    public Task<CameraFrame> GrabAsync(string id, CancellationToken ct = default) =>
-        GrabCoreAsync(id, () => Get(id).Grab(ct), ct);
+    public async Task<CameraFrame> GrabAsync(string id, CancellationToken ct = default)
+    {
+        var trace = await GrabTracedAsync(id, ct).ConfigureAwait(false);
+        return trace.Frame;
+    }
 
     /// <summary>异步获锁后对任意实例取图（与同 Id 的已注册相机互斥）。</summary>
-    public Task<CameraFrame> GrabAsync(ICamera camera, CancellationToken ct = default)
+    public async Task<CameraFrame> GrabAsync(ICamera camera, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(camera);
-        return GrabCoreAsync(camera.Id, () => camera.Grab(ct), ct);
+        var trace = await GrabTracedAsync(camera, ct).ConfigureAwait(false);
+        return trace.Frame;
+    }
+
+    /// <summary>与 <see cref="GrabAsync(string, CancellationToken)"/> 相同，额外返回等锁 / 采集耗时。</summary>
+    public Task<GrabTrace> GrabTracedAsync(string id, CancellationToken ct = default) =>
+        GrabCoreTracedAsync(id, () => Get(id).Grab(ct), ct);
+
+    /// <summary>与 <see cref="GrabAsync(ICamera, CancellationToken)"/> 相同，额外返回等锁 / 采集耗时。</summary>
+    public Task<GrabTrace> GrabTracedAsync(ICamera camera, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(camera);
+        return GrabCoreTracedAsync(camera.Id, () => camera.Grab(ct), ct);
     }
 
     private CameraFrame GrabCore(string id, Func<CameraFrame> grab, CancellationToken ct)
@@ -131,15 +150,19 @@ public sealed class CameraManager : IDisposable
         }
     }
 
-    private async Task<CameraFrame> GrabCoreAsync(string id, Func<CameraFrame> grab, CancellationToken ct)
+    private async Task<GrabTrace> GrabCoreTracedAsync(string id, Func<CameraFrame> grab, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var gate = Gate(id);
+        var sw = Stopwatch.StartNew();
         await gate.WaitAsync(ct).ConfigureAwait(false);
+        var waitMs = sw.Elapsed.TotalMilliseconds;
         try
         {
             // WaitAsync 若同步完成会停在调用线程；从 UI 进来时必须把 pylon Grab 丢到线程池。
-            return await Task.Run(() => grab(), ct).ConfigureAwait(false);
+            sw.Restart();
+            var frame = await Task.Run(() => grab(), ct).ConfigureAwait(false);
+            return new GrabTrace(frame, waitMs, sw.Elapsed.TotalMilliseconds);
         }
         finally
         {

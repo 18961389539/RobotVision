@@ -60,7 +60,7 @@ public sealed class AppConfig
     /// <summary>过程能力落盘与连续失败联锁。</summary>
     public ProcessHealthConfig ProcessHealth { get; set; } = new();
 
-    /// <summary>结果日志（JSON Lines 按天）：成功与失败结果的原始留档，供追溯/统计/导入分析。</summary>
+    /// <summary>结果日志（JSON Lines + 本机 SQLite）：成功与失败结果的原始留档，供追溯/统计/分析页。</summary>
     public ResultLogConfig ResultLog { get; set; } = new();
 
     /// <summary>成功产品现场图留存（默认关）：开启后成功检测也存图，供复检/工艺分析。</summary>
@@ -138,9 +138,9 @@ public sealed class ProcessHealthConfig
 }
 
 /// <summary>
-/// 结果日志配置（JSON Lines 按天滚动）：每次触发的成功/失败结果原始留档。
-/// 供产线追溯（"这批料 14:00 检的角度"）、合格率/角度分布统计、长期趋势分析，
-/// 字段固定为将来导入 SQLite 预留。写入为异步追加，不影响检测节拍。
+/// 结果日志配置：每次触发的成功/失败结果原始留档。
+/// JSON Lines 便于 Excel/文本直接打开；本机 SQLite 供分析页按时间/配方查询。
+/// 两者默认同时写（后台异步，不影响检测节拍）；可用 Jsonl/Sqlite 分别关掉。
 /// </summary>
 public sealed class ResultLogConfig
 {
@@ -149,8 +149,17 @@ public sealed class ResultLogConfig
     /// <summary>日志目录（相对路径按目录解析规则锚定：exe 目录优先，工作目录回退）。</summary>
     public string Folder { get; set; } = "data/results";
 
-    /// <summary>按天滚动保留天数；≤0 不清理。</summary>
+    /// <summary>按天滚动保留天数（JSONL 文件与 SQLite 行共用）；≤0 不清理。</summary>
     public int RetainedDays { get; set; } = 30;
+
+    /// <summary>继续按天追加 JSON Lines（results-yyyy-MM-dd.jsonl）。</summary>
+    public bool Jsonl { get; set; } = true;
+
+    /// <summary>写入本机 SQLite（默认 results.db），供按配方/时间/错误码查询。</summary>
+    public bool Sqlite { get; set; } = true;
+
+    /// <summary>库文件名（仅文件名，位于 Folder 下；非法名回退 results.db）。</summary>
+    public string SqliteFile { get; set; } = "results.db";
 }
 
 /// <summary>
@@ -319,6 +328,8 @@ public static class AppConfigExtensions
     public static string ResolveCalibrationFolder(this AppConfig cfg) => ResolveFolder(cfg.CalibrationFolder);
 
     public static string ResolveMetricsFolder(this AppConfig cfg) => ResolveFolder(cfg.ProcessHealth.Folder);
+
+    public static string ResolveResultsFolder(this AppConfig cfg) => ResolveFolder(cfg.ResultLog.Folder);
 
     /// <summary>
     /// 启动时对齐超时下限：请求总超时 ≥90s（避免旧配置 3s/5s 带病运行）。

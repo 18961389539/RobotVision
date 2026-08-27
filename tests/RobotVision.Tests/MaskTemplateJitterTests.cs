@@ -118,12 +118,12 @@ public class MaskTemplateJitterTests(ITestOutputHelper output)
             switch (mode)
             {
                 case "灰度":
-                    match = MaskTemplateMatcher.MatchBest(uprightGray, template, 8, 0.0);
+                    match = MaskTemplateMatcher.MatchBest(uprightGray, template, 5, 0.0);
                     break;
                 case "边缘图":
                     using (var ue = MaskTemplateMatcher.ToEdgeMap(uprightGray))
                     using (var te = MaskTemplateMatcher.ToEdgeMap(template))
-                        match = MaskTemplateMatcher.MatchBest(ue, te, 8, 0.0);
+                        match = MaskTemplateMatcher.MatchBest(ue, te, 5, 0.0);
                     break;
                 case "直线拟合":
                     // 直线拟合吃掩码轮廓（与纹理无关）：合成旋转矩形轮廓直接驱动，
@@ -135,7 +135,7 @@ public class MaskTemplateJitterTests(ITestOutputHelper output)
                     break;
                 }
                 default: // 混合（产品方案）
-                    match = MaskTemplateMatcher.MatchBestHybrid(uprightGray, template, 8, 0.0);
+                    match = MaskTemplateMatcher.MatchBestHybrid(uprightGray, template, 5, 0.0);
                     break;
             }
             Assert.NotNull(match);
@@ -273,7 +273,7 @@ public class MaskTemplateJitterTests(ITestOutputHelper output)
         }
     }
 
-    /// <summary>按真值角度转正 + 30% 边距裁剪（与 MaskTemplateStrategy 同参数）。</summary>
+    /// <summary>按真值角度转正 + 15% 边距裁剪（与 MaskTemplateStrategy 同参数，窗口约 1.3 倍）。</summary>
     private Mat UprightByTrueAngle(Mat canvas, double deg)
     {
         var center = new Point2f(canvas.Width / 2f, canvas.Height / 2f);
@@ -282,7 +282,7 @@ public class MaskTemplateJitterTests(ITestOutputHelper output)
         Cv2.WarpAffine(canvas, rotated, m, canvas.Size(), InterpolationFlags.Linear,
             BorderTypes.Reflect101);
 
-        var margin = 0.3;
+        var margin = 0.15;
         var cropW = (int)(TargetW * (1 + 2 * margin));
         var cropH = (int)(TargetH * (1 + 2 * margin));
         var x = (int)(center.X - cropW / 2.0);

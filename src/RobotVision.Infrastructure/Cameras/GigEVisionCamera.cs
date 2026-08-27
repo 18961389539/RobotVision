@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -92,8 +93,12 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
 
                 try
                 {
+                    var grabWatch = Stopwatch.StartNew();
                     var frame = WaitForFrame(ct);
-                    return new CameraFrame(VisionImageCv.FromMat(ToMat(frame), ownsMat: true), DateTime.UtcNow);
+                    var acquireMs = grabWatch.Elapsed.TotalMilliseconds;
+                    var image = VisionImageCv.FromMat(ToMat(frame), ownsMat: true);
+                    return new CameraFrame(image, DateTime.UtcNow, acquireMs,
+                        grabWatch.Elapsed.TotalMilliseconds - acquireMs);
                 }
                 catch (OperationCanceledException)
                 {
@@ -172,7 +177,9 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     public double? GetGain()
     {
         lock (_grabLock)
-            return EnsureConnected() ? TryGetFloat("Gain") ?? TryGetInteger("GainRaw") : null;
+            return EnsureConnected()
+                ? TryGetFloat("Gain") ?? TryGetFloat("GainAbs") ?? TryGetInteger("GainRaw")
+                : null;
     }
 
     public (double Min, double Max)? GetExposureRange()
@@ -186,7 +193,9 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     public (double Min, double Max)? GetGainRange()
     {
         lock (_grabLock)
-            return EnsureConnected() ? GetFloatRange("Gain") ?? GetIntegerRange("GainRaw") : null;
+            return EnsureConnected()
+                ? GetFloatRange("Gain") ?? GetFloatRange("GainAbs") ?? GetIntegerRange("GainRaw")
+                : null;
     }
 
     /// <summary>读/写光度参数前按需连接（注册阶段不连相机，与 Grab 一致）。</summary>
@@ -244,6 +253,8 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
 
             // 库在 StartAcquisition 时可能打开 ExposureAuto/GainAuto；软件取图改为手动。
             TrySetEnumeration("ExposureAuto", "Off");
+            if (!TrySetEnumeration("GainSelector", "AnalogAll"))
+                TrySetEnumeration("GainSelector", "All");
             TrySetEnumeration("GainAuto", "Off");
             if (_exposureTimeUs is > 0)
                 TrySetExposureCore(_exposureTimeUs.Value);
@@ -433,9 +444,15 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
         || TrySetFloat("ExposureTimeAbs", valueUs)
         || TrySetInteger("ExposureTime", (long)Math.Round(valueUs));
 
-    private bool TrySetGainCore(double value) =>
-        TrySetFloat("Gain", value)
-        || TrySetInteger("GainRaw", (long)Math.Round(value));
+    private bool TrySetGainCore(double value)
+    {
+        if (!TrySetEnumeration("GainSelector", "AnalogAll"))
+            TrySetEnumeration("GainSelector", "All");
+        TrySetEnumeration("GainAuto", "Off");
+        return TrySetFloat("Gain", value)
+            || TrySetFloat("GainAbs", value)
+            || TrySetInteger("GainRaw", (long)Math.Round(value));
+    }
 
     private bool TrySetFloat(string name, double value)
     {

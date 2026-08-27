@@ -2,7 +2,20 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-        xmlns:pages="clr-namespace:RobotVision.WpfHost.Pages"
+        xmlns:monitor="clr-namespace:RobotVision.WpfHost.Features.Monitor"
+        xmlns:cameras="clr-namespace:RobotVision.WpfHost.Features.Cameras"
+        xmlns:lightings="clr-namespace:RobotVision.WpfHost.Features.Lightings"
+        xmlns:recipe="clr-namespace:RobotVision.WpfHost.Features.Recipe"
+        xmlns:models="clr-namespace:RobotVision.WpfHost.Features.Models"
+        xmlns:calibration="clr-namespace:RobotVision.WpfHost.Features.Calibration"
+        xmlns:wizard="clr-namespace:RobotVision.WpfHost.Features.CalibrationWizard"
+        xmlns:failures="clr-namespace:RobotVision.WpfHost.Features.Failures"
+        xmlns:analysis="clr-namespace:RobotVision.WpfHost.Features.Analysis"
+        xmlns:communication="clr-namespace:RobotVision.WpfHost.Features.Communication"
+        xmlns:logs="clr-namespace:RobotVision.WpfHost.Features.Logs"
+        xmlns:settings="clr-namespace:RobotVision.WpfHost.Features.Settings"
+        xmlns:sys="clr-namespace:RobotVision.WpfHost.Features.SystemInfo"
+        xmlns:about="clr-namespace:RobotVision.WpfHost.Features.About"
         Title="RobotVision 视觉调试台"
         Width="1280" Height="820"
         MinWidth="960" MinHeight="600"
@@ -54,33 +67,35 @@
                            PaneDisplayMode="Left"
                            OpenPaneLength="196">
             <ui:NavigationView.MenuItems>
-                <ui:NavigationViewItem Content="运行监控" TargetPageType="{x:Type pages:MonitorPage}"
+                <ui:NavigationViewItem Content="运行监控" TargetPageType="{x:Type monitor:MonitorPage}"
                                        Icon="{ui:SymbolIcon Home24}" />
-                <ui:NavigationViewItem Content="相机管理" TargetPageType="{x:Type pages:CamerasPage}"
+                <ui:NavigationViewItem Content="相机管理" TargetPageType="{x:Type cameras:CamerasPage}"
                                        Icon="{ui:SymbolIcon Camera24}" />
-                <ui:NavigationViewItem Content="光源管理" TargetPageType="{x:Type pages:LightingsPage}"
+                <ui:NavigationViewItem Content="光源管理" TargetPageType="{x:Type lightings:LightingsPage}"
                                        Icon="{ui:SymbolIcon Lightbulb24}" />
-                <ui:NavigationViewItem Content="配方管理" TargetPageType="{x:Type pages:RecipePage}"
+                <ui:NavigationViewItem Content="配方管理" TargetPageType="{x:Type recipe:RecipePage}"
                                        Icon="{ui:SymbolIcon DocumentEdit24}" />
-                <ui:NavigationViewItem Content="模型管理" TargetPageType="{x:Type pages:ModelsPage}"
+                <ui:NavigationViewItem Content="模型管理" TargetPageType="{x:Type models:ModelsPage}"
                                        Icon="{ui:SymbolIcon Cube24}" />
-                <ui:NavigationViewItem Content="标定档案" TargetPageType="{x:Type pages:CalibrationPage}"
+                <ui:NavigationViewItem Content="标定档案" TargetPageType="{x:Type calibration:CalibrationPage}"
                                        Icon="{ui:SymbolIcon Wrench24}" />
-                <ui:NavigationViewItem Content="标定向导" TargetPageType="{x:Type pages:CalibrationWizardPage}"
+                <ui:NavigationViewItem Content="标定向导" TargetPageType="{x:Type wizard:CalibrationWizardPage}"
                                        Icon="{ui:SymbolIcon BookCompass24}" />
-                <ui:NavigationViewItem Content="失败现场" TargetPageType="{x:Type pages:FailuresPage}"
+                <ui:NavigationViewItem Content="失败现场" TargetPageType="{x:Type failures:FailuresPage}"
                                        Icon="{ui:SymbolIcon ImageMultiple24}" />
-                <ui:NavigationViewItem Content="通信监控" TargetPageType="{x:Type pages:CommunicationPage}"
+                <ui:NavigationViewItem Content="结果分析" TargetPageType="{x:Type analysis:AnalysisPage}"
+                                       Icon="{ui:SymbolIcon DataBarVertical24}" />
+                <ui:NavigationViewItem Content="通信监控" TargetPageType="{x:Type communication:CommunicationPage}"
                                        Icon="{ui:SymbolIcon PlugConnected24}" />
-                <ui:NavigationViewItem Content="日志浏览" TargetPageType="{x:Type pages:LogsPage}"
+                <ui:NavigationViewItem Content="日志浏览" TargetPageType="{x:Type logs:LogsPage}"
                                        Icon="{ui:SymbolIcon DocumentSearch24}" />
-                <ui:NavigationViewItem Content="服务设置" TargetPageType="{x:Type pages:SettingsPage}"
+                <ui:NavigationViewItem Content="服务设置" TargetPageType="{x:Type settings:SettingsPage}"
                                        Icon="{ui:SymbolIcon Options24}" />
-                <ui:NavigationViewItem Content="系统信息" TargetPageType="{x:Type pages:SystemPage}"
+                <ui:NavigationViewItem Content="系统信息" TargetPageType="{x:Type sys:SystemPage}"
                                        Icon="{ui:SymbolIcon Settings24}" />
             </ui:NavigationView.MenuItems>
             <ui:NavigationView.FooterMenuItems>
-                <ui:NavigationViewItem Content="关于" TargetPageType="{x:Type pages:AboutPage}"
+                <ui:NavigationViewItem Content="关于" TargetPageType="{x:Type about:AboutPage}"
                                        Icon="{ui:SymbolIcon Info24}" />
             </ui:NavigationView.FooterMenuItems>
         </ui:NavigationView>

@@ -20,6 +20,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="RobotVision.Wpf.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\recipes\**\*" CopyToOutputDirectory="PreserveNewest" Link="recipes.samples\%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\data\calibration\**\*" CopyToOutputDirectory="PreserveNewest" Link="data\calibration\%(RecursiveDir)%(Filename)%(Extension)" />

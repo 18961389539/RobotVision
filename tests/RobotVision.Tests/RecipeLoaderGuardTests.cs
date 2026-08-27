@@ -158,7 +158,7 @@ public sealed class RecipeLoaderGuardTests : IDisposable
     }
 
     [Fact]
-    public void Validate_MaskTemplate_LineFit_DoesNotRequireTemplate()
+    public void Validate_MaskTemplate_CaliperTab_DoesNotRequireTemplate()
     {
         var recipe = new RecipeConfig
         {
@@ -166,7 +166,7 @@ public sealed class RecipeLoaderGuardTests : IDisposable
             CameraId = "cam",
             AngleMode = AngleMode.MaskTemplate,
             Models = ["a.onnx"],
-            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.LineFit },
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.CaliperTab },
         };
         RecipeLoader.Validate(recipe);
     }

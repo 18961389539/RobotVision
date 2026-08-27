@@ -37,6 +37,8 @@ public class DiContainerIntegrationTests
         sp.GetRequiredService<LightingManager>().Should().NotBeNull();
         sp.GetRequiredService<AngleStrategyFactory>().Should().NotBeNull();
         sp.GetRequiredService<FailureImageStore>().Should().NotBeNull();
+        sp.GetRequiredService<ResultLogStore>().Should().NotBeNull();
+        sp.GetRequiredService<SqliteResultStore>().Should().NotBeNull();
         sp.GetRequiredService<AppSettingsStore>().Should().NotBeNull();
         sp.GetRequiredService<IInferenceEngineFactory>().Should().NotBeNull();
         sp.GetRequiredService<CameraTypeRegistry>().Should().NotBeNull();

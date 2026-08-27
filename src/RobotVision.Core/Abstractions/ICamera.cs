@@ -20,10 +20,18 @@ public sealed class CameraFrame : IDisposable
     /// <summary>采集完成时刻（UTC）。模拟实现以 Grab 返回时刻计。</summary>
     public DateTime CapturedAtUtc { get; }
 
-    public CameraFrame(VisionImage image, DateTime capturedAtUtc)
+    /// <summary>底层采集（曝光+传输）耗时（毫秒）。未分段的实现为 0，由 CameraManager 用整段 Grab 代替。</summary>
+    public double AcquireMs { get; }
+
+    /// <summary>像素格式转换（Bayer→BGR 等）耗时（毫秒）。未分段的实现为 0。</summary>
+    public double ConvertMs { get; }
+
+    public CameraFrame(VisionImage image, DateTime capturedAtUtc, double acquireMs = 0, double convertMs = 0)
     {
         Image = image ?? throw new ArgumentNullException(nameof(image));
         CapturedAtUtc = capturedAtUtc;
+        AcquireMs = acquireMs;
+        ConvertMs = convertMs;
     }
 
     public void Dispose() => Image.Dispose();

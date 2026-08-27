@@ -9,6 +9,20 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
+using RobotVision.WpfHost.Features.Analysis;
+using RobotVision.WpfHost.Features.Calibration;
+using RobotVision.WpfHost.Features.CalibrationWizard;
+using RobotVision.WpfHost.Features.Cameras;
+using RobotVision.WpfHost.Features.Communication;
+using RobotVision.WpfHost.Features.Failures;
+using RobotVision.WpfHost.Features.Lightings;
+using RobotVision.WpfHost.Features.Logs;
+using RobotVision.WpfHost.Features.Models;
+using RobotVision.WpfHost.Features.Monitor;
+using RobotVision.WpfHost.Features.Recipe;
+using RobotVision.WpfHost.Features.Settings;
+using SystemPage = RobotVision.WpfHost.Features.SystemInfo.SystemPage;
+using SystemViewModel = RobotVision.WpfHost.Features.SystemInfo.SystemViewModel;
 
 namespace RobotVision.WpfHost;
 
@@ -168,6 +182,7 @@ public partial class App : Application
         services.AddSingleton<CalibrationViewModel>();
         services.AddSingleton<CalibrationWizardViewModel>();
         services.AddSingleton<FailuresViewModel>();
+        services.AddSingleton<AnalysisViewModel>();
         services.AddSingleton<CommunicationViewModel>();
         services.AddSingleton<LogsViewModel>();
         services.AddSingleton<SettingsViewModel>();
@@ -227,31 +242,40 @@ public partial class App : Application
         // 逐页直接实例化渲染，验证各管理页布局
         var pages = new (string Name, Type Page)[]
         {
-            ("monitor", typeof(Pages.MonitorPage)),
-            ("cameras", typeof(Pages.CamerasPage)),
-            ("lightings", typeof(Pages.LightingsPage)),
-            ("recipe", typeof(Pages.RecipePage)),
-            ("models", typeof(Pages.ModelsPage)),
-            ("calibration", typeof(Pages.CalibrationPage)),
-            ("wizard", typeof(Pages.CalibrationWizardPage)),
-            ("failures", typeof(Pages.FailuresPage)),
-            ("communication", typeof(Pages.CommunicationPage)),
-            ("logs", typeof(Pages.LogsPage)),
-            ("settings", typeof(Pages.SettingsPage)),
-            ("system", typeof(Pages.SystemPage)),
+            ("monitor", typeof(MonitorPage)),
+            ("cameras", typeof(CamerasPage)),
+            ("lightings", typeof(LightingsPage)),
+            ("recipe", typeof(RecipePage)),
+            ("models", typeof(ModelsPage)),
+            ("calibration", typeof(CalibrationPage)),
+            ("wizard", typeof(CalibrationWizardPage)),
+            ("failures", typeof(FailuresPage)),
+            ("analysis", typeof(AnalysisPage)),
+            ("communication", typeof(CommunicationPage)),
+            ("logs", typeof(LogsPage)),
+            ("settings", typeof(SettingsPage)),
+            ("system", typeof(SystemPage)),
         };
         foreach (var (name, page) in pages)
         {
             // WPF Page 只允许 Window/Frame 父级，快照用 Frame 承载
-            var frame = new System.Windows.Controls.Frame
-            {
-                Content = Activator.CreateInstance(page),
-            };
+            var instance = (System.Windows.Controls.Page)Activator.CreateInstance(page)!;
+            var frame = new System.Windows.Controls.Frame { Content = instance };
             host.Child = frame;
             host.UpdateLayout();
-            // Frame.Content 走异步导航队列，需泵空 Dispatcher 后页面才挂载
             System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
                 () => { }, System.Windows.Threading.DispatcherPriority.SystemIdle);
+            if (instance.DataContext is AnalysisViewModel analysis)
+            {
+                _ = analysis.RefreshAsync();
+                var deadline = DateTime.UtcNow.AddSeconds(2);
+                while (DateTime.UtcNow < deadline && analysis.Message is "尚未加载" or "加载中…")
+                {
+                    System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                        () => { }, System.Windows.Threading.DispatcherPriority.Background);
+                    Thread.Sleep(20);
+                }
+            }
             host.UpdateLayout();
             RenderHost(host, name, width, height);
         }

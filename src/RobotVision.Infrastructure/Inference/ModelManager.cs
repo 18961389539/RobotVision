@@ -132,6 +132,10 @@ public sealed class ModelManager(
     /// <summary>字典变更（增删）短锁：加载/预热/等待推理均在锁外，锁内无耗时操作。</summary>
     private readonly object _sync = new();
 
+    private readonly ConcurrentDictionary<string, (long Length, DateTime LastWriteUtc, string Hash)> _sha256 =
+        new(StringComparer.OrdinalIgnoreCase);
+    private int _sha256FileReads;
+
     private volatile bool _disposed;
 
     public int LoadedCount
@@ -169,16 +173,29 @@ public sealed class ModelManager(
         }
     }
 
-    /// <summary>计算模型文件 SHA-256。每次读文件内容（不用 mtime+size 缓存：
-    /// 同大小且保留时间戳的覆盖会漏检，而这正是钉扎要拦住的场景）。</summary>
+    /// <summary>
+    /// 模型文件 SHA-256。按路径 + 大小 + 修改时间缓存，TRIGGER 不重复读盘。
+    /// 文件替换（mtime 或 size 变）后下次自动重算。口径与 ModelSession 缓存键相同。
+    /// </summary>
     public string ComputeSha256(string modelFile)
     {
         var path = ResolvePath(modelFile);
-        if (!File.Exists(path))
+        var info = new FileInfo(path);
+        if (!info.Exists)
             throw new FileNotFoundException($"模型文件不存在: {modelFile}", path);
 
-        return FileSha256.ComputeFile(path);
+        if (_sha256.TryGetValue(path, out var cached)
+            && cached.Length == info.Length
+            && cached.LastWriteUtc == info.LastWriteTimeUtc)
+            return cached.Hash;
+
+        Interlocked.Increment(ref _sha256FileReads);
+        var hash = FileSha256.ComputeFile(path);
+        _sha256[path] = (info.Length, info.LastWriteTimeUtc, hash);
+        return hash;
     }
+
+    internal int Sha256FileReads => Volatile.Read(ref _sha256FileReads);
 
     /// <summary>已物化的缓存键（供管理界面显示加载状态；按 (路径, 任务) 去重，版本不外露）。</summary>
     public IReadOnlyList<(string Path, InferenceTask Task)> LoadedKeys
@@ -426,6 +443,7 @@ public sealed class ModelManager(
         {
             snapshot = _models.Values.ToList();
             _models.Clear();
+            _sha256.Clear();
         }
         // 锁外逐个安全释放（等待在途推理退出）；物化中的线程由 Open 复查路径自行释放。
         // 幂等保护下与 Open 路径的双重释放不会发生

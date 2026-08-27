@@ -161,6 +161,8 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             throw new InvalidDataException("appsettings.json 的 PoseCheck 容差必须为正");
         if (cfg.ProcessHealth.ConsecutiveFailLimit < 0)
             throw new InvalidDataException("appsettings.json 的 ProcessHealth.ConsecutiveFailLimit 不能为负（0 = 不联锁）");
+        if (cfg.ResultLog.RetainedDays < 0)
+            throw new InvalidDataException("appsettings.json 的 ResultLog.RetainedDays 不能为负（0 = 不清理）");
         if (cfg.MaxQueueDepth < 1)
             throw new InvalidDataException($"appsettings.json 的 MaxQueueDepth={cfg.MaxQueueDepth} 至少为 1");
         if (cfg.MaxConcurrent < 1 || cfg.MaxConcurrent > cfg.MaxQueueDepth)

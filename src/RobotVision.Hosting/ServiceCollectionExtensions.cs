@@ -69,9 +69,21 @@ public static class ServiceCollectionExtensions
 
         // 配方加载器：注入引用完整性校验器（联动相机/模型/标定管理器）。
         // 工厂延迟执行，首次解析 RecipeLoader 时所有依赖均已注册，无循环依赖。
+        services.AddSingleton(MaskTemplateRotationCache.Shared);
         services.AddSingleton(sp =>
         {
             var loader = new RecipeLoader(recipesFolder);
+            var rotations = sp.GetRequiredService<MaskTemplateRotationCache>();
+            var recipeLog = sp.GetRequiredService<ILogger<RecipeLoader>>();
+            loader.AfterMaterialize = recipe =>
+            {
+                try { rotations.Warm(recipe); }
+                catch (Exception ex)
+                {
+                    recipeLog.LogWarning(ex, "配方 {Name} 模板旋转缓存预热失败，首次匹配将现场旋转", recipe.Name);
+                }
+            };
+            loader.AfterDelete = rotations.Remove;
             loader.ReferenceValidator = recipe => ValidateRecipeReferences(
                 recipe,
                 sp.GetRequiredService<CameraManager>(),
@@ -222,8 +234,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(AngleStrategyTypeRegistry.Default);
         services.AddSingleton(sp => new FailureImageStore(
             cfg.FailureImage, sp.GetRequiredService<ILogger<FailureImageStore>>()));
+        services.AddSingleton(sp => new SqliteResultStore(
+            cfg.ResultLog, sp.GetRequiredService<ILogger<SqliteResultStore>>()));
         services.AddSingleton(sp => new ResultLogStore(
-            cfg.ResultLog, sp.GetRequiredService<ILogger<ResultLogStore>>()));
+            cfg.ResultLog,
+            sp.GetRequiredService<ILogger<ResultLogStore>>(),
+            sp.GetRequiredService<SqliteResultStore>()));
         services.AddSingleton(sp => new SuccessCaptureStore(
             cfg.CaptureSuccess, sp.GetRequiredService<ILogger<SuccessCaptureStore>>()));
 
@@ -337,6 +353,9 @@ public static class ServiceCollectionExtensions
 
                 var health = sp.GetRequiredService<ProcessHealthStore>();
                 health.ApplyConfig(updated.ProcessHealth);
+
+                var results = sp.GetRequiredService<ResultLogStore>();
+                results.ApplyConfig(updated.ResultLog);
 
                 var failures = sp.GetRequiredService<FailureImageStore>();
                 failures.Enabled = updated.FailureImage.Enabled;

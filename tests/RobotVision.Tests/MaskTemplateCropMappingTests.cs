@@ -20,7 +20,7 @@ public sealed class MaskTemplateCropMappingTests
             new((float)(cx - 90), (float)(cy + 35)),
         ];
 
-        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0.3);
+        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0.15);
         using (crop.Upright)
         {
             var mapped = MaskTemplateMatcher.MapUprightToSource(crop,
@@ -43,7 +43,7 @@ public sealed class MaskTemplateCropMappingTests
             new((float)(cx - 70), (float)(cy + 25)),
         ];
 
-        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0.3);
+        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0.15);
         using (crop.Upright)
         {
             Assert.True(crop.CropOriginX > 50, "裁剪原点应远离图像左上角，否则无法暴露旧映射错误");
@@ -154,5 +154,127 @@ public sealed class MaskTemplateCropMappingTests
         var picked = MaskTemplateMatcher.SelectHybridOrientation(edge, low, high);
         Assert.Equal(180, picked.RotationDeg);
         Assert.Equal(edge.Score, picked.Score);
+    }
+
+    [Fact]
+    public void CanonicalExtraWarp_UnifiesTabMatchCenter()
+    {
+        const int w = 640, h = 480;
+        using var src = new Mat(h, w, MatType.CV_8UC3, new Scalar(240, 240, 240));
+        using var tab = new Mat(48, 200, MatType.CV_8UC3, new Scalar(240, 240, 240));
+        Cv2.Rectangle(tab, new Point(10, 14), new Point(190, 28), new Scalar(200, 200, 200), -1);
+        Cv2.Rectangle(tab, new Point(88, 28), new Point(112, 44), new Scalar(25, 25, 25), -1);
+        var tx = (w - tab.Width) / 2;
+        var ty = (h - tab.Height) / 2;
+        tab.CopyTo(src[new Rect(tx, ty, tab.Width, tab.Height)]);
+        Point2f[] contour =
+        [
+            new(120, 180),
+            new(520, 180),
+            new(520, 300),
+            new(120, 300),
+        ];
+
+        var crop0 = MaskTemplateMatcher.UprightCrop(src, contour, 0.4);
+        var crop180 = MaskTemplateMatcher.UprightCrop(src, contour, 0.4, extraWarpDeg: 180);
+        using (crop0.Upright)
+        using (crop180.Upright)
+        {
+            var m0 = MaskTemplateMatcher.MatchBest(crop0.Upright, tab, 5, 0.2);
+            var m180 = MaskTemplateMatcher.MatchBest(crop180.Upright, tab, 5, 0.2);
+            Assert.True(m0 is not null,
+                $"0° 裁剪未匹配 {crop0.Upright.Width}x{crop0.Upright.Height} warp={crop0.WarpAngleDeg:0.1}");
+            Assert.True(m180 is not null,
+                $"180° 裁剪未匹配 {crop180.Upright.Width}x{crop180.Upright.Height} warp={crop180.WarpAngleDeg:0.1}");
+
+            var naive0 = MaskTemplateMatcher.MapUprightToSource(crop0, m0.CenterInUpright);
+            var naive180 = MaskTemplateMatcher.MapUprightToSource(crop180, m180.CenterInUpright);
+            Assert.True(Math.Abs(naive0.Y - naive180.Y) > 8,
+                $"未对齐时应出现模板中心偏置（{naive0.Y:0.0} vs {naive180.Y:0.0}）");
+
+            var c0 = CanonicalCenter(src, contour, tab, extraWarp: 0);
+            var c180 = CanonicalCenter(src, contour, tab, extraWarp: 180);
+            Assert.InRange(c0.X - c180.X, -3, 3);
+            Assert.InRange(c0.Y - c180.Y, -3, 3);
+        }
+    }
+
+    [Fact]
+    public void UprightCrop_LocalPatch_MatchesFullImageWarp()
+    {
+        using var src = new Mat(1800, 2400, MatType.CV_8UC3, Scalar.All(0));
+        Cv2.Rectangle(src, new Rect(1100, 800, 240, 90), new Scalar(20, 180, 240), -1);
+        Cv2.Rectangle(src, new Rect(1280, 820, 40, 50), new Scalar(0, 0, 220), -1);
+        Point2f[] contour =
+        [
+            new(1100, 800), new(1340, 800), new(1340, 890), new(1100, 890),
+        ];
+
+        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0.15);
+        using (crop.Upright)
+        using (var expected = FullImageUprightCrop(src, contour, 0.15))
+        {
+            Assert.Equal(expected.Width, crop.Upright.Width);
+            Assert.Equal(expected.Height, crop.Upright.Height);
+            using var diff = new Mat();
+            Cv2.Absdiff(crop.Upright, expected, diff);
+            var mean = Cv2.Mean(diff);
+            Assert.True(mean.Val0 + mean.Val1 + mean.Val2 < 3.0,
+                $"局部转正应与整图 WarpAffine 一致，通道均值差 {mean.Val0:0.00}/{mean.Val1:0.00}/{mean.Val2:0.00}");
+        }
+    }
+
+    [Fact]
+    public void UprightCrop_CropIsMuchSmallerThanSource()
+    {
+        using var src = new Mat(2000, 3000, MatType.CV_8UC3, Scalar.All(0));
+        Point2f[] contour =
+        [
+            new(1400, 900), new(1680, 900), new(1680, 1000), new(1400, 1000),
+        ];
+        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0.15);
+        using (crop.Upright)
+        {
+            Assert.True(crop.Upright.Width < src.Width / 3, $"转正窗宽 {crop.Upright.Width} 不应接近整幅 {src.Width}");
+            Assert.True(crop.Upright.Height < src.Height / 3, $"转正窗高 {crop.Upright.Height} 不应接近整幅 {src.Height}");
+        }
+    }
+
+    private static Point2d CanonicalCenter(Mat src, Point2f[] contour, Mat template, double extraWarp)
+    {
+        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0.4, extraWarp);
+        using (crop.Upright)
+        {
+            var match = MaskTemplateMatcher.MatchBest(crop.Upright, template, 5, 0.2);
+            Assert.NotNull(match);
+            if (!MaskTemplateMatcher.NeedsUprightAlign(match))
+                return MaskTemplateMatcher.MapUprightToSource(crop, match.CenterInUpright);
+
+            var recrop = MaskTemplateMatcher.UprightCrop(src, contour, 0.4, extraWarp + 180);
+            using (recrop.Upright)
+            {
+                var rematch = MaskTemplateMatcher.MatchBest(
+                    recrop.Upright, template, 5, 0.2, orientationBranchDeg: 0);
+                Assert.NotNull(rematch);
+                Assert.False(MaskTemplateMatcher.IsOrientationFlip(rematch.RotationDeg));
+                return MaskTemplateMatcher.MapUprightToSource(recrop, rematch.CenterInUpright);
+            }
+        }
+    }
+
+    private static Mat FullImageUprightCrop(Mat src, IReadOnlyList<Point2f> contour, double marginRatio)
+    {
+        var rect = Cv2.MinAreaRect(contour);
+        var warpAngleDeg = rect.Size.Width >= rect.Size.Height ? rect.Angle : rect.Angle + 90.0;
+        using var m = Cv2.GetRotationMatrix2D(rect.Center, -warpAngleDeg, 1.0);
+        using var rotated = new Mat();
+        Cv2.WarpAffine(src, rotated, m, src.Size(), InterpolationFlags.Linear, BorderTypes.Reflect101);
+        var cropW = (int)Math.Ceiling(rect.Size.Width * (1 + 2 * marginRatio));
+        var cropH = (int)Math.Ceiling(rect.Size.Height * (1 + 2 * marginRatio));
+        var x = Math.Clamp((int)Math.Floor(rect.Center.X - cropW / 2.0), 0, Math.Max(0, rotated.Width - 1));
+        var y = Math.Clamp((int)Math.Floor(rect.Center.Y - cropH / 2.0), 0, Math.Max(0, rotated.Height - 1));
+        cropW = Math.Min(cropW, rotated.Width - x);
+        cropH = Math.Min(cropH, rotated.Height - y);
+        return rotated[new Rect(x, y, cropW, cropH)].Clone();
     }
 }

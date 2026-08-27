@@ -215,6 +215,38 @@ public class CameraManagerTests
     }
 
     [Fact]
+    public async Task GrabTracedAsync_SeparatesGateWaitFromGrab()
+    {
+        using var manager = new CameraManager();
+        using var enteredGrab = new ManualResetEventSlim(false);
+        using var releaseGrab = new ManualResetEventSlim(false);
+        var camera = new FakeCamera("cam1")
+        {
+            OnGrab = _ =>
+            {
+                enteredGrab.Set();
+                releaseGrab.Wait();
+                return new CameraFrame(VisionImage.AllocateZero(4, 4, 3), DateTime.UtcNow);
+            },
+        };
+        manager.Register(camera);
+
+        var first = manager.GrabTracedAsync("cam1");
+        Assert.True(enteredGrab.Wait(TimeSpan.FromSeconds(2)), "首帧应进入 Grab");
+        var second = manager.GrabTracedAsync("cam1");
+        await Task.Delay(80);
+        releaseGrab.Set();
+
+        var r1 = await first;
+        var r2 = await second;
+        r1.Frame.Dispose();
+        r2.Frame.Dispose();
+
+        Assert.True(r1.GateWaitMs < 40, $"首帧等锁应接近 0，实际 {r1.GateWaitMs:0}ms");
+        Assert.True(r2.GateWaitMs > 30, $"次帧应等到首帧释放门闩，实际等锁 {r2.GateWaitMs:0}ms");
+    }
+
+    [Fact]
     public void Dispose_DisposesAllCameras_AndIsIdempotent()
     {
         var manager = new CameraManager();
