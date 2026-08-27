@@ -44,6 +44,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
     private readonly LightingManager _lighting;
     private readonly AngleStrategyTypeRegistry _angleRegistry;
     private readonly TcpServerManager _tcp;
+    private readonly AssetIntegrityChecker _assets;
     private readonly DispatcherTimer _dirtyTimer;
 
     /// <summary>进入当前编辑状态时的基线副本（脏标记比较基准）。</summary>
@@ -203,7 +204,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         VisionService vision,
         LightingManager lighting,
         AngleStrategyTypeRegistry angleRegistry,
-        TcpServerManager tcp)
+        TcpServerManager tcp,
+        AssetIntegrityChecker assets)
     {
         _loader = loader;
         _cfg = cfg;
@@ -214,6 +216,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         _lighting = lighting;
         _angleRegistry = angleRegistry;
         _tcp = tcp;
+        _assets = assets;
         _dirtyTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _dirtyTimer.Tick += (_, _) => NotifyEditorMutated();
         // 注意：FrameProcessed 只在测试触发期间订阅（见 TestTriggerAsync）——
@@ -338,8 +341,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
     }
 
     /// <summary>
-    /// 示教模板（MaskTemplate 模式）：点亮配方光源 → 取图 → 分割 → 置信度最高的目标转正裁剪 →
-    /// base64 内嵌配方。变换与运行时策略共用 MaskTemplateMatcher，坐标系一致。
+    /// 示教模板（MaskTemplate 模式）：点亮配方光源 → 取图 → 分割 → 转正裁剪 →
+    /// base64 内嵌配方。有特征 ROI 时只裁该框（须落在某个分割目标内）；否则裁整个最优目标。
+    /// 变换与运行时策略共用 MaskTemplateMatcher，坐标系一致。TRIGGER 仍用检测 ROI，不用特征框。
     /// </summary>
     [RelayCommand]
     private async Task TeachTemplateAsync()
@@ -386,20 +390,42 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
                 }
 
                 using var undistortedScope = undistorted;
-                using var roiOwned = RoiHelper.CropToVisionImage(image, Editor.Roi, out _, out _);
+                using var roiOwned = RoiHelper.CropToVisionImage(image, Editor.Roi, out var ox, out var oy);
                 var roiView = roiOwned ?? image;
+                var imgW = image.Width;
+                var imgH = image.Height;
+                var featureRoi = Editor.Template?.Roi;
+                double? featureCx = featureRoi is { } fr
+                    ? (fr.X + fr.Width / 2.0) * imgW - ox
+                    : null;
+                double? featureCy = featureRoi is { } fr2
+                    ? (fr2.Y + fr2.Height / 2.0) * imgH - oy
+                    : null;
+
                 var session = _models.Open(Editor.Models[0], InferenceTask.Segmentation);
                 var results = session.Run(y => y.RunSegmentation(
                     roiView, Editor.Confidence, Editor.Segmentation.PixelConfidence, Editor.Iou));
 
-                foreach (var seg in results.OrderByDescending(s => s.Confidence))
+                var valid = results.Where(s =>
+                    (double)s.Box.Width * s.Box.Height >= 400 && s.ContourLocal.Count >= 4).ToList();
+                if (valid.Count == 0)
+                    throw new InvalidOperationException("分割未检出有效目标，无法示教（请确认模型/阈值/画面内有目标）");
+
+                IReadOnlyList<InstanceSegmentation> candidates = valid;
+                if (featureCx is { } fcx && featureCy is { } fcy)
+                {
+                    var inside = valid.Where(s =>
+                        fcx >= s.Box.Left && fcx < s.Box.Right &&
+                        fcy >= s.Box.Top && fcy < s.Box.Bottom).ToList();
+                    if (inside.Count == 0)
+                        throw new InvalidOperationException(
+                            "特征 ROI 中心未落在分割目标内（请把特征框画在目标上，或检查检测区域/模型）");
+                    candidates = inside;
+                }
+
+                foreach (var seg in candidates.OrderByDescending(s => s.Confidence))
                 {
                     var box = seg.Box;
-                    if ((double)box.Width * box.Height < 400)
-                        continue;
-                    if (seg.ContourLocal.Count < 4)
-                        continue;
-
                     var points = new Point2f[seg.ContourLocal.Count];
                     for (var i = 0; i < seg.ContourLocal.Count; i++)
                     {
@@ -410,7 +436,22 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
                     using var roiMat = VisionImageCv.AsMat(roiView);
                     var crop = MaskTemplateMatcher.UprightCrop(roiMat, points, 0);
                     using (crop.Upright)
-                        return (MaskTemplateMatcher.EncodeTemplatePng(crop.Upright), crop.Upright.Width, crop.Upright.Height);
+                    {
+                        if (featureRoi is null)
+                        {
+                            return (MaskTemplateMatcher.EncodeTemplatePng(crop.Upright),
+                                crop.Upright.Width, crop.Upright.Height);
+                        }
+
+                        using var feature = MaskTemplateMatcher.CropUprightBySourceRect(
+                            crop,
+                            featureRoi.X * imgW - ox,
+                            featureRoi.Y * imgH - oy,
+                            featureRoi.Width * imgW,
+                            featureRoi.Height * imgH);
+                        return (MaskTemplateMatcher.EncodeTemplatePng(feature),
+                            feature.Width, feature.Height);
+                    }
                 }
                 throw new InvalidOperationException("分割未检出有效目标，无法示教（请确认模型/阈值/画面内有目标）");
             });
@@ -420,7 +461,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
             OnPropertyChanged(nameof(HasTemplate));
             OnPropertyChanged(nameof(HasUnsavedChanges));
             OnPropertyChanged(nameof(UnsavedHint));
-            Message = $"模板已示教（{w}×{h}px）· 保存配方后生效";
+            Message = featureHint(w, h);
         }
         catch (Exception ex)
         {
@@ -430,6 +471,10 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         {
             IsBusy = false;
         }
+
+        string featureHint(int tw, int th) => Editor.Template.Roi is not null
+            ? $"模板已示教（特征 {tw}×{th}px）· 保存配方后生效"
+            : $"模板已示教（{tw}×{th}px）· 保存配方后生效";
     }
 
     /// <summary>相机增删后通知下拉重新求值（页面 Loaded 时调用）。</summary>
@@ -508,7 +553,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
     {
         AngleMode.MaskMinAreaRect => "最小外接矩形角度为 [0,180)，无头尾方向；偏心工具补偿可能差 180°",
         AngleMode.DualCenterLine => "默认全局就近配对，多目标间距接近时可能配错；开「窗口配对」后 B 只在 A 外扩窗口内检测，多目标不配错",
-        AngleMode.MaskTemplate => "模板匹配失败会回退粗角度 [0,180)（无方向）；示教须与生产同一套照明",
+        AngleMode.MaskTemplate => "模板匹配失败会回退粗角度 [0,180)（无方向）；示教可单独框选特征（不必等于检测 ROI）；须与生产同一套照明",
         AngleMode.DualBlobCenterLine => "主BLOB质心定位、主→次质心定向（有方向）；次BLOB缺失该目标不输出；无需模型",
         _ => "",
     };
@@ -757,12 +802,28 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
     {
         if (RoiRefWidth <= 0 || RoiRefHeight <= 0)
             return;
-        var w = Math.Clamp(widthPx, 1, RoiRefWidth) / RoiRefWidth;
-        var h = Math.Clamp(heightPx, 1, RoiRefHeight) / RoiRefHeight;
-        var x = Math.Clamp((centerXPx - widthPx / 2) / RoiRefWidth, 0, 1 - w);
-        var y = Math.Clamp((centerYPx - heightPx / 2) / RoiRefHeight, 0, 1 - h);
-        Editor.Roi = new Roi(x, y, w, h);
+        Editor.Roi = RoiFromCenterPx(centerXPx, centerYPx, widthPx, heightPx, RoiRefWidth, RoiRefHeight);
         NotifyRoiChanged();
+    }
+
+    /// <summary>框选特征 ROI 回写（仅示教用，不参与 TRIGGER 裁剪）。</summary>
+    public void ApplyTemplateRoiFromRect(double centerXPx, double centerYPx, double widthPx, double heightPx)
+    {
+        if (RoiRefWidth <= 0 || RoiRefHeight <= 0)
+            return;
+        Editor.Template ??= new();
+        Editor.Template.Roi = RoiFromCenterPx(centerXPx, centerYPx, widthPx, heightPx, RoiRefWidth, RoiRefHeight);
+        NotifyTemplateRoiChanged();
+    }
+
+    private static Roi RoiFromCenterPx(
+        double centerXPx, double centerYPx, double widthPx, double heightPx, int refW, int refH)
+    {
+        var w = Math.Clamp(widthPx, 1, refW) / refW;
+        var h = Math.Clamp(heightPx, 1, refH) / refH;
+        var x = Math.Clamp((centerXPx - widthPx / 2) / refW, 0, 1 - w);
+        var y = Math.Clamp((centerYPx - heightPx / 2) / refH, 0, 1 - h);
+        return new Roi(x, y, w, h);
     }
 
     /// <summary>ROI 变更统一入口：写回 Editor、通知调用属性与派生状态。
@@ -790,6 +851,97 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         OnPropertyChanged(nameof(RoiPxWidth));
         OnPropertyChanged(nameof(RoiPxHeight));
         OnPropertyChanged(nameof(RoiRatioHint));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(UnsavedHint));
+        if (callerProperty != null)
+            OnPropertyChanged(callerProperty);
+    }
+
+    /// <summary>是否启用示教特征框（与检测 ROI 独立；不启用则示教裁整个分割目标）。</summary>
+    public bool UseTemplateRoi
+    {
+        get => Editor.Template?.Roi is not null;
+        set
+        {
+            if (value)
+            {
+                Editor.Template ??= new();
+                Editor.Template.Roi ??= Editor.Roi ?? new Roi(0.25, 0.25, 0.5, 0.5);
+            }
+            else if (Editor.Template is not null)
+                Editor.Template.Roi = null;
+            NotifyTemplateRoiChanged();
+        }
+    }
+
+    public double TemplateRoiPxX
+    {
+        get => Editor.Template?.Roi is { } r && RoiRefWidth > 0 ? Math.Round(r.X * RoiRefWidth) : 0;
+        set
+        {
+            if (RoiRefWidth <= 0 || Editor.Template?.Roi is not { } r)
+                return;
+            var w = Math.Max(1, (int)Math.Round(r.Width * RoiRefWidth));
+            var px = Math.Clamp((int)Math.Round(value), 0, Math.Max(0, RoiRefWidth - w));
+            SetTemplateRoi(nameof(TemplateRoiPxX), x => x with { X = px / (double)RoiRefWidth });
+        }
+    }
+
+    public double TemplateRoiPxY
+    {
+        get => Editor.Template?.Roi is { } r && RoiRefHeight > 0 ? Math.Round(r.Y * RoiRefHeight) : 0;
+        set
+        {
+            if (RoiRefHeight <= 0 || Editor.Template?.Roi is not { } r)
+                return;
+            var h = Math.Max(1, (int)Math.Round(r.Height * RoiRefHeight));
+            var px = Math.Clamp((int)Math.Round(value), 0, Math.Max(0, RoiRefHeight - h));
+            SetTemplateRoi(nameof(TemplateRoiPxY), v => v with { Y = px / (double)RoiRefHeight });
+        }
+    }
+
+    public double TemplateRoiPxWidth
+    {
+        get => Editor.Template?.Roi is { } r && RoiRefWidth > 0 ? Math.Round(r.Width * RoiRefWidth) : 0;
+        set
+        {
+            if (RoiRefWidth <= 0 || Editor.Template?.Roi is not { } r)
+                return;
+            var x = (int)Math.Round(r.X * RoiRefWidth);
+            var px = Math.Clamp((int)Math.Round(value), 1, Math.Max(1, RoiRefWidth - x));
+            SetTemplateRoi(nameof(TemplateRoiPxWidth), v => v with { Width = px / (double)RoiRefWidth });
+        }
+    }
+
+    public double TemplateRoiPxHeight
+    {
+        get => Editor.Template?.Roi is { } r && RoiRefHeight > 0 ? Math.Round(r.Height * RoiRefHeight) : 0;
+        set
+        {
+            if (RoiRefHeight <= 0 || Editor.Template?.Roi is not { } r)
+                return;
+            var y = (int)Math.Round(r.Y * RoiRefHeight);
+            var px = Math.Clamp((int)Math.Round(value), 1, Math.Max(1, RoiRefHeight - y));
+            SetTemplateRoi(nameof(TemplateRoiPxHeight), v => v with { Height = px / (double)RoiRefHeight });
+        }
+    }
+
+    private void SetTemplateRoi(string propertyName, Func<Roi, Roi> update)
+    {
+        if (Editor.Template?.Roi is { } roi)
+        {
+            Editor.Template.Roi = update(roi);
+            NotifyTemplateRoiChanged(propertyName);
+        }
+    }
+
+    private void NotifyTemplateRoiChanged(string? callerProperty = null)
+    {
+        OnPropertyChanged(nameof(UseTemplateRoi));
+        OnPropertyChanged(nameof(TemplateRoiPxX));
+        OnPropertyChanged(nameof(TemplateRoiPxY));
+        OnPropertyChanged(nameof(TemplateRoiPxWidth));
+        OnPropertyChanged(nameof(TemplateRoiPxHeight));
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
         if (callerProperty != null)
@@ -1231,6 +1383,11 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         OnPropertyChanged(nameof(RoiPxHeight));
         OnPropertyChanged(nameof(RoiRefFrameHint));
         OnPropertyChanged(nameof(RoiRatioHint));
+        OnPropertyChanged(nameof(UseTemplateRoi));
+        OnPropertyChanged(nameof(TemplateRoiPxX));
+        OnPropertyChanged(nameof(TemplateRoiPxY));
+        OnPropertyChanged(nameof(TemplateRoiPxWidth));
+        OnPropertyChanged(nameof(TemplateRoiPxHeight));
         OnPropertyChanged(nameof(RotationCenterHint));
         OnPropertyChanged(nameof(IsDualMode));
         OnPropertyChanged(nameof(IsKeyPointMode));
@@ -1248,7 +1405,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         this.Commit();
         try
         {
-            var (hashes, station) = SnapshotAssetPins(Editor);
+            var (hashes, station) = _assets.Snapshot(Editor);
             Editor.ModelSha256 = hashes;
             Editor.StationSha256 = station;
             NotifyEditorMutated();
@@ -1283,7 +1440,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
 
             try
             {
-                var (hashes, station) = SnapshotAssetPins(Editor);
+                var (hashes, station) = _assets.Snapshot(Editor);
                 var modelOk = true;
                 for (var i = 0; i < Editor.ModelSha256.Count; i++)
                 {
@@ -1313,33 +1470,6 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
         }
     }
 
-    private (List<string> ModelHashes, string? StationHash) SnapshotAssetPins(RecipeConfig recipe)
-    {
-        var hashes = new List<string>();
-        if (recipe.AngleMode != AngleMode.DualBlobCenterLine)
-        {
-            foreach (var file in recipe.Models)
-            {
-                if (string.IsNullOrWhiteSpace(file) || !_models.ModelFileExists(file))
-                {
-                    hashes.Add("");
-                    continue;
-                }
-
-                hashes.Add(_models.ComputeSha256(file));
-            }
-        }
-
-        string? station = null;
-        if (!string.IsNullOrWhiteSpace(recipe.StationId))
-        {
-            var includeRotation = recipe.RotationCompensation == RotationCompensationMode.EccentricTool;
-            station = _calibration.ComputeStationSha256(recipe.StationId, includeRotation);
-        }
-
-        return (hashes, station);
-    }
-
     private RecipeListItem DescribeItem(string name)
     {
         try
@@ -1357,6 +1487,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, ID
             // 信息密度：模式/相机/主模型之外，工位、ROI、光源直接可见——
             // 现场找"哪个配方开了 ROI / 用了光源"不再逐个点开
             var tags = new List<string> { mode, r.CameraId, r.Models.FirstOrDefault("") };
+            tags.Add(r.SerialNumber > 0 ? $"#{r.SerialNumber}" : "无序号");
             if (!string.IsNullOrWhiteSpace(r.StationId))
                 tags.Add($"工位:{r.StationId}");
             if (r.Roi is not null)

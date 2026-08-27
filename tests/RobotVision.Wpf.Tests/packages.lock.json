@@ -365,8 +365,8 @@
       },
       "Microsoft.ML.OnnxRuntime.Managed": {
         "type": "Transitive",
-        "resolved": "1.23.0",
-        "contentHash": "YsvYcS/Xp9QW/cN+FqC7iX66eIaV1hDeNLgCjNzY/4HU3J9+ABk5QVqpP1YgcSmOouVq0+/IBR0FYKvLYQi+4g==",
+        "resolved": "1.22.0",
+        "contentHash": "zlG3eY5mJnx1BhYAxRwpuHCGHzl3B+cY5/se0RmlVBw6Yh6QTGjPAXdjhlBIcw6BPFhgMn9lxWPE/U3Fvis+BQ==",
         "dependencies": {
           "System.Memory": "4.5.5",
           "System.Numerics.Tensors": "9.0.0"
@@ -1519,15 +1519,15 @@
         "type": "Project",
         "dependencies": {
           "GigEVision.Net": "[1.0.0, )",
+          "Intel.ML.OnnxRuntime.OpenVino": "[1.22.0, )",
           "LDVisionCamera.Net": "[1.0.0-rc.37, )",
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.5, )",
-          "Microsoft.ML.OnnxRuntime": "[1.23.0, )",
           "OpenCvSharp4": "[4.10.0.20240615, )",
           "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )",
           "System.IO.Ports": "[8.0.0, )",
           "YoloDotNet": "[4.2.0, )",
-          "YoloDotNet.ExecutionProvider.Cpu": "[1.1.0, )"
+          "YoloDotNet.ExecutionProvider.OpenVino": "[1.1.0, )"
         }
       },
       "robotvision.wpf": {
@@ -1572,6 +1572,15 @@
           "SharpDX.Direct2D1": "4.2.0",
           "SharpDX.Direct3D11": "4.2.0",
           "SharpDX.Direct3D9": "4.2.0"
+        }
+      },
+      "Intel.ML.OnnxRuntime.OpenVino": {
+        "type": "CentralTransitive",
+        "requested": "[1.22.0, )",
+        "resolved": "1.22.0",
+        "contentHash": "jn+XCTMHQ7Sz2ncaSMoR0HPFIbVhViLvUiZSUzJ2VwLMVXpYpTkAaFgDpTjwqL9kQLvxoUGqYFRKvK2S3/D+Ew==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.22.0"
         }
       },
       "LDVisionCamera.Net": {
@@ -1672,15 +1681,6 @@
           "Microsoft.Extensions.Options": "8.0.2"
         }
       },
-      "Microsoft.ML.OnnxRuntime": {
-        "type": "CentralTransitive",
-        "requested": "[1.23.0, )",
-        "resolved": "1.23.0",
-        "contentHash": "R/7UnmdaiYj8cqsL/ubpZ7Fq6LjHwhe+esFO4eJCsR1t803ZVQg3XadC25XPh2cB+cbOFS3RcIdYVA/PJzW2DA==",
-        "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.23.0"
-        }
-      },
       "OpenCvSharp4": {
         "type": "CentralTransitive",
         "requested": "[4.10.0.20240615, )",
@@ -1746,13 +1746,13 @@
           "SkiaSharp": "3.119.1"
         }
       },
-      "YoloDotNet.ExecutionProvider.Cpu": {
+      "YoloDotNet.ExecutionProvider.OpenVino": {
         "type": "CentralTransitive",
         "requested": "[1.1.0, )",
         "resolved": "1.1.0",
-        "contentHash": "KYakPp+FjuxWO1W5SLXI4NoTKgEDsXMfWbmWNcvP9lbMzwKPGj22L9N9vVBKnkgSH/8DO1CZHc2/3L/n9o+tCg==",
+        "contentHash": "bS7gu7EoGiDEa5m4eGbVzWjngAt9hgMXO5MYgXWtO/gf8pt8okwn34RF18e9/d5VXIyzC9ZjFHmiVge1RtkgNw==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntime": "1.23.0",
+          "Intel.ML.OnnxRuntime.OpenVino": "1.22.0",
           "YoloDotNet": "4.0.0"
         }
       }

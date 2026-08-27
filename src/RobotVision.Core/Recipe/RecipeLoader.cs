@@ -214,6 +214,8 @@ public sealed class RecipeLoader(string folder)
         if (recipe.Iou is < 0 or > 1)
             throw new InvalidRecipeException(name, "iou 必须在 [0,1]");
 
+        recipe.OutputOffset ??= new();
+        recipe.ModelSha256 ??= [];
         ValidateOutputOffset(recipe);
         ValidateAssetPins(recipe);
 
@@ -224,16 +226,22 @@ public sealed class RecipeLoader(string folder)
             throw new InvalidRecipeException(name, "keypoint 索引不能为负");
 
         if (recipe.Roi is { } roi)
-        {
-            if (roi.X is < 0 or > 1 || roi.Y is < 0 or > 1 ||
-                roi.Width is <= 0 or > 1 || roi.Height is <= 0 or > 1)
-                throw new InvalidRecipeException(name, "roi 的 X/Y 必须在 [0,1]，Width/Height 必须在 (0,1]");
-            // 1e-9 容差：像素↔比例往返换算可能产生 1.0000000000000002 这类浮点毛刺
-            if (roi.X + roi.Width > 1 + 1e-9 || roi.Y + roi.Height > 1 + 1e-9)
-                throw new InvalidRecipeException(name, "roi 超出图像范围（X+Width/Y+Height 不能超过 1）");
-        }
+            ValidateNormalizedRoi(name, "roi", roi);
+        if (recipe.Template?.Roi is { } templateRoi)
+            ValidateNormalizedRoi(name, "template.roi", templateRoi);
 
         ValidateLighting(recipe);
+    }
+
+    /// <summary>相对比例 ROI 值域：X/Y∈[0,1]，W/H∈(0,1]，且不越出右/下边界。</summary>
+    private static void ValidateNormalizedRoi(string recipeName, string field, Roi roi)
+    {
+        if (roi.X is < 0 or > 1 || roi.Y is < 0 or > 1 ||
+            roi.Width is <= 0 or > 1 || roi.Height is <= 0 or > 1)
+            throw new InvalidRecipeException(recipeName, $"{field} 的 X/Y 必须在 [0,1]，Width/Height 必须在 (0,1]");
+        // 1e-9 容差：像素↔比例往返换算可能产生 1.0000000000000002 这类浮点毛刺
+        if (roi.X + roi.Width > 1 + 1e-9 || roi.Y + roi.Height > 1 + 1e-9)
+            throw new InvalidRecipeException(recipeName, $"{field} 超出图像范围（X+Width/Y+Height 不能超过 1）");
     }
 
     private static void ValidateOutputOffset(RecipeConfig recipe)
@@ -375,11 +383,26 @@ public sealed class RecipeLoader(string folder)
     {
         foreach (var name in ListNames())
         {
-            if (Get(name).SerialNumber == serial)
-                return name;
+            try
+            {
+                if (PeekSerialNumber(name) == serial)
+                    return name;
+            }
+            catch (Exception)
+            {
+                // 坏 JSON / 读失败：跳过，不挡住后面已分配该序号的配方
+            }
         }
 
         return null;
+    }
+
+    /// <summary>只读 serialNumber，不做引用校验——查找序号时不应被坏配方打断。</summary>
+    private int PeekSerialNumber(string name)
+    {
+        var path = Path.Combine(folder, name + ".json");
+        var recipe = JsonSerializer.Deserialize<RecipeConfig>(File.ReadAllText(path), JsonOptions);
+        return recipe?.SerialNumber ?? 0;
     }
 
     public string Folder => folder;

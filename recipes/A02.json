@@ -1,6 +1,8 @@
 {
-  // 示例配方二：双检测模型连线模式（A→B 方向唯一）
+  // 示例配方二：双检测模型连线。默认停用，避免产线误触发文件回放相机。
+  "enabled": false,
   "cameraId": "cam_file",
+  "serialNumber": 2,
   "stationId": "",
   "angleMode": "DualCenterLine",
   "models": [ "a02_feat_a.onnx", "a02_feat_b.onnx" ],

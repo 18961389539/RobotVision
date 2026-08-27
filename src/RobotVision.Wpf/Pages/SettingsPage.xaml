@@ -83,7 +83,7 @@
                             </StackPanel>
                             <StackPanel Margin="0,0,10,8">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="并发执行上限（工位数）" Margin="0,0,0,4" />
+                                    <TextBlock Text="并发执行上限（管线工位）" Margin="0,0,0,4" />
                                     <TextBlock Style="{StaticResource RestartHint}" Text="需重启" />
                                 </StackPanel>
                                 <ui:NumberBox Value="{Binding MaxConcurrent}" Minimum="1" Maximum="64"
@@ -105,8 +105,11 @@
                                               SmallChange="1" SpinButtonPlacementMode="Inline" />
                             </StackPanel>
                         </UniformGrid>
+                        <TextBlock Text="{Binding InferenceStatus}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         <ui:TextBlock FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                      Text="并发执行上限必须 ≤ 队列深度；采集超时 60s / 请求总超时 90s 为内置固定值（appsettings.json 可改）" />
+                                      Text="并发槽位是管线工位数，同模型推理仍串行；请求总超时启动下限 90s（json 更小会被抬到 90s）。推理 Provider 在 appsettings Inference:Provider，本页不改。" />
                     </StackPanel>
                 </ui:CardExpander>
 

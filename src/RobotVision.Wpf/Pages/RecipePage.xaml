@@ -264,7 +264,7 @@
                                     <TextBlock Text="序列号（PLC 触发，0=未分配）" Margin="0,0,0,4" FontSize="12" />
                                     <ui:NumberBox Value="{Binding Editor.SerialNumber}" Minimum="0" Maximum="9999"
                                                   SmallChange="1" SpinButtonPlacementMode="Compact"
-                                                  ToolTip="PLC 用 #1 或 1 触发；0 表示未分配。改完后点保存才会写入配方文件。" />
+                                                  ToolTip="#2 表示本框填 2 的配方，不是列表第 2 项。0=未分配，只能用名称触发。改完必须保存。" />
                                 </StackPanel>
                                 <StackPanel Margin="0,0,8,8">
                                     <TextBlock Text="相机" Margin="0,0,0,4" FontSize="12" />
@@ -629,7 +629,7 @@
                                 <DockPanel Margin="0,0,0,6">
                                     <ui:Button DockPanel.Dock="Right" Content="示教模板" Padding="10,3" FontSize="11"
                                                Command="{Binding TeachTemplateCommand}"
-                                               ToolTip="取图 → 分割 → 最优目标转正裁剪存为模板（内嵌配方文件）。仅模板匹配方法需要" />
+                                               ToolTip="取图 → 分割 → 转正裁剪存为模板。若启用特征 ROI，只裁该框（头尾/齿脚等局部纹理）；否则裁整个分割目标。仅模板匹配方法需要" />
                                     <ui:TextBlock FontTypography="BodyStrong" Text="精修设置" VerticalAlignment="Center" />
                                 </DockPanel>
                                 <StackPanel Margin="0,0,0,6">
@@ -702,6 +702,47 @@
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
+                                    <CheckBox Content="单独框选特征（示教用）" FontSize="11" Margin="0,8,0,4"
+                                              IsChecked="{Binding UseTemplateRoi}"
+                                              ToolTip="检测 ROI 决定 TRIGGER 在哪找目标；特征框决定模板吃哪块纹理（齿/脚、丝印等）。不启用则示教仍裁整个分割目标。运行时匹配仍在目标转正窗口内滑窗，不必特征框与检测框相同。" />
+                                    <StackPanel
+                                        Visibility="{Binding UseTemplateRoi,
+                                            Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <UniformGrid Columns="4" Visibility="{Binding HasRoiRefFrame,
+                                                Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <StackPanel Margin="0,0,8,4">
+                                                <TextBlock Text="X (px)" Margin="0,0,0,2" FontSize="11" />
+                                                <ui:NumberBox Value="{Binding TemplateRoiPxX}" Minimum="0"
+                                                              Maximum="{Binding RoiRefWidth}"
+                                                              SmallChange="1" SpinButtonPlacementMode="Compact" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,8,4">
+                                                <TextBlock Text="Y (px)" Margin="0,0,0,2" FontSize="11" />
+                                                <ui:NumberBox Value="{Binding TemplateRoiPxY}" Minimum="0"
+                                                              Maximum="{Binding RoiRefHeight}"
+                                                              SmallChange="1" SpinButtonPlacementMode="Compact" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,8,4">
+                                                <TextBlock Text="宽 (px)" Margin="0,0,0,2" FontSize="11" />
+                                                <ui:NumberBox Value="{Binding TemplateRoiPxWidth}" Minimum="1"
+                                                              Maximum="{Binding RoiRefWidth}"
+                                                              SmallChange="1" SpinButtonPlacementMode="Compact" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,0,4">
+                                                <TextBlock Text="高 (px)" Margin="0,0,0,2" FontSize="11" />
+                                                <ui:NumberBox Value="{Binding TemplateRoiPxHeight}" Minimum="1"
+                                                              Maximum="{Binding RoiRefHeight}"
+                                                              SmallChange="1" SpinButtonPlacementMode="Compact" />
+                                            </StackPanel>
+                                        </UniformGrid>
+                                        <ui:Button Content="框选特征" FontSize="11" Padding="10,4" Margin="0,0,0,4"
+                                                   HorizontalAlignment="Left"
+                                                   Click="OnDrawTemplateRoiClick"
+                                                   ToolTip="在预览图上拖出橙色特征框（可与绿色检测框并存）。示教时只把该框内纹理存成模板。" />
+                                        <TextBlock FontSize="10" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                   Text="橙色=特征（示教），绿色=检测（TRIGGER）。特征中心须落在分割目标上。" />
+                                    </StackPanel>
                                 </StackPanel>
                             </StackPanel>
 

@@ -12,6 +12,7 @@
 | 操作系统 | Windows 10/11 x64(工控机建议 Windows 10 LTSC) |
 | 运行时 | 无需安装 .NET 8(自包含包已内置) |
 | 相机驱动 | GigE 相机:网卡 IP 与相机同网段,放行 UDP 3956;Basler:安装 pylon 运行库 |
+| 推理 | Intel 核显（OpenVINO GPU）。GPU 不可用时自动回退 OpenVINO CPU（日志有警告）。也可把 `Inference:Provider` 改为 `OpenVinoCpu` |
 | 磁盘 | 至少 2GB(含失败现场图/指标留存) |
 
 ## 2. 目录结构(解压后)
@@ -81,7 +82,7 @@ RobotVision/
 | 操作 | 方式 |
 |---|---|
 | 查看运行状态 | TCP `STATUS` → `OK,ready|busy,队列深度,上限,最近耗时ms` |
-| 手动触发 | 界面「手动触发」或 TCP `TRIGGER,配方名` |
+| 手动触发 | 界面「手动触发」或 TCP 配方名（如 `A01`；旧 `TRIGGER,A01` 会 1013） |
 | 解除过程联锁 | 界面「解除联锁」或 TCP `CLEARINHIBIT`(1018 触发后) |
 | 查看日志 | `logs/` 下 Serilog 文件(按天滚动) |
 | 定位失败原因 | 先查 `data/failures/` 最近现场图,再对 [错误码总表](./ERROR-CODES.md) |
@@ -100,7 +101,8 @@ RobotVision/
 |---|---|---|
 | `IpAddress` / `TcpPort` | 0.0.0.0 / 9999 | TCP 监听 |
 | `TimeoutMs` | 90000 | 单次触发超时 |
-| `MaxQueueDepth` / `MaxConcurrent` | 4 / 2 | 排队上限 / 并发槽位 |
+| `MaxQueueDepth` / `MaxConcurrent` | 4 / 2 | 排队上限 / 管线工位槽（同模型推理仍串行） |
+| `Inference:Provider` | OpenVinoGpu | OpenVinoGpu 或 OpenVinoCpu；GPU 失败且模型有效时回退 CPU |
 | `RecipesFolder` / `ModelsFolder` | recipes / models | 相对 exe 目录 |
 | `CalibrationFolder` | data/calibration | 标定档案目录 |
 | `FailureImage.Enabled/RetainedCount` | true / 200 | 失败现场留存 |

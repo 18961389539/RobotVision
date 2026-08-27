@@ -29,9 +29,35 @@
             <ivc:ImageViewer x:Name="Viewer" ImageSource="{Binding DisplayImage}" />
         </Border>
 
+        <!-- 连续失败联锁：须可点击「解除联锁」，因此不放进 IsHitTestVisible=False 的状态栈 -->
+        <Border HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="8" Panel.ZIndex="40"
+                Padding="12,8" CornerRadius="4" Background="#C0A32D2D"
+                Visibility="{Binding HasInterlock, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding InterlockText}" Foreground="White" FontSize="12"
+                           TextWrapping="Wrap" VerticalAlignment="Center" />
+                <ui:Button Grid.Column="1" Content="解除联锁" Appearance="Primary" Margin="12,0,0,0"
+                           Command="{Binding ClearInhibitCommand}" Padding="12,4" />
+            </Grid>
+        </Border>
+
         <!-- 左上：状态 + 触发结果横幅 -->
-        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Panel.ZIndex="30"
+        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Panel.ZIndex="30"
                     IsHitTestVisible="False">
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                    <Setter Property="Margin" Value="10" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasInterlock}" Value="True">
+                            <Setter Property="Margin" Value="10,72,10,10" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </StackPanel.Style>
             <Border Background="#B0000000" CornerRadius="3" Padding="8,4" Margin="0,0,0,6">
                 <TextBlock Text="{Binding StatusText}" Foreground="White" />
             </Border>
@@ -146,7 +172,7 @@
                                            Content="{Binding TriggerButtonText}"
                                            IsEnabled="{Binding CanTrigger}"
                                            FontSize="14"
-                                           ToolTip="触发一次完整流程：取图 → 去畸变 → 推理 → 坐标变换（快捷键 F5）"
+                                           ToolTip="触发一次完整流程：取图 → 预处理（去畸变或原图克隆）→ 推理 → 坐标变换（快捷键 F5）"
                                            Command="{Binding TriggerCommand}" />
                                 <ui:CardExpander Header="高级选项" IsExpanded="False" Margin="0,8,0,0">
                                     <StackPanel Margin="0,10,0,0">

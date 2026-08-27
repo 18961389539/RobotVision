@@ -124,6 +124,16 @@ public class ProtocolTests
         Assert.Equal("A01", TcpServerManager.ParseClearInhibitRecipe("clearinhibit, A01 ,extra"));
     }
 
+    [Fact]
+    public void IsClearInhibitCommand_ExactOrComma_NotPrefixGlue()
+    {
+        Assert.True(TcpServerManager.IsClearInhibitCommand("CLEARINHIBIT"));
+        Assert.True(TcpServerManager.IsClearInhibitCommand("clearinhibit,A01"));
+        Assert.False(TcpServerManager.IsClearInhibitCommand("CLEARINHIBITED"));
+        Assert.False(TcpServerManager.IsClearInhibitCommand("CLEARINHIBITFOO"));
+        Assert.True(TcpServerManager.IsClearInhibitCommand(" CLEARINHIBIT "));
+    }
+
     // ---- 触发行格式（配方名 / 序列号,X,Y,RZ）----
 
     [Fact]

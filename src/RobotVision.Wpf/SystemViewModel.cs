@@ -25,6 +25,7 @@ public partial class SystemViewModel : ObservableObject
     private readonly RecipeLoader _recipes;
     private readonly FailureImageStore _failures;
     private readonly ModelManager _models;
+    private readonly IInferenceEngineFactory _inference;
     private readonly DispatcherTimer _timer;
 
     public ObservableCollection<CameraBadge> CameraBadges { get; } = [];
@@ -53,7 +54,8 @@ public partial class SystemViewModel : ObservableObject
         CameraManager cameras,
         RecipeLoader recipes,
         FailureImageStore failures,
-        ModelManager models)
+        ModelManager models,
+        IInferenceEngineFactory inference)
     {
         _cfg = cfg;
         _tcp = tcp;
@@ -62,6 +64,7 @@ public partial class SystemViewModel : ObservableObject
         _recipes = recipes;
         _failures = failures;
         _models = models;
+        _inference = inference;
 
         RebuildSettings();
         RebuildDirectories();
@@ -86,20 +89,22 @@ public partial class SystemViewModel : ObservableObject
             _cfg.MaxQueueDepth, _cfg.MaxConcurrent,
             _cfg.TcpBacklog, _cfg.MaxConnections, string.Join(",", _cfg.IpWhitelist),
             _cfg.FileLogging.Enabled, _cfg.FileLogging.RetainedDays,
-            _failures.Enabled, _cfg.FailureImage.RetainedCount);
+            _failures.Enabled, _cfg.FailureImage.RetainedCount,
+            _cfg.Inference.Provider, _inference.ActiveDevice, _inference.GpuUnavailable);
         if (digest == _settingsDigest)
             return;
         _settingsDigest = digest;
 
         Settings.Clear();
-        Settings.Add(new("TCP 监听", $"{_cfg.IpAddress}:{_cfg.TcpPort}（重启生效）"));
-        Settings.Add(new("请求超时", $"{_cfg.TimeoutMs} ms"));
+        Settings.Add(new("TCP 监听", $"{_cfg.IpAddress}:{_cfg.TcpPort}（保存后热重启监听）"));
+        Settings.Add(new("请求超时", $"{_cfg.TimeoutMs} ms（启动下限 90000）"));
         Settings.Add(new("连接空闲超时", _cfg.IdleTimeoutMs <= 0 ? "永久" : $"{_cfg.IdleTimeoutMs} ms"));
         Settings.Add(new("位姿校验", _cfg.PoseCheck.Enabled
             ? $"开 · XY {_cfg.PoseCheck.XyToleranceMm:0.###}mm · RZ {_cfg.PoseCheck.RzToleranceDeg:0.###}°"
             : "关"));
         Settings.Add(new("最大排队深度", $"{_cfg.MaxQueueDepth}"));
-        Settings.Add(new("并发推理槽位", $"{_cfg.MaxConcurrent}"));
+        Settings.Add(new("并发管线槽位", $"{_cfg.MaxConcurrent}（同模型推理仍串行）"));
+        Settings.Add(new("推理", FormatInference()));
         Settings.Add(new("TCP backlog", $"{_cfg.TcpBacklog}"));
         Settings.Add(new("最大连接数", _cfg.MaxConnections <= 0 ? "不限" : $"{_cfg.MaxConnections}"));
         Settings.Add(new("IP 白名单", _cfg.IpWhitelist.Count == 0
@@ -109,6 +114,18 @@ public partial class SystemViewModel : ObservableObject
             ? $"开启 · 保留 {_cfg.FileLogging.RetainedDays} 天" : "关闭"));
         Settings.Add(new("失败留存", _failures.Enabled
             ? $"开启 · 保留 {_cfg.FailureImage.RetainedCount} 张" : "关闭"));
+    }
+
+    private string FormatInference()
+    {
+        var configured = string.IsNullOrWhiteSpace(_cfg.Inference.Provider)
+            ? "OpenVinoGpu"
+            : _cfg.Inference.Provider;
+        if (_inference.GpuUnavailable)
+            return $"配置 {configured} · 实际 OpenVINO CPU（GPU 不可用，重启后才再试）";
+        if (string.IsNullOrEmpty(_inference.ActiveDevice))
+            return $"配置 {configured} · 尚未加载模型";
+        return $"配置 {configured} · 实际 OpenVINO {_inference.ActiveDevice}";
     }
 
     /// <summary>重建目录列表（配置路径变化才更新，避免显示过期路径）。</summary>

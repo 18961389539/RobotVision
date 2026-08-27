@@ -12,8 +12,8 @@
     <PackageReference Include="OpenCvSharp4" />
     <PackageReference Include="OpenCvSharp4.runtime.win" />
     <PackageReference Include="YoloDotNet" />
-    <PackageReference Include="YoloDotNet.ExecutionProvider.Cpu" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" GeneratePathProperty="true" />
+    <PackageReference Include="YoloDotNet.ExecutionProvider.OpenVino" />
+    <PackageReference Include="Intel.ML.OnnxRuntime.OpenVino" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="System.IO.Ports" />
     <!-- 未检测到本机 pylon 安装时回退 NuGet 10.x（须与已装 pylon 大版本一致，否则枚举 SEH 异常）。 -->
@@ -51,13 +51,15 @@
     <ProjectReference Include="..\RobotVision.Core\RobotVision.Core.csproj" />
   </ItemGroup>
 
-  <!-- 本机 System32 存在同名旧版 onnxruntime.dll 会抢先加载（OrtGetApiBase 入口点缺失），
-       将 win-x64 原生库放到输出根目录：应用目录优先于 System32。随项目引用传递到 App/CalibTool/Tests。
-       另外 onnxruntime.dll 依赖 VC++ 2015-2022 运行库，本机未安装系统级 Redistributable，
-       故将三个 x64 运行库 DLL 一并应用本地部署（取自 Edge 应用目录，许可允许）。 -->
+  <!-- 本机 System32 存在同名旧版 onnxruntime.dll 会抢先加载。
+       OpenVINO EP 的 win-x64 原生库放到输出根目录（随项目引用传到 App/Tests）。
+       另将 VC++ 2015-2022 运行库 DLL 应用本地部署（native\，许可允许）。 -->
   <ItemGroup>
-    <None Include="$(PkgMicrosoft_ML_OnnxRuntime)\runtimes\win-x64\native\onnxruntime.dll" CopyToOutputDirectory="PreserveNewest" Link="onnxruntime.dll" Visible="false" />
-    <None Include="$(PkgMicrosoft_ML_OnnxRuntime)\runtimes\win-x64\native\onnxruntime_providers_shared.dll" CopyToOutputDirectory="PreserveNewest" Link="onnxruntime_providers_shared.dll" Visible="false" />
+    <None Include="$(PkgIntel_ML_OnnxRuntime_OpenVino)\runtimes\win-x64\native\*.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="%(Filename)%(Extension)"
+          Visible="false"
+          Condition="'$(PkgIntel_ML_OnnxRuntime_OpenVino)' != '' and Exists('$(PkgIntel_ML_OnnxRuntime_OpenVino)\runtimes\win-x64\native')" />
     <None Update="native\*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>
 

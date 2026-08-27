@@ -222,11 +222,13 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             Thread.Sleep(1000);
             devices = TryEnumeratePylon();
         }
-        var match = FindPylonDevice(devices, _deviceId) ?? FindPylonDevice(devices, forcedIp ?? "");
+        var specified = !string.IsNullOrWhiteSpace(_deviceId);
+        var match = FindPylonDevice(devices, _deviceId)
+                    ?? (!specified ? null : FindPylonDevice(devices, forcedIp ?? ""));
         if (match is not null)
             return new Camera(match);
 
-        foreach (var key in new[] { _deviceId, forcedIp })
+        foreach (var key in new[] { _deviceId, specified ? forcedIp : null })
         {
             if (string.IsNullOrWhiteSpace(key))
                 continue;
@@ -240,7 +242,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(forcedIp))
+        if (specified && !string.IsNullOrWhiteSpace(forcedIp))
         {
             try
             {
@@ -255,17 +257,36 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             }
         }
 
-        if (devices.Count > 0)
+        if (!specified && devices.Count == 1)
         {
-            if (devices.Count > 1)
-                _log?.LogWarning(
-                    "Basler 相机 {Id} 未指定 DeviceId，将绑定第一台（共 {Count} 台）: SN={Sn}",
-                    Id, devices.Count, devices[0][CameraInfoKey.SerialNumber]);
+            _log?.LogInformation("Basler 相机 {Id} 未指定 DeviceId，现场仅一台，绑定 SN={Sn}",
+                Id, devices[0][CameraInfoKey.SerialNumber]);
             return new Camera(devices[0]);
         }
 
+        var available = string.Join("; ", devices.Select(FormatPylonDevice));
+        if (devices.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "未发现可打开的 Basler 相机。请完全退出 pylon Viewer，确认网卡与相机 IP 同网段（169.254 与 192.168 不能直接互通），并检查防火墙。");
+        }
+
         throw new InvalidOperationException(
-            "未发现可打开的 Basler 相机。请完全退出 pylon Viewer，确认网卡与相机 IP 同网段（169.254 与 192.168 不能直接互通），并检查防火墙。");
+            CameraDeviceSelection.UnresolvedMessage(Id, _deviceId, devices.Count, available));
+    }
+
+    private static string FormatPylonDevice(ICameraInfo device)
+    {
+        try
+        {
+            var sn = device[CameraInfoKey.SerialNumber];
+            var ip = device[CameraInfoKey.DeviceIpAddress];
+            return string.IsNullOrEmpty(ip) ? sn : $"{sn}/{ip}";
+        }
+        catch
+        {
+            return "?";
+        }
     }
 
     private string? TryForceGigEIpIntoNicSubnet()
@@ -287,28 +308,15 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
     }
 
-    private static GigECameraInfo? SelectGigE(IReadOnlyList<GigECameraInfo> cameras, string deviceId)
-    {
-        if (cameras.Count == 0)
-            return null;
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return cameras[0];
-        foreach (var camera in cameras)
-        {
-            if (string.Equals(camera.SerialNumber, deviceId, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(camera.IpAddress.ToString(), deviceId, StringComparison.OrdinalIgnoreCase))
-                return camera;
-        }
-
-        return cameras[0];
-    }
+    private static GigECameraInfo? SelectGigE(IReadOnlyList<GigECameraInfo> cameras, string deviceId) =>
+        CameraDeviceSelection.Resolve(cameras, deviceId, static (camera, needle) =>
+            string.Equals(camera.SerialNumber, needle, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(camera.IpAddress.ToString(), needle, StringComparison.OrdinalIgnoreCase));
 
     private static ICameraInfo? FindPylonDevice(List<ICameraInfo> devices, string deviceId)
     {
-        if (devices.Count == 0)
+        if (devices.Count == 0 || string.IsNullOrWhiteSpace(deviceId))
             return null;
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return devices[0];
 
         var needle = deviceId.Trim();
         foreach (var device in devices)

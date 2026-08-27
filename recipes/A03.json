@@ -1,7 +1,10 @@
 {
   // 联调/回归配方：与 A01 相同的关键点模型，但走 cam_file 文件回放相机。
   // 生产机 Basler 相机可用时用 A01；开发机无 pylon/相机时用本配方验证全链路。
+  // 联调/回归配方：文件回放。默认停用，避免产线误触发。
+  "enabled": false,
   "cameraId": "cam_file",
+  "serialNumber": 3,
   "stationId": "",
   "angleMode": "KeyPointLine",
   "models": [ "a01_kpt.onnx" ],

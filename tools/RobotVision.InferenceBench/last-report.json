@@ -1,0 +1,181 @@
+{
+  "imageCount": 14,
+  "sizes": [
+    "1505\u00D7968"
+  ],
+  "phaseA": [
+    {
+      "name": "CPU",
+      "latency": {
+        "p50": 41.74605,
+        "p95": 46.199279999999995,
+        "p99": 50.649743,
+        "mean": 42.677755000000005,
+        "min": 39.944,
+        "max": 52.9961
+      },
+      "detectCount": 1,
+      "fingerprint": [
+        {
+          "label": "OSFP",
+          "score": 0.9116482734680176,
+          "x": 409,
+          "y": 284,
+          "w": 863,
+          "h": 421,
+          "cx": 840.5,
+          "cy": 494.5
+        }
+      ],
+      "error": null,
+      "workerDevice": null
+    },
+    {
+      "name": "OpenVINO CPU",
+      "latency": {
+        "p50": 44.55875,
+        "p95": 47.941335,
+        "p99": 48.077003000000005,
+        "mean": 44.65844749999999,
+        "min": 40.8674,
+        "max": 48.1208
+      },
+      "detectCount": 1,
+      "fingerprint": [
+        {
+          "label": "OSFP",
+          "score": 0.9116482734680176,
+          "x": 409,
+          "y": 284,
+          "w": 863,
+          "h": 421,
+          "cx": 840.5,
+          "cy": 494.5
+        }
+      ],
+      "error": null,
+      "workerDevice": "AUTO:CPU"
+    },
+    {
+      "name": "OpenVINO GPU",
+      "latency": {
+        "p50": 33.4755,
+        "p95": 35.799479999999996,
+        "p99": 37.450008999999994,
+        "mean": 33.77562249999999,
+        "min": 32.6459,
+        "max": 38.1508
+      },
+      "detectCount": 1,
+      "fingerprint": [
+        {
+          "label": "OSFP",
+          "score": 0.91162109375,
+          "x": 409,
+          "y": 284,
+          "w": 862,
+          "h": 421,
+          "cx": 840,
+          "cy": 494.5
+        }
+      ],
+      "error": null,
+      "workerDevice": "GPU"
+    }
+  ],
+  "serialWinner": {
+    "name": "OpenVINO GPU \u4E32\u884C",
+    "makespan": {
+      "p50": 67.54425,
+      "p95": 69.271775,
+      "p99": 70.192515,
+      "mean": 67.63232500000001,
+      "min": 66.1029,
+      "max": 70.4227
+    },
+    "waitA": {
+      "p50": 33.794200000000004,
+      "p95": 34.814165,
+      "p99": 34.885073,
+      "mean": 33.861574999999995,
+      "min": 32.8901,
+      "max": 34.9028
+    },
+    "waitB": {
+      "p50": 33.5834,
+      "p95": 35.302575000000004,
+      "p99": 36.696035,
+      "mean": 33.76806500000001,
+      "min": 32.5951,
+      "max": 37.0444
+    }
+  },
+  "parallelWinner": {
+    "name": "OpenVINO GPU \u53CC\u4F1A\u8BDD\u5E76\u884C",
+    "makespan": {
+      "p50": 54.2162,
+      "p95": 57.399415000000005,
+      "p99": 58.316203,
+      "mean": 54.61843499999999,
+      "min": 52.4125,
+      "max": 58.5454
+    },
+    "waitA": {
+      "p50": 54.081050000000005,
+      "p95": 56.111475,
+      "p99": 56.814854999999994,
+      "mean": 52.004255,
+      "min": 35.408,
+      "max": 56.9907
+    },
+    "waitB": {
+      "p50": 54.033950000000004,
+      "p95": 56.496095,
+      "p99": 57.075139,
+      "mean": 51.47732499999999,
+      "min": 38.2074,
+      "max": 57.2199
+    }
+  },
+  "mixed": {
+    "name": "\u6DF7\u6C60 CPU \u002B OpenVINO GPU",
+    "makespan": {
+      "p50": 46.48035,
+      "p95": 49.174285000000005,
+      "p99": 55.58237699999998,
+      "mean": 46.93838999999999,
+      "min": 43.8837,
+      "max": 57.1844
+    },
+    "waitA": {
+      "p50": 46.42915,
+      "p95": 49.10426000000001,
+      "p99": 55.51957199999999,
+      "mean": 46.88195499999999,
+      "min": 43.8592,
+      "max": 57.1234
+    },
+    "waitB": {
+      "p50": 40.44255,
+      "p95": 45.196580000000004,
+      "p99": 48.591955999999996,
+      "mean": 40.85150500000001,
+      "min": 38.3434,
+      "max": 49.4408
+    }
+  },
+  "decision": {
+    "winnerEp": "OpenVINO GPU",
+    "switchFromCpu": true,
+    "addSecondSameEpSession": true,
+    "dropMixedPool": false,
+    "lines": [
+      "Phase A \u8D62\u5BB6\uFF1AOpenVINO GPU\uFF08p50=33.48 ms\uFF0C\u7EA6\u4E3A CPU \u7684 1.25\u00D7 \u5FEB\uFF09\u3002",
+      "\u5EFA\u8BAE\uFF1A\u5168\u5C40\u6362\u6210 OpenVINO GPU\uFF0C\u5148\u4FDD\u6301\u4E00\u4E2A\u4F1A\u8BDD\uFF08\u6539 Inference:Provider\uFF0C\u4E0D\u8981\u6DF7\u6C60\uFF09\u3002",
+      "Phase B \u4E24\u67AA\u9F50\u6D3B\uFF1A\u4E32\u884C p50=67.54 ms\uFF0C\u53CC\u540C\u7C7B\u4F1A\u8BDD\u5E76\u884C p50=54.22 ms\uFF08\u76F8\u5BF9\u4E32\u884C 20%\uFF09\u3002",
+      "\u5EFA\u8BAE\uFF1A\u4EC5\u5F53\u73B0\u573A\u786E\u6709\u4E24\u8DEF TRIGGER \u91CD\u53E0\u65F6\uFF0C\u518D\u5F00\u7B2C\u4E8C\u4E2A\u76F8\u540C EP \u4F1A\u8BDD\u3002\u540C\u4E00\u76F8\u673A\u53D6\u56FE\u4ECD\u662F\u4E32\u884C\u7684\u3002",
+      "\u6DF7\u6C60\u5BF9\u7167\uFF08CPU\u002BOpenVINO \u5404\u4E00\u67AA\uFF09\u9F50\u6D3B p50=46.48 ms\uFF0C\u8D62\u5BB6\u4E32\u884C\u4E24\u67AA p50=67.54 ms\u3002",
+      "\u6DF7\u6C60\u9F50\u6D3B\u7565\u77ED\u4E8E\u8D62\u5BB6\u4E32\u884C\u4E24\u67AA\uFF0C\u4F46\u4ECD\u4E0D\u8981\u4F5C\u9ED8\u8BA4\uFF1A\u8C03\u5EA6\u590D\u6742\uFF0C\u4E14\u5355\u67AA\u53EF\u80FD\u843D\u5230\u6162\u8DEF\u4E0A\u3002"
+    ]
+  }
+}

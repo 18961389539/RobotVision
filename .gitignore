@@ -17,6 +17,9 @@ data/*
 !data/calibration/**
 models/*.onnx
 
+# OpenVINO 编译缓存（exe 旁 ovcache/）
+ovcache/
+
 # CodeGraph 本地索引数据库（工具数据，不入库）
 .codegraph/
 

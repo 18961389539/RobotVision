@@ -20,4 +20,8 @@
     <ProjectReference Include="..\RobotVision.Infrastructure\RobotVision.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="RobotVision.Tests" />
+  </ItemGroup>
+
 </Project>

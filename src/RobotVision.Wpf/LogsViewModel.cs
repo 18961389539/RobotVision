@@ -57,7 +57,7 @@ public sealed partial record LogRow
 
 /// <summary>
 /// 日志文件浏览：按天列文件、级别/关键词过滤、异常堆栈并入所属条目、
-/// 可选跟随文件尾部（2s 轮询，写日志的进程是本程序自身，读文件无锁冲突）。
+/// 可选跟随文件尾部（2s 轮询）。读文件必须 FileShare.ReadWrite：Serilog 正在追加同一文件。
 /// </summary>
 public partial class LogsViewModel : ObservableObject
 {
@@ -176,7 +176,7 @@ public partial class LogsViewModel : ObservableObject
             // 文件读取 + 行解析在后台线程（大日志文件不冻结 UI）
             var (rows, total, trimmed) = await Task.Run(() =>
             {
-                var lines = File.ReadAllLines(path);
+                var lines = ReadAllLinesShared(path);
                 var totalCount = lines.Length;
                 if (lines.Length > MaxRows)
                     lines = lines[(lines.Length - MaxRows)..];
@@ -300,7 +300,7 @@ public partial class LogsViewModel : ObservableObject
         {
             var (tail, total, needFullReload) = await Task.Run(() =>
             {
-                var lines = File.ReadAllLines(_loadedPath);
+                var lines = ReadAllLinesShared(_loadedPath);
                 var totalCount = lines.Length;
                 if (totalCount <= _parsedLineCount)
                     return (Array.Empty<string>(), totalCount, false);
@@ -352,5 +352,22 @@ public partial class LogsViewModel : ObservableObject
         catch (OperationCanceledException)
         {
         }
+    }
+
+    /// <summary>
+    /// 与正在写入的 Serilog 共享打开。File.ReadAllLines 默认 FileShare.Read，
+    /// 对已有写句柄会 ERROR_SHARING_VIOLATION（0x80070020）。
+    /// </summary>
+    internal static string[] ReadAllLinesShared(string path)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 4096, FileOptions.SequentialScan);
+        using var reader = new StreamReader(stream);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line)
+            lines.Add(line);
+        return [.. lines];
     }
 }

@@ -110,5 +110,83 @@ public class ProcessHealthTests : IDisposable
 
         var result = await vision.RunAsync("A01", CancellationToken.None);
         Assert.Equal(VisionErrorCode.ProcessUnhealthy, result.ErrorCode);
+
+        var tasks = Enumerable.Range(0, 8)
+            .Select(_ => vision.RunAsync("A01", CancellationToken.None))
+            .ToArray();
+        var results = await Task.WhenAll(tasks);
+        Assert.All(results, r => Assert.Equal(VisionErrorCode.ProcessUnhealthy, r.ErrorCode));
+
+        var stats = vision.GetRecipeStats().Single(s => s.Recipe == "A01");
+        Assert.Equal(1, stats.Failed);
+        Assert.Equal(1, stats.ConsecutiveFails);
+    }
+
+    [Fact]
+    public async Task InhibitedRecipe_DoesNotOccupyQueueForOtherRecipes()
+    {
+        var recipesDir = Path.Combine(_dir, "recipes");
+        Directory.CreateDirectory(recipesDir);
+        File.WriteAllText(Path.Combine(recipesDir, "A01.json"), """
+            { "cameraId": "cam_v", "angleMode": "KeyPointLine", "models": ["m.onnx"] }
+            """);
+        File.WriteAllText(Path.Combine(recipesDir, "B01.json"), """
+            { "cameraId": "cam_v", "angleMode": "KeyPointLine", "models": ["m.onnx"] }
+            """);
+
+        var store = new ProcessHealthStore(
+            new ProcessHealthConfig { Enabled = true, ConsecutiveFailLimit = 1, InhibitOnLimit = true },
+            _dir, NullLogger<ProcessHealthStore>.Instance);
+        var seed = new VisionMetrics();
+        var fail = VisionResult.Fail("A01", VisionErrorCode.NoTargetFound, "miss", 1);
+        seed.Record(fail);
+        store.OnCompleted(fail, seed);
+
+        var cameras = new CameraManager();
+        cameras.Register(new VirtualCamera("cam_v", 64, 64, "Bars"));
+        var vision = new VisionService(
+            new RecipeLoader(recipesDir), cameras, new LightingManager(), new CalibrationManager(),
+            new AngleStrategyFactory(new ModelManager(_dir)),
+            new FailureImageStore(new FailureImageConfig { Folder = Path.Combine(_dir, "f") },
+                NullLogger<FailureImageStore>.Instance),
+            NullLogger<VisionService>.Instance,
+            assets: null,
+            health: store)
+        {
+            MaxQueueDepth = 1,
+            MaxConcurrent = 1,
+        };
+
+        var blocked = Enumerable.Range(0, 8)
+            .Select(_ => vision.RunAsync("A01", CancellationToken.None));
+        var other = vision.RunAsync("B01", CancellationToken.None);
+        var results = await Task.WhenAll(blocked.Append(other));
+
+        Assert.All(results.Take(8), r => Assert.Equal(VisionErrorCode.ProcessUnhealthy, r.ErrorCode));
+        Assert.NotEqual(VisionErrorCode.Busy, results[8].ErrorCode);
+        Assert.NotEqual(VisionErrorCode.ProcessUnhealthy, results[8].ErrorCode);
+    }
+
+    [Fact]
+    public void Restore_WhenDisabled_StillLoadsConsecutive()
+    {
+        var on = new ProcessHealthStore(
+            new ProcessHealthConfig { Enabled = true, ConsecutiveFailLimit = 1, InhibitOnLimit = true },
+            _dir, NullLogger<ProcessHealthStore>.Instance);
+        var metrics = new VisionMetrics();
+        var fail = VisionResult.Fail("A01", VisionErrorCode.NoTargetFound, "miss", 1);
+        metrics.Record(fail);
+        on.OnCompleted(fail, metrics);
+
+        var off = new ProcessHealthStore(
+            new ProcessHealthConfig { Enabled = false, ConsecutiveFailLimit = 1, InhibitOnLimit = true },
+            _dir, NullLogger<ProcessHealthStore>.Instance);
+        var restored = new VisionMetrics();
+        off.RestoreInto(restored);
+        Assert.Equal(1, restored.GetConsecutiveFails("A01"));
+        Assert.False(off.IsInhibited(restored, "A01"));
+
+        off.ApplyConfig(new ProcessHealthConfig { Enabled = true, ConsecutiveFailLimit = 1, InhibitOnLimit = true });
+        Assert.True(off.IsInhibited(restored, "A01"));
     }
 }

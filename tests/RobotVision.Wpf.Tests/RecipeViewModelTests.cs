@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure.Cameras;
@@ -25,6 +26,7 @@ public class RecipeViewModelTests : IDisposable
     private readonly RobotVision.Infrastructure.Inference.ModelManager _models;
     private readonly RobotVision.Infrastructure.Lighting.LightingManager _lighting = new();
     private readonly RobotVision.Infrastructure.Inference.Strategies.AngleStrategyTypeRegistry _angleRegistry = new();
+    private readonly AssetIntegrityChecker _assets;
 
     public RecipeViewModelTests()
     {
@@ -46,6 +48,8 @@ public class RecipeViewModelTests : IDisposable
 
         _loader = new RecipeLoader(_recipeFolder);
         _models = new RobotVision.Infrastructure.Inference.ModelManager(_dir.Path);
+        _assets = new AssetIntegrityChecker(
+            new AppConfig(), _models, _calibration, NullLogger<AssetIntegrityChecker>.Instance);
         _vision = TestInfra.CreateVisionService(_recipeFolder, _cameras);
         _tcp = TestInfra.CreateTcp();
     }
@@ -57,7 +61,7 @@ public class RecipeViewModelTests : IDisposable
     }
 
     private RecipeViewModel CreateVm() =>
-        new(_loader, _cfg, _cameras, _models, _calibration, _vision, _lighting, _angleRegistry, _tcp);
+        new(_loader, _cfg, _cameras, _models, _calibration, _vision, _lighting, _angleRegistry, _tcp, _assets);
 
     [Fact]
     public void Ctor_LoadsRecipeList_SelectsFirst()

@@ -60,7 +60,7 @@ public sealed class ModelSession
 /// - 安全卸载：先置卸载标记，再等在途推理离开临界区，最后释放引擎（幂等）——
 ///   卸载/裁剪/退出永不 Dispose 正在推理的会话。
 /// 推理后端（ExecutionProvider/框架）由 <see cref="IInferenceEngineFactory"/> 决定——
-/// 默认 YoloDotNet CPU（appsettings 的 Inference:Provider 可配），换 GPU/框架 =
+/// 默认 YoloDotNet OpenVINO GPU（appsettings 的 Inference:Provider 可配），换框架 =
 /// 替换工厂，本类与策略层零改动。
 /// </summary>
 public sealed class ModelManager(
@@ -152,33 +152,33 @@ public sealed class ModelManager(
                 .ToArray()
             : [];
 
-    /// <summary>模型文件是否存在（相对路径按 models 目录解析；绝对路径直接判断）。供配方引用校验。</summary>
-    public bool ModelFileExists(string fileName) =>
-        !string.IsNullOrWhiteSpace(fileName) &&
-        File.Exists(Path.IsPathRooted(fileName) ? fileName : Path.Combine(modelsFolder, fileName));
+    /// <summary>模型文件是否存在且非空（相对路径按 models 目录解析；绝对路径直接判断）。供配方引用校验。</summary>
+    public bool ModelFileExists(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+            return false;
+        var path = Path.IsPathRooted(fileName) ? fileName : Path.Combine(modelsFolder, fileName);
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists && info.Length > 0;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
 
-    /// <summary>计算模型文件 SHA-256（按路径+mtime+大小缓存，TRIGGER 钉扎比对用）。</summary>
+    /// <summary>计算模型文件 SHA-256。每次读文件内容（不用 mtime+size 缓存：
+    /// 同大小且保留时间戳的覆盖会漏检，而这正是钉扎要拦住的场景）。</summary>
     public string ComputeSha256(string modelFile)
     {
         var path = ResolvePath(modelFile);
         if (!File.Exists(path))
             throw new FileNotFoundException($"模型文件不存在: {modelFile}", path);
 
-        var info = new FileInfo(path);
-        lock (_hashCache)
-        {
-            if (_hashCache.TryGetValue(path, out var cached) &&
-                cached.Stamp == info.LastWriteTimeUtc && cached.Size == info.Length)
-                return cached.Hash;
-        }
-
-        var hash = FileSha256.ComputeFile(path);
-        lock (_hashCache)
-            _hashCache[path] = (info.LastWriteTimeUtc, info.Length, hash);
-        return hash;
+        return FileSha256.ComputeFile(path);
     }
-
-    private readonly Dictionary<string, (DateTime Stamp, long Size, string Hash)> _hashCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>已物化的缓存键（供管理界面显示加载状态；按 (路径, 任务) 去重，版本不外露）。</summary>
     public IReadOnlyList<(string Path, InferenceTask Task)> LoadedKeys
@@ -371,8 +371,8 @@ public sealed class ModelManager(
 
     private LoadedModel Load(string path, InferenceTask task)
     {
-        if (!File.Exists(path))
-            throw new VisionException(VisionErrorCode.ModelNotAvailable, $"模型文件不存在: {path}");
+        if (!File.Exists(path) || new FileInfo(path).Length == 0)
+            throw new VisionException(VisionErrorCode.ModelNotAvailable, $"模型文件不存在或为空: {path}");
 
         var engine = _engineFactory.Create(path);
 

@@ -23,9 +23,8 @@ public sealed record TaskOption(InferenceTask Value, string Label);
 /// <summary>
 /// 模型管理：目录浏览 + 缓存会话状态 + 单模型测试推理。
 /// 测试推理不经过配方/相机/标定链路：选模型 + 选图片直接跑，用于验证模型本身
-/// （框/掩码/关键点）。测试使用 IInferenceEngineFactory 创建的独立引擎实例
-/// （用完即释放）：不占用产线会话与信号量，长耗时测试不会阻塞产线 TRIGGER；
-/// 代价是每次测试重新加载模型（一次性内存峰值，调试场景可接受）。
+/// （框/掩码/关键点）。测试走 <see cref="ModelManager"/> 会话（与产线同锁、同 GPU 会话），
+/// 避免另开引擎抢核显；探测任务类型仍用工厂短加载。
 /// 测试参数（模型/任务/阈值/图片目录）持久化到 exe 旁 model-test.prefs.json。
 /// </summary>
 public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
@@ -440,8 +439,12 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
             {
                 var results = new List<FolderTestResult>(images.Count);
                 var totalDetections = 0;
-                using var engine = _engineFactory.Create(_models.ResolvePath(model));
-                InferenceTaskValidation.EnsureSupported(engine, task);
+                var session = _models.Open(model, task);
+                session.Run(engine =>
+                {
+                    InferenceTaskValidation.EnsureSupported(engine, task);
+                    return 0;
+                });
 
                 for (var i = 0; i < images.Count; i++)
                 {
@@ -455,13 +458,13 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
                             throw new InvalidOperationException("图片解码失败");
 
                         using var image = VisionImageCv.FromMat(mat, ownsMat: false);
-                        var detected = task switch
+                        var detected = session.Run(engine => task switch
                         {
                             InferenceTask.ObjectDetection => DrawDetections(engine, image, mat, confidence, iou),
                             InferenceTask.Segmentation => DrawSegmentations(engine, image, mat, confidence, pixelConfidence, iou),
                             InferenceTask.PoseEstimation => DrawPoses(engine, image, mat, confidence, iou),
                             _ => 0,
-                        };
+                        });
                         var source = ImageConverter.ToBitmapSource(mat);
                         if (source.CanFreeze)
                             source.Freeze();

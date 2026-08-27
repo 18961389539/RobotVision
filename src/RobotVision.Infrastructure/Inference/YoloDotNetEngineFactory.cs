@@ -1,38 +1,40 @@
+using Microsoft.Extensions.Logging;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using YoloDotNet;
-using YoloDotNet.ExecutionProvider.Cpu;
+using YoloDotNet.ExecutionProvider.OpenVino;
 using YoloDotNet.Models;
 
 namespace RobotVision.Infrastructure.Inference;
 
 /// <summary>
-/// YoloDotNet（ONNX Runtime）引擎工厂：按模型路径创建引擎实例。
-/// ExecutionProvider 由 <paramref name="provider"/> 决定（默认 CPU）：
-/// - "Cpu"：CPU 推理（当前引用 YoloDotNet.ExecutionProvider.Cpu 包）；
-/// - 换 GPU/加速器：NuGet 引用对应 ExecutionProvider 包后，在本工厂按
-///   provider 名补充分支（Cuda/OpenVino/DirectML），或提供独立的
-///   IInferenceEngineFactory 实现替换 DI 注册——ModelManager 与策略层零改动。
+/// YoloDotNet 引擎工厂。YoloDotNet 每个进程只能引用一种 Execution Provider 包，
+/// 产线按工控机对比结果优先 OpenVINO 核显 GPU，不再混编 Microsoft CPU EP。
+/// <paramref name="provider"/>（appsettings Inference:Provider）：
+/// - OpenVinoGpu / Gpu / OpenVino：Intel 核显（FP16）；GPU 创建失败且 CPU 成功才记「GPU 不可用」；
+/// - OpenVinoCpu / Cpu：直接 OpenVINO CPU（无核显或对照）。
+/// 坏文件 / 两边都失败不置位，避免空 ONNX 把后续好模型永久打到 CPU。
+/// 同一模型仍由 ModelManager 一把锁串行，不开 CPU+GPU 混池、不默认第二会话。
 /// </summary>
-public sealed class YoloDotNetEngineFactory(string provider = "Cpu") : IInferenceEngineFactory
+public sealed class YoloDotNetEngineFactory(
+    string provider = "OpenVinoGpu",
+    ILogger<YoloDotNetEngineFactory>? log = null) : IInferenceEngineFactory
 {
+    private int _gpuFailed;
+    private string _activeDevice = "";
+
     public string Provider { get; } = provider;
+
+    public string ActiveDevice => Volatile.Read(ref _activeDevice) ?? "";
+
+    public bool GpuUnavailable => Volatile.Read(ref _gpuFailed) != 0;
 
     public IInferenceEngine Create(string modelPath)
     {
         try
         {
-            var yolo = Provider.ToUpperInvariant() switch
-            {
-                "CPU" => new Yolo(new YoloOptions
-                {
-                    ExecutionProvider = new CpuExecutionProvider(modelPath),
-                }),
-                // 更换 GPU：引用对应 NuGet 包（如 YoloDotNet.ExecutionProvider.Cuda）
-                // 后在此补充分支，如 "CUDA" => new Yolo(new YoloOptions { ExecutionProvider = new CudaExecutionProvider(modelPath) })
-                _ => throw new VisionException(VisionErrorCode.ModelNotAvailable,
-                    $"不支持的推理 Provider: {Provider}（当前支持 Cpu；换 GPU 请引用对应 ExecutionProvider 包并在 YoloDotNetEngineFactory 补充）"),
-            };
+            var skipGpu = GpuUnavailable;
+            var yolo = CreateYolo(modelPath, Provider, log, skipGpu, OnGpuFallback, OnDevice);
             return new YoloDotNetEngine(yolo);
         }
         catch (VisionException)
@@ -44,5 +46,100 @@ public sealed class YoloDotNetEngineFactory(string provider = "Cpu") : IInferenc
             throw new VisionException(VisionErrorCode.ModelNotAvailable,
                 $"模型加载失败: {Path.GetFileName(modelPath)}: {ex.Message}", ex);
         }
+    }
+
+    private void OnGpuFallback() => Interlocked.Exchange(ref _gpuFailed, 1);
+
+    private void OnDevice(string device) => Volatile.Write(ref _activeDevice, device);
+
+    /// <summary>供诊断工具与工厂共用同一套 OpenVINO 会话参数；GPU 失败且 CPU 成功时才回退并粘性。</summary>
+    public static Yolo CreateYolo(
+        string modelPath,
+        string provider,
+        ILogger? log = null,
+        bool skipGpu = false,
+        Action? onGpuFallback = null,
+        Action<string>? onDevice = null)
+    {
+        var device = ResolveDevice(provider);
+        if (device == "GPU" && skipGpu)
+            device = "CPU";
+
+        if (device != "GPU")
+        {
+            var cpu = CreateOnDevice(modelPath, device);
+            onDevice?.Invoke(device);
+            return cpu;
+        }
+
+        try
+        {
+            var gpu = CreateOnDevice(modelPath, "GPU");
+            onDevice?.Invoke("GPU");
+            return gpu;
+        }
+        catch (Exception ex) when (ex is not VisionException)
+        {
+            var file = Path.GetFileName(modelPath);
+            try
+            {
+                var cpu = CreateOnDevice(modelPath, "CPU");
+                onGpuFallback?.Invoke();
+                onDevice?.Invoke("CPU");
+                log?.LogWarning(ex,
+                    "OpenVINO GPU 不可用（{Reason}），模型 {Model} 已回退 OpenVINO CPU；后续模型将跳过 GPU",
+                    ex.Message, file);
+                if (log is null)
+                {
+                    Console.Error.WriteLine(
+                        $"警告: OpenVINO GPU 不可用（{ex.Message}），模型 {file} 已回退 OpenVINO CPU");
+                }
+
+                return cpu;
+            }
+            catch (Exception cpuEx)
+            {
+                throw new VisionException(VisionErrorCode.ModelNotAvailable,
+                    $"模型加载失败: {file}: GPU 创建失败（{ex.Message}），CPU 回退也失败: {cpuEx.Message}",
+                    cpuEx);
+            }
+        }
+    }
+
+    private static Yolo CreateOnDevice(string modelPath, string device)
+    {
+        var cacheDir = Path.Combine(AppContext.BaseDirectory, "ovcache");
+        Directory.CreateDirectory(cacheDir);
+
+        var ov = new OpenVino
+        {
+            DeviceType = device,
+            Precision = device.StartsWith("GPU", StringComparison.OrdinalIgnoreCase)
+                ? Precision.FP16
+                : Precision.FP32,
+            CachePath = cacheDir,
+            ModelPriority = ModelPriority.HIGH,
+        };
+
+        return new Yolo(new YoloOptions
+        {
+            ExecutionProvider = new OpenVinoExecutionProvider(modelPath, ov),
+        });
+    }
+
+    private static string ResolveDevice(string provider)
+    {
+        var key = provider.Trim().ToUpperInvariant()
+            .Replace("-", "", StringComparison.Ordinal)
+            .Replace("_", "", StringComparison.Ordinal)
+            .Replace(" ", "", StringComparison.Ordinal);
+
+        return key switch
+        {
+            "OPENVINOGPU" or "GPU" or "OPENVINO" => "GPU",
+            "OPENVINOCPU" or "CPU" => "CPU",
+            _ => throw new VisionException(VisionErrorCode.ModelNotAvailable,
+                $"不支持的推理 Provider: {provider}（当前支持 OpenVinoGpu / OpenVinoCpu）"),
+        };
     }
 }

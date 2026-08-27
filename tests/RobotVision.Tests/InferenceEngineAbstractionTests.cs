@@ -8,7 +8,7 @@ namespace RobotVision.Tests;
 
 /// <summary>
 /// 推理引擎抽象测试：
-/// - YoloDotNetEngineFactory provider 校验（Cpu 支持、未知 provider 拒绝）；
+/// - YoloDotNetEngineFactory provider 校验（OpenVinoGpu 默认、未知 provider 拒绝）；
 /// - ModelManager 通过注入的 IInferenceEngineFactory 创建引擎——换后端 =
 ///   换工厂，ModelManager/策略层不感知具体框架；
 /// - ModelSession.Run 把调用委托给抽象引擎（返回类型兼容）。
@@ -27,10 +27,10 @@ public class InferenceEngineAbstractionTests : IDisposable
     }
 
     [Fact]
-    public void YoloDotNetEngineFactory_DefaultProvider_IsCpu()
+    public void YoloDotNetEngineFactory_DefaultProvider_IsOpenVinoGpu()
     {
         var factory = new YoloDotNetEngineFactory();
-        Assert.Equal("Cpu", factory.Provider);
+        Assert.Equal("OpenVinoGpu", factory.Provider);
     }
 
     [Fact]
@@ -40,6 +40,29 @@ public class InferenceEngineAbstractionTests : IDisposable
         var ex = Assert.Throws<VisionException>(() => factory.Create(Path.Combine(_folder, "x.onnx")));
         Assert.Equal(VisionErrorCode.ModelNotAvailable, ex.ErrorCode);
         Assert.Contains("Cuda", ex.Message);
+    }
+
+    [Fact]
+    public void YoloDotNetEngineFactory_GpuCreateFail_AttemptsCpuFallback()
+    {
+        var factory = new YoloDotNetEngineFactory("OpenVinoGpu");
+        var missing = Path.Combine(_folder, "missing.onnx");
+        var ex = Assert.Throws<VisionException>(() => factory.Create(missing));
+        Assert.Equal(VisionErrorCode.ModelNotAvailable, ex.ErrorCode);
+        Assert.Contains("CPU 回退也失败", ex.Message);
+        Assert.False(factory.GpuUnavailable);
+    }
+
+    [Fact]
+    public void ModelFileExists_EmptyFile_ReturnsFalse()
+    {
+        var empty = Path.Combine(_folder, "empty.onnx");
+        File.WriteAllBytes(empty, []);
+        using var manager = new ModelManager(_folder, new FakeEngineFactory());
+        Assert.False(manager.ModelFileExists("empty.onnx"));
+        var ex = Assert.Throws<VisionException>(() => manager.Open("empty.onnx", InferenceTask.ObjectDetection));
+        Assert.Equal(VisionErrorCode.ModelNotAvailable, ex.ErrorCode);
+        Assert.Contains("为空", ex.Message);
     }
 
     /// <summary>记录型假引擎：验证 ModelManager 经抽象调用引擎方法。</summary>

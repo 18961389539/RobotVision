@@ -77,6 +77,57 @@ public static class MaskTemplateMatcher
     }
 
     /// <summary>
+    /// 源图坐标 → 转正裁剪图坐标：与 <see cref="MapUprightToSource"/> 互逆
+    ///（同一旋转矩阵，不加 Invert）。
+    /// </summary>
+    public static Point2d MapSourceToUpright(UprightCropResult crop, Point2d source)
+    {
+        using var m = Cv2.GetRotationMatrix2D(crop.RotationCenter, -crop.WarpAngleDeg, 1.0);
+        var rx = m.At<double>(0, 0) * source.X + m.At<double>(0, 1) * source.Y + m.At<double>(0, 2);
+        var ry = m.At<double>(1, 0) * source.X + m.At<double>(1, 1) * source.Y + m.At<double>(1, 2);
+        return new Point2d(rx - crop.CropOriginX, ry - crop.CropOriginY);
+    }
+
+    /// <summary>
+    /// 把源图上的轴对齐特征框映到转正图，取四角 AABB 后裁出模板（独立拷贝）。
+    /// 示教用：特征框在相机图上画出，模板必须与运行时同一套转正坐标系。
+    /// </summary>
+    public static Mat CropUprightBySourceRect(
+        UprightCropResult crop, double x, double y, double width, double height)
+    {
+        var corners = new[]
+        {
+            new Point2d(x, y),
+            new Point2d(x + width, y),
+            new Point2d(x + width, y + height),
+            new Point2d(x, y + height),
+        };
+        var minX = double.PositiveInfinity;
+        var minY = double.PositiveInfinity;
+        var maxX = double.NegativeInfinity;
+        var maxY = double.NegativeInfinity;
+        foreach (var corner in corners)
+        {
+            var u = MapSourceToUpright(crop, corner);
+            minX = Math.Min(minX, u.X);
+            minY = Math.Min(minY, u.Y);
+            maxX = Math.Max(maxX, u.X);
+            maxY = Math.Max(maxY, u.Y);
+        }
+
+        var ix = (int)Math.Floor(minX);
+        var iy = (int)Math.Floor(minY);
+        var iw = (int)Math.Ceiling(maxX) - ix;
+        var ih = (int)Math.Ceiling(maxY) - iy;
+        var clipped = new Rect(ix, iy, Math.Max(0, iw), Math.Max(0, ih))
+            & new Rect(0, 0, crop.Upright.Width, crop.Upright.Height);
+        if (clipped.Width < 8 || clipped.Height < 8)
+            throw new InvalidOperationException(
+                "特征 ROI 转正后过小或落在目标外（请把特征框画在分割目标上）");
+        return crop.Upright[clipped].Clone();
+    }
+
+    /// <summary>
     /// 在转正图上做带旋转搜索的模板匹配：
     /// 候选角 φ ∈ ±refineRangeDeg（1° 步进）∪ 180°±refineRangeDeg——
     /// 前者精修角度，后者判头尾（180° 歧义）；两者合起来覆盖有方向的绝对角度。

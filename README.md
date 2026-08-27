@@ -24,7 +24,8 @@ RobotVision.sln
 │   │                                  #   文件日志（滚动文件 + UI 日志sink）
 │   └── RobotVision.Wpf/                # WPF 宿主（TCP 服务 + 实时画面叠加、手动触发调试）
 ├── tools/
-│   └── RobotVision.CalibTool/          # 命令行标定工具（内参 + 外参）
+│   ├── RobotVision.CalibTool/          # 命令行标定工具（内参 + 外参）
+│   └── RobotVision.InferenceBench/     # CPU vs OpenVINO 推理对比（工控机上跑）
 ├── tests/
 │   └── RobotVision.Tests/              # 单元测试（几何/标定/协议/队列/模型并发/日志/失败留存）
 ├── recipes/                            # 配方 JSON（A01 关键点示例 / A02 双模型示例）
@@ -52,6 +53,7 @@ dotnet test RobotVision.sln
 | `tests/ImageViewerControl.Tests` | UI 控件层测试 | 撤销/重做管理器（容量上限/异常入栈/PropertyChanged）、ROI 几何服务（环形钳制/多边形闭合/包围盒）、ROI 命令（状态替换/标签）、ROI 持久化（序列化往返/未知类型跳过/文件 IO）、插件注册表（内置发现/重复注册/反注册/绘制工具排序） |
 | `tests/RobotVision.IntegrationTests` | 端到端集成测试 | 真实 TCP socket ↔ 服务（PING/STATUS/触发/错误码/白名单/序列号/路径穿越）、VisionService 全链路（1001~1016 语义、OnArm 位姿校验、快照订阅）、DI 容器解析与 RuntimeSync 热应用、并发压力（多连接/排队/死锁免疫）、FlaUI UI 自动化冒烟（`RV_UI_TEST=1` 启用） |
 | `benchmarks/RobotVision.Benchmarks` | BenchmarkDotNet 基准 | 角度几何、协议解析/应答格式化、标定变换/旋转补偿、ROI 序列化/反序列化。运行：`dotnet run -c Release --project benchmarks/RobotVision.Benchmarks`（可加 `--filter *AngleGeometry*` 缩小范围） |
+| `tools/RobotVision.InferenceBench` | 推理 EP 对比（独立进程） | 现场 ONNX + 现场图：CPU vs OpenVINO CPU/GPU 的 p50/p95/p99，以及两枪串行/双会话并行/混池齐活。**不要**和上面 BenchmarkDotNet 混用。 |
 
 **环境门控测试**（默认跳过，避免 CI/无硬件环境误报）：
 - 真实相机硬件冒烟：`RV_HARDWARE_TEST=1`（见 `HardwareCameraSmokeTests`）
@@ -77,7 +79,7 @@ Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资�
 
 配置见 `src/RobotVision.Wpf/appsettings.json`：TCP 监听地址/端口、超时、
 排队深度（`maxQueueDepth`，默认 4）、目录、相机列表、推理
-（`Inference:Provider` 默认 `Cpu`、`Inference:MaxSessions` 默认 8）。
+（`Inference:Provider` 默认 `OpenVinoGpu`、`Inference:MaxSessions` 默认 8）。
 真实相机（海康/Basler 等）实现 `ICamera` + `ICameraFactory` 后调用
 `CameraTypeRegistry.Default.Register(...)` 一行注册接入。
 
@@ -117,7 +119,7 @@ Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资�
 |---|---|---|
 | `PING` | `PONG` | 心跳（仅证明连接存活，不反映管线忙闲） |
 | `STATUS` | `OK,ready\|busy,队列深度,队列上限,最近耗时ms,连续失败,联锁0/1` | 管线状态查询（后两段为过程能力扩展，旧 PLC 可读前 5 段） |
-| `CLEARINHIBIT` 或 `CLEARINHIBIT,配方名` | `OK,CLEARED` | 解除连续失败联锁（1018） |
+| `CLEARINHIBIT` 或 `CLEARINHIBIT,键`（键=配方名或序列号） | `OK,CLEARED` | 解除连续失败联锁（1018） |
 | `配方名` 或 `序列号`（`3` / `#3`） | `OK,x,y,角度[,...],配方名,目标数,耗时ms` | 触发一次完整流程（不带位姿） |
 | `键,X,Y,RZ`（键=配方名或序列号） | 同上 | 带拍照位姿触发（末端相机工位必须；
 与 OnArm 外参档案比对，不一致返回 1012） |
@@ -188,6 +190,20 @@ PLC 可顺序读坐标，或用尾部 N 校验；也为将来"0 目标返回空 
    一行注册（与相机 `CameraTypeRegistry` 同构）——服务注册、UI 类型下拉、
    运行时注册自动生效，无需改核心与 DI 代码；
 3. appsettings `LightControllers` 增加条目，`Type` 填工厂 `TypeName`，配方 `lightControllerId` 指向它。
+
+## 推理 EP 对比（CPU vs OpenVINO）
+
+必须在**目标工控机**上、用现场 ONNX 和现场分辨率/ROI 图跑。不要和 `RobotVision.Benchmarks`（几何/协议微基准）混用。
+YoloDotNet 每个进程只能加载一种 Execution Provider，本工具把 OpenVINO 放到独立 `ov-worker` 进程。
+
+```powershell
+dotnet run -c Release --project tools/RobotVision.InferenceBench -- `
+  --model models\xxx.onnx --image data\replay\a.bmp
+# 可选：--roi 0.1,0.1,0.5,0.5  --task seg  --model2 models\b.onnx  --phase A
+```
+
+屏幕会打印 Phase A 的 p50/p95/p99、相对 CPU 的框/分数偏差，以及 Phase B 两枪齐活时间，并给出「换哪个 EP / 要不要第二会话 / 是否丢掉混池」的建议。
+产线默认已按工控机对比结果切到 `OpenVinoGpu`（单会话）。本工具仍可用来复测。
 
 ## 标定
 
@@ -376,12 +392,12 @@ CalibTool 用 `--tool-offset auto`。离散度 >5° 提示标记噪声大；若�
 首件微调用，缺省全 0。绝对值超过 100mm / 180° 会在保存时拒绝。
 
 **资产钉扎**（`modelSha256` / `stationSha256`，可选）：配方页「钉死当前哈希」写入 SHA-256。
-钉扎后替换同名 ONNX 或覆盖标定档案，TRIGGER 返回 **1017**。未钉扎的旧配方行为不变。
+钉扎后替换同名 ONNX 或覆盖标定档案，TRIGGER 返回 **1017**。九点外参工位的工位指纹包含去畸变内参；质量字段与标定时间不参与哈希。未钉扎的旧配方行为不变。
 `AssetIntegrity:RequireManifest=true` 时还要求 `models/manifest.json` 中有对应条目。
 
 **过程能力**：成功/失败按日追加 `data/metrics/yyyyMMdd.tsv`，累计写入 `health.json`（重启不丢）。
 同配方连续过程失败（1003/1005/1007/1008 等）达到 `ProcessHealth:ConsecutiveFailLimit`（默认 5）
-后 TRIGGER 返回 **1018**。通信页「解除联锁」或 TCP `CLEARINHIBIT` / `CLEARINHIBIT,配方名`。
+后 TRIGGER 返回 **1018**（入队前拒绝，不占队列、不计入失败次数）。通信页「解除联锁」或 TCP `CLEARINHIBIT` / `CLEARINHIBIT,配方名` / `CLEARINHIBIT,#3`。
 配置类错误（1001/1004/1012/1017）不计入连续失败。
 
 **光源（可选）**：缺省不亮灯，行为与旧版完全一致。需要照明时在 appsettings
@@ -414,13 +430,16 @@ CalibTool 用 `--tool-offset auto`。离散度 >5° 提示标记噪声大；若�
 
 推理引擎已抽象为 `IInferenceEngine`（检测/分割/关键点三个入口，与 YoloDotNet 签名一致），
 `ModelManager` 通过 `IInferenceEngineFactory` 创建引擎——**策略层、VisionService、UI 均不感知具体框架**。
-默认实现 `YoloDotNetEngineFactory` 使用 CPU（`YoloDotNet.ExecutionProvider.Cpu`），
-由 appsettings 的 `Inference:Provider` 配置（默认 `Cpu`）。更换 GPU 时：
+默认实现 `YoloDotNetEngineFactory` 使用 **OpenVINO 核显**（`YoloDotNet.ExecutionProvider.OpenVino`），
+由 appsettings 的 `Inference:Provider` 配置（默认 `OpenVinoGpu`）。
+YoloDotNet **每个进程只能引用一种 Execution Provider 包**，因此仓库已从 CPU EP 换成 OpenVINO，不能再在同一进程里混编 Microsoft CPU EP。
 
-1. NuGet 引用对应 ExecutionProvider 包（`YoloDotNet.ExecutionProvider.Cuda` / `DirectML` / `OpenVino`）；
-2. 在 `YoloDotNetEngineFactory` 按 provider 名补充分支
-   （如 `"CUDA" => new Yolo(new YoloOptions { ExecutionProvider = new CudaExecutionProvider(path) })`）；
-3. appsettings 的 `Inference:Provider` 改为对应名称，无需改代码与 DI 注册。
+可用值：
+
+- `OpenVinoGpu` / `Gpu` / `OpenVino`：Intel 核显（FP16），现场对比单枪更快；创建失败则回退 OpenVINO CPU 并在日志打警告；
+- `OpenVinoCpu` / `Cpu`：直接 OpenVINO CPU（无核显或对照）。
+
+同一模型仍是一份会话 + 一把锁，**不要**做 CPU+GPU 混池。两路 TRIGGER 重叠是否开第二会话，用 `tools/RobotVision.InferenceBench` 在工控机上测过再定。
 
 换整个推理框架（如 ONNX Runtime 直连）＝实现 `IInferenceEngine` + `IInferenceEngineFactory` 替换注册，
 同样零改动策略层。`ModelSession.Run(Func&lt;IInferenceEngine,T&gt;)` 内信号量串行化语义保留（引擎实例非线程安全）。

@@ -1,7 +1,7 @@
 {
-  // 示例配方一：关键点模式（kpt_shape=[2,2] 的 pose 模型）
-  // 默认相机 cam_basler（Basler 实拍）；无相机环境联调可切回 cam_file 回放
+  // 示例配方一：关键点模式。cam_basler 必须在 appsettings 填写真实序列号（多台时不会自动绑第一台）。
   "cameraId": "cam_basler",
+  "serialNumber": 1,
   "stationId": "",
   "angleMode": "KeyPointLine",
   "models": [ "a01_kpt.onnx" ],

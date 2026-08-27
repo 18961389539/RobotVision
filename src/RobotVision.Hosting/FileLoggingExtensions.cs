@@ -28,6 +28,8 @@ public static class FileLoggingExtensions
             .WriteTo.File(
                 Path.Combine(folder, "robotvision-.log"),
                 rollingInterval: RollingInterval.Day,
+                // 日志页同时读当天文件；不共享会 ERROR_SHARING_VIOLATION
+                shared: true,
                 // retainedDays ≤ 0 = 不自动清理（null）；原 Math.Max(1,·) 把 0 改成 1，
                 // 与"≤0 不清理"的语义不一致（RetainedDays=0 应保留全部日志）
                 retainedFileCountLimit: retainedDays > 0 ? retainedDays : null,

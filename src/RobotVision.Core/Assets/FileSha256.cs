@@ -8,7 +8,9 @@ public static class FileSha256
 {
     public static string ComputeFile(string path)
     {
-        using var stream = File.OpenRead(path);
+        // ReadWrite：推理引擎可能正打开同一 ONNX；Delete：允许替换中的文件仍可读完。
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         return ToHex(SHA256.HashData(stream));
     }
 

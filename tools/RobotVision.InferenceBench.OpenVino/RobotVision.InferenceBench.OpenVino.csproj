@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>RobotVision.InferenceBench.OpenVino</AssemblyName>
+    <RootNamespace>RobotVision.InferenceBench.OpenVinoWorker</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="YoloDotNet" />
+    <PackageReference Include="YoloDotNet.ExecutionProvider.OpenVino" />
+    <PackageReference Include="OpenCvSharp4" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RobotVision.InferenceBench.Shared\RobotVision.InferenceBench.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- 与产线同一套 Mat→SKBitmap，避免预处理差异污染计时 -->
+  <ItemGroup>
+    <Compile Include="..\..\src\RobotVision.Infrastructure\Inference\MatSkiaConverter.cs" Link="Linked\MatSkiaConverter.cs" />
+  </ItemGroup>
+
+  <!-- 与主程序相同：把 win-x64 原生库放到输出根，避免 System32 旧版 onnxruntime.dll 抢加载 -->
+  <Target Name="CopyOpenVinoNativesToOutputRoot" AfterTargets="Build">
+    <ItemGroup>
+      <_OvNative Include="$(TargetDir)runtimes\win-x64\native\*.dll" Condition="Exists('$(TargetDir)runtimes\win-x64\native')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_OvNative)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" Condition="'@(_OvNative)' != ''" />
+  </Target>
+
+</Project>

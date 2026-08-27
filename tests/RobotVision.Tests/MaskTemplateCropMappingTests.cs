@@ -81,6 +81,71 @@ public sealed class MaskTemplateCropMappingTests
     }
 
     [Fact]
+    public void MapSourceToUpright_RoundTripsWithMapUprightToSource()
+    {
+        using var src = new Mat(480, 640, MatType.CV_8UC3, Scalar.All(0));
+        const double cx = 400, cy = 280;
+        Point2f[] contour =
+        [
+            new((float)(cx - 90), (float)(cy - 35)),
+            new((float)(cx + 90), (float)(cy - 35)),
+            new((float)(cx + 90), (float)(cy + 35)),
+            new((float)(cx - 90), (float)(cy + 35)),
+        ];
+
+        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0);
+        using (crop.Upright)
+        {
+            var srcPt = new Point2d(cx, cy);
+            var up = MaskTemplateMatcher.MapSourceToUpright(crop, srcPt);
+            var back = MaskTemplateMatcher.MapUprightToSource(crop, up);
+            Assert.InRange(back.X, srcPt.X - 1, srcPt.X + 1);
+            Assert.InRange(back.Y, srcPt.Y - 1, srcPt.Y + 1);
+        }
+    }
+
+    [Fact]
+    public void CropUprightBySourceRect_LeftHalfOfBlob_IsNarrowerThanFullCrop()
+    {
+        using var src = new Mat(480, 640, MatType.CV_8UC3, Scalar.All(0));
+        const double cx = 400, cy = 280, halfW = 90, halfH = 35;
+        Point2f[] contour =
+        [
+            new((float)(cx - halfW), (float)(cy - halfH)),
+            new((float)(cx + halfW), (float)(cy - halfH)),
+            new((float)(cx + halfW), (float)(cy + halfH)),
+            new((float)(cx - halfW), (float)(cy + halfH)),
+        ];
+
+        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0);
+        using (crop.Upright)
+        {
+            using var feature = MaskTemplateMatcher.CropUprightBySourceRect(
+                crop, cx - halfW, cy - halfH, halfW, halfH * 2);
+            var fullArea = crop.Upright.Width * crop.Upright.Height;
+            var featArea = feature.Width * feature.Height;
+            Assert.True(featArea < fullArea, $"特征 {feature.Width}x{feature.Height} 应小于全目标 {crop.Upright.Width}x{crop.Upright.Height}");
+            Assert.True(feature.Width >= 8 && feature.Height >= 8);
+        }
+    }
+
+    [Fact]
+    public void CropUprightBySourceRect_FarOutsideBlob_Throws()
+    {
+        using var src = new Mat(480, 640, MatType.CV_8UC3, Scalar.All(0));
+        Point2f[] contour =
+        [
+            new(300, 200), new(500, 200), new(500, 280), new(300, 280),
+        ];
+        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0);
+        using (crop.Upright)
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                MaskTemplateMatcher.CropUprightBySourceRect(crop, 1, 1, 12, 12));
+        }
+    }
+
+    [Fact]
     public void SelectHybridOrientation_PicksHigherGrayScore()
     {
         var edge = new MaskTemplateMatchResult(0.9, 0, new Point2d(0, 0));

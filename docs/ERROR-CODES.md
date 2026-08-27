@@ -5,12 +5,12 @@ RobotVision TCP 协议错误应答格式:`ERR,<错误码>,<说明>`。
 
 | 错误码 | 名称 | 含义 | 触发场景 | 处置 |
 |---|---|---|---|---|
-| 1000 | UnknownCommand | 未知命令 | 发送了非 PING/STATUS/配方名的命令 | 核对协议命令;非命令输入一律按配方名解析 |
-| 1001 | UnknownRecipe | 配方不存在 | 配方名错误 / 配方文件缺失 | 核对配方名;检查 recipes/ 目录文件 |
+| 1000 | UnknownCommand | 未知命令 | 仅 `CLEARINHIBIT` 未注入处理器等极少路径 | 核对协议；拼写错误的「命令」会按配方名解析成 **1001** |
+| 1001 | UnknownRecipe | 配方不存在 | 配方名错误 / 配方文件缺失；旧格式 `TRIGGER,A01` 也会变成找不到配方或 **1013** | 核对配方名;检查 recipes/ 目录文件 |
 | 1002 | CameraNotRegistered | 相机未注册 | 配方引用未注册的相机 Id | 检查 appsettings.json 相机配置;确认相机 Id 拼写 |
 | 1003 | CameraGrabFailed | 相机取图失败 | 回放图读取失败 / 相机断流 | 检查回放目录、网线、相机状态 |
 | 1004 | NotCalibrated | 未标定或标定不一致 | 缺内参/外参;或外参/旋转中心分辨率与内参不一致 | 完成对应标定;换相机/改分辨率后重新标定 |
-| 1005 | ModelNotAvailable | 模型不可用 | 模型文件缺失 / 模型与任务不匹配 / 会话被卸载 | 检查 models/ 目录;核对模型类型与推理任务 |
+| 1005 | ModelNotAvailable | 模型不可用 | 模型文件缺失/空文件 / 模型与任务不匹配 / 会话被卸载 | 检查 models/ 目录与文件大小;核对模型类型与推理任务 |
 | 1006 | LightNotRegistered | 光源未注册 | 配方引用未注册的光源控制器 | 检查 appsettings.json 光源配置 |
 | 1007 | NoTargetFound | 未检出目标 | 推理完成但零目标 / 双BLOB 无配对 | 检查来料、光源、阈值;查看失败现场图(failures/) |
 | 1008 | Timeout | 处理超时 | 取图/推理超过 TCP 超时;执行阶段取消 | 检查慢相机/慢推理;调大 TimeoutMs |
@@ -18,7 +18,7 @@ RobotVision TCP 协议错误应答格式:`ERR,<错误码>,<说明>`。
 | 1010 | QueueTimeout | 排队超时 | 排队阶段取消/超时(未进入处理) | 稍后重试;检查是否长时间 busy |
 | 1011 | CameraInitFailed | 相机初始化失败 | pylon 运行库缺失 / 设备打开失败 | 安装 pylon 运行库;检查相机供电与网络 |
 | 1012 | PoseMismatch | 拍照位姿不一致 | OnArm 工位:上报位姿与标定位姿超容差 | PLC 核对拍照点;或重新标定该工位外参 |
-| 1013 | InvalidTriggerArgument | 触发参数格式错误 | TRIGGER 段数非 1/4;或 X/Y/RZ 非有限数字 | 按协议发送 `TRIGGER,配方名` 或 `TRIGGER,配方名,X,Y,RZ` |
+| 1013 | InvalidTriggerArgument | 触发参数格式错误 | 段数不是 1（配方键）或 4（键,X,Y,RZ）；或 X/Y/RZ 非有限数字；旧前缀 `TRIGGER,A01` 也是 1013 | 发 `A01` 或 `A01,X,Y,RZ`（**不要** `TRIGGER,` 前缀） |
 | 1014 | PoseRequired | 缺少拍照位姿 | OnArm 工位已记录示教位姿但未上报 X/Y/RZ | TRIGGER 补上位姿段;或界面补位姿 |
 | 1015 | RecipeDisabled | 配方已停用 | 触发 Enabled=false 的配方 | 界面启用配方后重试 |
 | 1016 | InvalidRecipeConfig | 配方参数校验失败 | cameraId 空 / 模型缺失 / 阈值越界等 | 打开配方页修正配置 |

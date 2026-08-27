@@ -361,6 +361,19 @@ public sealed class RecipeLoaderTests : IDisposable
     }
 
     [Fact]
+    public void ResolveTriggerKey_BySerial_SkipsUnloadableSibling()
+    {
+        File.WriteAllText(Path.Combine(_folder, "BAD.json"), "{ not-json");
+        File.WriteAllText(Path.Combine(_folder, "GOOD.json"), """
+            { "serialNumber": 2, "cameraId": "cam", "angleMode": "KeyPointLine", "models": ["m.onnx"] }
+            """);
+        var loader = new RecipeLoader(_folder);
+
+        Assert.Equal("GOOD", loader.ResolveTriggerKey("#2").RecipeName);
+        Assert.Equal("GOOD", loader.ResolveTriggerKey("2").RecipeName);
+    }
+
+    [Fact]
     public void Save_RejectsDuplicateSerialNumber()
     {
         File.WriteAllText(Path.Combine(_folder, "A01.json"), """

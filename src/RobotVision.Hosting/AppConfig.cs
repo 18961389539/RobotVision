@@ -206,7 +206,7 @@ public sealed class CameraConfig
     /// <summary>Basler / GigEVision：增益（dB 或机型原始单位）；null = 不下发。</summary>
     public double? Gain { get; set; }
 
-    /// <summary>Basler / GigEVision：单帧采集超时（ms），固定为 <see cref="AppConfig.DefaultGrabTimeoutMs"/>。</summary>
+    /// <summary>Basler / GigEVision：单帧采集超时（ms）。合法且小于总超时的值启动时保留；0 或越界才改回默认 60s。</summary>
     public int GrabTimeoutMs { get; set; } = AppConfig.DefaultGrabTimeoutMs;
 
     /// <summary>Virtual 相机：生成图像宽（px）。</summary>

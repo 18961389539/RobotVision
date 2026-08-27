@@ -78,6 +78,12 @@ public sealed class CalibrationManager : IDisposable
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    /// <summary>钉扎指纹用：紧凑 camelCase，不含质量字段与时间戳。</summary>
+    private static readonly JsonSerializerOptions FingerprintJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
     public int IntrinsicCount => _intrinsics.Count;
 
     public int ExtrinsicCount => _extrinsics.Count;
@@ -126,36 +132,104 @@ public sealed class CalibrationManager : IDisposable
     }
 
     /// <summary>
-    /// 工位映射档案指纹（多项式 &gt; 外参 &gt; 比例的内存对象规范化 JSON）。
-    /// <paramref name="includeRotation"/> 为 true 时并入旋转中心档案（偏心补偿工位）。
+    /// 工位映射指纹：只纳入影响像素→机器人结果的字段（仿射/多项式系数/比例/示教位姿/分辨率）。
+    /// 不含 CalibratedAt、Rms、残差数组等质量元数据——重保存或档案加字段不应误报 1017。
+    /// 外参工位额外并入去畸变所用内参（<paramref name="undistortCameraId"/>，缺省取外参 CameraId）。
+    /// <paramref name="includeRotation"/> 为 true 时并入旋转中心几何（偏心补偿）。
     /// 无映射档案返回 null。
     /// </summary>
-    public string? ComputeStationSha256(string? stationId, bool includeRotation = false)
+    public string? ComputeStationSha256(
+        string? stationId, bool includeRotation = false, string? undistortCameraId = null)
     {
         if (string.IsNullOrEmpty(stationId))
             return null;
 
-        var parts = new List<string>();
-        switch (GetMappingMode(stationId))
+        var mode = GetMappingMode(stationId);
+        MappingFingerprint? mapping = mode switch
         {
-            case StationMappingMode.Polynomial when _polynomials.TryGetValue(stationId, out var poly):
-                parts.Add("polynomial:" + JsonSerializer.Serialize(poly, JsonOptions));
-                break;
-            case StationMappingMode.Extrinsic when _extrinsics.TryGetValue(stationId, out var ext):
-                parts.Add("extrinsic:" + JsonSerializer.Serialize(ext, JsonOptions));
-                break;
-            case StationMappingMode.Scale when _scales.TryGetValue(stationId, out var scale):
-                parts.Add("scale:" + JsonSerializer.Serialize(scale, JsonOptions));
-                break;
-            default:
-                return null;
+            StationMappingMode.Polynomial when _polynomials.TryGetValue(stationId, out var poly) =>
+                FromPolynomial(poly),
+            StationMappingMode.Extrinsic when _extrinsics.TryGetValue(stationId, out var ext) =>
+                FromExtrinsic(ext),
+            StationMappingMode.Scale when _scales.TryGetValue(stationId, out var scale) =>
+                FromScale(scale),
+            _ => null,
+        };
+        if (mapping is null)
+            return null;
+
+        IntrinsicFingerprint? intrinsic = null;
+        if (mode == StationMappingMode.Extrinsic)
+        {
+            var cameraId = string.IsNullOrWhiteSpace(undistortCameraId)
+                ? mapping.CameraId
+                : undistortCameraId;
+            if (_intrinsics.TryGetValue(cameraId, out var state))
+                intrinsic = FromIntrinsic(state.Profile);
         }
 
-        if (includeRotation && _rotationCenters.TryGetValue(stationId, out var rotation))
-            parts.Add("rotation:" + JsonSerializer.Serialize(rotation, JsonOptions));
+        RotationFingerprint? rotation = null;
+        if (includeRotation && _rotationCenters.TryGetValue(stationId, out var rot))
+            rotation = FromRotation(rot);
 
-        return FileSha256.ComputeUtf8(string.Join("\n", parts));
+        return FileSha256.ComputeUtf8(
+            JsonSerializer.Serialize(new StationFingerprint(mapping, intrinsic, rotation), FingerprintJson));
     }
+
+    private sealed record StationFingerprint(
+        MappingFingerprint Mapping, IntrinsicFingerprint? Intrinsic, RotationFingerprint? Rotation);
+
+    private sealed record MappingFingerprint(
+        string Kind,
+        string StationId,
+        string CameraId,
+        int Width,
+        int Height,
+        double[]? Affine,
+        int Order,
+        double[]? CoefX,
+        double[]? CoefY,
+        double ScaleX,
+        double ScaleY,
+        string MountType,
+        string ComposeMode,
+        string CoordinateSpace,
+        double TeachTcpX,
+        double TeachTcpY,
+        double TeachRzDeg,
+        bool HasTeachPose,
+        double CalibrationPlaneZ);
+
+    private sealed record IntrinsicFingerprint(
+        string CameraId, int Width, int Height, double[] CameraMatrix, double[] DistCoeffs);
+
+    private sealed record RotationFingerprint(
+        string StationId, string CameraId, double Cx, double Cy, double RadiusPx,
+        int Width, int Height, double ToolOffsetDeg);
+
+    private static MappingFingerprint FromPolynomial(PolynomialProfile p) => new(
+        "polynomial", p.StationId, p.CameraId, p.Width, p.Height,
+        Affine: null, p.Order, p.CoefX, p.CoefY, 0, 0,
+        p.MountType, p.ComposeMode, p.CoordinateSpace,
+        p.TeachTcpX, p.TeachTcpY, p.TeachRzDeg, p.HasTeachPose, p.CalibrationPlaneZ);
+
+    private static MappingFingerprint FromExtrinsic(ExtrinsicProfile p) => new(
+        "extrinsic", p.StationId, p.CameraId, p.Width, p.Height,
+        p.Affine, Order: 0, CoefX: null, CoefY: null, 0, 0,
+        p.MountType, p.ComposeMode, CoordinateSpace: "",
+        p.TeachTcpX, p.TeachTcpY, p.TeachRzDeg, p.HasTeachPose, p.CalibrationPlaneZ);
+
+    private static MappingFingerprint FromScale(ScaleProfile p) => new(
+        "scale", p.StationId, p.CameraId, p.Width, p.Height,
+        Affine: null, Order: 0, CoefX: null, CoefY: null, p.ScaleX, p.ScaleY,
+        MountType: "", ComposeMode: "", CoordinateSpace: "",
+        0, 0, 0, false, 0);
+
+    private static IntrinsicFingerprint FromIntrinsic(IntrinsicProfile p) =>
+        new(p.CameraId, p.Width, p.Height, p.CameraMatrix, p.DistCoeffs);
+
+    private static RotationFingerprint FromRotation(RotationCenterProfile p) =>
+        new(p.StationId, p.CameraId, p.Cx, p.Cy, p.RadiusPx, p.Width, p.Height, p.ToolOffsetDeg);
 
     /// <summary>加载时发现的质量超标警告（供启动日志/UI 展示）。</summary>
     public IReadOnlyList<string> QualityWarnings => _qualityWarnings.ToArray();

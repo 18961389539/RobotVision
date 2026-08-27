@@ -253,4 +253,19 @@ public class ScaleCalibrationTests : IDisposable
         result.ErrorCode.Should().Be(VisionErrorCode.NotCalibrated,
             "外参路径需要内参去畸变，应先于比例映射失败");
     }
+
+    [Fact]
+    public void FormatStageMs_Scale_UsesCloneLabelAndStageDurations()
+    {
+        // 累计戳 24/25/98/99 → 阶段 24 / 克隆1 / 推理73 / 后处理1（用户截图那种「去畸变 25」是累计误标）
+        VisionService.FormatStageMs(StationMappingMode.Scale, 24, 25, 98, 99)
+            .Should().Be("取图 24 · 克隆 1 · 推理 73 · 后处理 1");
+    }
+
+    [Fact]
+    public void FormatStageMs_Extrinsic_KeepsUndistortLabel()
+    {
+        VisionService.FormatStageMs(StationMappingMode.Extrinsic, 24, 32, 90, 91)
+            .Should().Be("取图 24 · 去畸变 8 · 推理 58 · 后处理 1");
+    }
 }

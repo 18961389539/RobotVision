@@ -18,7 +18,7 @@ namespace RobotVision.Infrastructure.Cameras;
 /// <summary>
 /// 开源 GigE Vision 相机（GigEVision.Net：GVCP 控制 + GVSP 收流）。
 /// 不依赖 pylon；本机防火墙需放行 UDP 3956（控制）与流端口。
-/// DeviceId 可填序列号、IP 或 MAC；留空绑定发现列表第一台。
+/// DeviceId 可填序列号、IP 或 MAC；留空仅当发现恰好一台时绑定，多台必须填写。
 /// </summary>
 public sealed class GigEVisionCamera : ICamera, IExposureControl
 {
@@ -218,7 +218,8 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
 
                 info = SelectDevice(cameras, _deviceId)
                     ?? throw new InvalidOperationException(
-                        $"未匹配到设备 '{_deviceId}'（可用: {string.Join("; ", cameras.Select(FormatDevice))}）");
+                        CameraDeviceSelection.UnresolvedMessage(
+                            Id, _deviceId, cameras.Count, string.Join("; ", cameras.Select(FormatDevice))));
                 info = GigEForceIp.EnsureReachable(info, _log);
             }
 
@@ -648,24 +649,12 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     private static bool TryParseIpv4(string deviceId, out IPAddress ip) =>
         IPAddress.TryParse(deviceId, out ip!) && ip.AddressFamily == AddressFamily.InterNetwork;
 
-    private static GigECameraInfo? SelectDevice(IReadOnlyList<GigECameraInfo> cameras, string deviceId)
-    {
-        if (cameras.Count == 0)
-            return null;
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return cameras[0];
-
-        foreach (var camera in cameras)
-        {
-            if (string.Equals(camera.SerialNumber, deviceId, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(camera.IpAddress.ToString(), deviceId, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(camera.UserDefinedName, deviceId, StringComparison.OrdinalIgnoreCase)
-                || MacMatches(camera.MacAddress, deviceId))
-                return camera;
-        }
-
-        return null;
-    }
+    private static GigECameraInfo? SelectDevice(IReadOnlyList<GigECameraInfo> cameras, string deviceId) =>
+        CameraDeviceSelection.Resolve(cameras, deviceId, static (camera, needle) =>
+            string.Equals(camera.SerialNumber, needle, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(camera.IpAddress.ToString(), needle, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(camera.UserDefinedName, needle, StringComparison.OrdinalIgnoreCase)
+            || MacMatches(camera.MacAddress, needle));
 
     private static bool MacMatches(byte[] mac, string deviceId)
     {

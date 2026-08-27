@@ -18,12 +18,8 @@ namespace RobotVision.Tests;
 /// </summary>
 public class ModelManagerRaceTests : IDisposable
 {
-    /// <summary>仓库内真实 ONNX 模型（多路径探测，兼容不同检出位置；不存在时 REAL 测试跳过）。</summary>
-    private static readonly string RealModel = new[]
-    {
-        @"D:\projects\公司项目\光模块\RobotVision\models\a01_kpt.onnx",
-        @"d:\Code\RobotVision\models\a01_kpt.onnx",
-    }.FirstOrDefault(File.Exists) ?? "";
+    /// <summary>仓库内真实 ONNX 模型（从仓库根 models/ 探测；不存在时 REAL 测试 Skip）。</summary>
+    private static readonly string RealModel = RepoAssets.FindOnnx() ?? "";
 
     private readonly string _folder = Path.Combine(Path.GetTempPath(), "rv_mm_" + Guid.NewGuid().ToString("N"));
 
@@ -80,8 +76,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Open_MissingFile_FailureNotCached_RetrySucceedsAfterFileArrives()
     {
-        if (!File.Exists(RealModel))
-            return; // 运维场景：启动时模型未就位，后补模型文件后应能重试成功
+        RepoAssets.SkipIfNoOnnx(RealModel); // 运维场景：启动时模型未就位，后补模型文件后应能重试成功
 
         using var manager = new ModelManager(_folder);
 
@@ -97,8 +92,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Open_SameModelConcurrent_LoadsExactlyOnce()
     {
-        if (!File.Exists(RealModel))
-            return;
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
         var sessions = new ConcurrentQueue<ModelSession>();
@@ -112,8 +106,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Open_TaskIsPartOfCacheKey_FailedTaskDoesNotEvictWorkingOne()
     {
-        if (!File.Exists(RealModel))
-            return;
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
 
@@ -133,8 +126,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Open_PathCaseInsensitive_SharesCache()
     {
-        if (!File.Exists(RealModel))
-            return;
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
 
@@ -156,8 +148,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Unload_RemovesSingleTask_AndReloadsOnNextOpen()
     {
-        if (!File.Exists(RealModel))
-            return;
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
         manager.Open(RealModel, InferenceTask.PoseEstimation);
@@ -174,8 +165,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void UnloadAll_File_RemovesEveryTaskOfThatModel()
     {
-        if (!File.Exists(RealModel))
-            return;
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
 
@@ -196,8 +186,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void UnloadAll_Everything_ClearsCache()
     {
-        if (!File.Exists(RealModel))
-            return;
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
         manager.Open(RealModel, InferenceTask.PoseEstimation);
@@ -213,8 +202,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void MaxSessions_TrimsOldestUnusedSession()
     {
-        if (!File.Exists(RealModel))
-            return;
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         using var manager = new ModelManager(_folder, maxSessions: 2);
 
@@ -235,8 +223,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void MaxSessions_Zero_MeansUnlimited()
     {
-        if (!File.Exists(RealModel))
-            return;
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         using var manager = new ModelManager(_folder, maxSessions: 0);
         manager.Open(RealModel, InferenceTask.PoseEstimation);

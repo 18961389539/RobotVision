@@ -72,6 +72,30 @@ public class RoiTests
     }
 
     [Fact]
+    public void Clone_PreservesTemplateRoi()
+    {
+        var recipe = new RecipeConfig
+        {
+            Template = new TemplateOptions { Roi = new Roi(0.1, 0.2, 0.3, 0.4) },
+        };
+        Assert.Equal(recipe.Template.Roi, recipe.Clone().Template.Roi);
+    }
+
+    [Fact]
+    public void Validate_InvalidTemplateRoi_Throws()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "r",
+            CameraId = "cam",
+            Models = ["m.onnx"],
+            Template = new TemplateOptions { Roi = new Roi(0.8, 0, 0.3, 0.5) },
+        };
+        var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+        Assert.Contains("template.roi", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Crop_RelativeToPixels_WithOffset()
     {
         // 1280×960 图，ROI = (0.25, 0.5, 0.5, 0.25)

@@ -38,10 +38,10 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
     {
         Validate(values);
 
-        // 反向联动校验：总超时必须大于所有 Basler 相机的取图超时，
+        // 反向联动校验：总超时必须大于所有硬件相机的取图超时，
         // 否则相机取图超时将表现为 1008（处理超时）而非 1003（取图失败），排障困难
         var conflicts = cfg.Cameras
-            .Where(c => string.Equals(c.Type, "Basler", StringComparison.OrdinalIgnoreCase))
+            .Where(c => c.UsesGrabTimeout())
             .Where(c => c.GrabTimeoutMs >= values.TimeoutMs)
             .Select(c => $"{c.Id}(GrabTimeoutMs={c.GrabTimeoutMs})")
             .ToList();
@@ -147,7 +147,7 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
     /// <summary>
     /// 启动时校验 appsettings.json 解析出的运行时配置值域（与 <see cref="Validate"/> 保存校验保持同一套规则）。
     /// 非法值（如 TimeoutMs=100）直接启动失败并抛出清晰异常，避免静默生效带病运行。
-    /// 逐相机联动校验：Basler 取图超时须小于总超时，否则取图超时表现为 1008 而非 1003，排障困难。
+    /// 逐相机联动校验：Basler / GigEVision 取图超时须小于总超时，否则取图超时表现为 1008 而非 1003，排障困难。
     /// </summary>
     public static void ValidateConfig(AppConfig cfg)
     {
@@ -180,8 +180,7 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         }
         foreach (var camera in cfg.Cameras)
         {
-            if (string.Equals(camera.Type, "Basler", StringComparison.OrdinalIgnoreCase) &&
-                camera.GrabTimeoutMs >= cfg.TimeoutMs)
+            if (camera.UsesGrabTimeout() && camera.GrabTimeoutMs >= cfg.TimeoutMs)
                 throw new InvalidDataException(
                     $"相机 {camera.Id} 的 GrabTimeoutMs={camera.GrabTimeoutMs} 不小于总超时 TimeoutMs={cfg.TimeoutMs}，" +
                     "取图超时将表现为 1008 而非 1003，请先调大总超时或调小 GrabTimeoutMs");

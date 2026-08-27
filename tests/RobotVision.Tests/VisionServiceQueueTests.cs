@@ -19,7 +19,7 @@ namespace RobotVision.Tests;
 /// </summary>
 public class VisionServiceQueueTests : IDisposable
 {
-    private static readonly string RealModel = @"d:\Code\RobotVision\models\a01_kpt.onnx";
+    private static readonly string RealModel = RepoAssets.FindOnnx() ?? "";
 
     private readonly string _recipeFolder = Path.Combine(Path.GetTempPath(), "rv_vsq_" + Guid.NewGuid().ToString("N"));
     private readonly string _replayFolder = Path.Combine(Path.GetTempPath(), "rv_vsq_replay_" + Guid.NewGuid().ToString("N"));
@@ -106,8 +106,7 @@ public class VisionServiceQueueTests : IDisposable
     [Fact]
     public async Task TimeoutWhileQueued_ReturnsFast_PipelineSurvives()
     {
-        if (!File.Exists(RealModel))
-            return; // 无真实模型时跳过（CI 环境无 38MB 模型资产）
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         var service = CreateService(maxDepth: 4, maxConcurrent: 1);
 
@@ -137,8 +136,7 @@ public class VisionServiceQueueTests : IDisposable
     [Fact]
     public async Task QueueDepthExceeded_ReturnsBusyImmediately()
     {
-        if (!File.Exists(RealModel))
-            return;
+        RepoAssets.SkipIfNoOnnx(RealModel);
 
         var service = CreateService(maxDepth: 2, maxConcurrent: 1);
 

@@ -264,7 +264,7 @@
                                 </ui:CardExpander>
                                 <ui:TextBlock FontSize="11" TextWrapping="Wrap"
                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                              Text="测试推理不经过配方/相机/标定链路，直接验证模型输出；与产线共享会话缓存，互不并发" />
+                                              Text="测试推理不经过配方/相机/标定；与产线共用模型会话（同锁，不另开 GPU）" />
                             </StackPanel>
                         </ui:CardExpander>
 

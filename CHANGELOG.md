@@ -25,6 +25,7 @@
 
 ### 变更
 - 全仓依赖锁定(packages.lock.json)
+- 推理后端改为 OpenVINO 核显（`Inference:Provider` 默认 `OpenVinoGpu`，单会话；GPU 不可用时回退 OpenVINO CPU 并打警告；YoloDotNet 每进程只能一种 EP，已替换 CPU 包）
 
 ### 破坏性变更
 

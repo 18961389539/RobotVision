@@ -188,6 +188,25 @@ public class LogsViewModelTests
     }
 
     [Fact]
+    public async Task ReloadAsync_SucceedsWhileFileIsBeingWritten()
+    {
+        using var dir = new TestInfra.TempDir("rv_logs_share");
+        var logs = dir.CreateSub("logs");
+        var path = System.IO.Path.Combine(logs, "robotvision-20260826.log");
+        File.WriteAllText(path, "2026-08-26 10:00:00.000 [INF] A: first\n");
+        var cfg = TestInfra.CreateAppConfig(dir.Path);
+        cfg.FileLogging.Folder = logs;
+
+        await using var writer = new FileStream(
+            path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        var vm = new LogsViewModel(cfg);
+        await vm.ReloadCommand.ExecuteAsync(null);
+
+        vm.Rows.Should().ContainSingle();
+        vm.Status.Should().NotContain("读取失败");
+    }
+
+    [Fact]
     public void ClearFilter_ResetsAllLevelsAndKeyword()
     {
         using var dir = new TestInfra.TempDir("rv_logs_clear");

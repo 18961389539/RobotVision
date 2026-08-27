@@ -123,7 +123,7 @@ public enum SegmentRefineMethod
 /// <summary>
 /// 分割+精修策略（MaskTemplate 模式）专属参数。
 /// 模板图（转正后的目标 PNG，base64 内嵌配方文件）由配方页「示教模板」自动生成：
-/// 取图 → 分割 → 最优目标转正裁剪。拷贝配方文件即携带模板，无路径依赖。
+/// 取图 → 分割 → 转正裁剪（可选特征 ROI 只裁局部纹理）。拷贝配方文件即携带模板，无路径依赖。
 /// </summary>
 public sealed class TemplateOptions
 {
@@ -132,6 +132,13 @@ public sealed class TemplateOptions
 
     /// <summary>模板图 PNG 的 base64（转正目标裁剪）；空 = 未示教（LineFit 方法不使用）。</summary>
     public string TemplateImageBase64 { get; set; } = "";
+
+    /// <summary>
+    /// 示教特征框（相对全图 0~1，与检测 ROI 同口径）；null = 示教时裁整个分割目标。
+    /// 仅「示教模板」使用：TRIGGER 仍用配方检测 ROI 找目标，匹配在目标转正窗口内滑窗。
+    /// 用于检测窗口很大、但头尾/齿脚等只在局部纹理上可判的场景。
+    /// </summary>
+    public Roi? Roi { get; set; }
 
     /// <summary>模板匹配置信阈值 [0,1]：低于该值放弃精修，回退粗角度（[0,180) 无方向）。</summary>
     public double MatchThreshold { get; set; } = 0.6;
@@ -147,6 +154,7 @@ public sealed class TemplateOptions
     {
         RefineMethod = RefineMethod,
         TemplateImageBase64 = TemplateImageBase64,
+        Roi = Roi,
         MatchThreshold = MatchThreshold,
         RefineRangeDeg = RefineRangeDeg,
         UseEdgeMatch = UseEdgeMatch,
@@ -326,8 +334,8 @@ public sealed class RecipeConfig
         Blob = Blob.Clone(),
         Roi = Roi,
         RotationCompensation = RotationCompensation,
-        OutputOffset = OutputOffset.Clone(),
-        ModelSha256 = [.. ModelSha256],
+        OutputOffset = (OutputOffset ?? new()).Clone(),
+        ModelSha256 = [.. ModelSha256 ?? []],
         StationSha256 = StationSha256,
         LightControllerId = LightControllerId,
         Lighting = Lighting?.Clone(),

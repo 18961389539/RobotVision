@@ -383,6 +383,37 @@ public class AppSettingsStoreTests : IDisposable
             PoseXyToleranceMm: 0);
         Assert.Throws<InvalidDataException>(() => store.Save(values));
     }
+
+    [Fact]
+    public void ValidateConfig_GigEGrabTimeoutNotLessThanTotal_Throws()
+    {
+        var cfg = new AppConfig
+        {
+            TimeoutMs = 90_000,
+            Cameras =
+            [
+                new CameraConfig { Id = "cam_gige", Type = "GigEVision", GrabTimeoutMs = 90_000 },
+            ],
+        };
+        var ex = Assert.Throws<InvalidDataException>(() => AppSettingsStore.ValidateConfig(cfg));
+        Assert.Contains("cam_gige", ex.Message);
+    }
+
+    [Fact]
+    public void NormalizeVisionTiming_RaisesTimeoutButKeepsValidGrabTimeout()
+    {
+        var cfg = new AppConfig
+        {
+            TimeoutMs = 5_000,
+            Cameras =
+            [
+                new CameraConfig { Id = "cam_basler", Type = "Basler", GrabTimeoutMs = 2_000 },
+            ],
+        };
+        cfg.NormalizeVisionTiming();
+        Assert.Equal(AppConfig.DefaultRequestTimeoutMs, cfg.TimeoutMs);
+        Assert.Equal(2_000, cfg.Cameras[0].GrabTimeoutMs);
+    }
 }
 
 /// <summary>失败留存运行时开关测试：Enabled/RetainedCount 热改后立即生效。</summary>

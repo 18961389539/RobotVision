@@ -51,9 +51,7 @@ public sealed class ProcessHealthStore
 
     public void RestoreInto(VisionMetrics metrics)
     {
-        if (!_cfg.Enabled)
-            return;
-
+        // 无论当前是否启用联锁都恢复累计：启动时关闭再打开不得用空统计覆盖 health.json。
         try
         {
             if (!File.Exists(StatePath))

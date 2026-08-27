@@ -99,4 +99,80 @@ public class AssetIntegrityTests : IDisposable
         var b = cal.ComputeStationSha256("st1");
         Assert.NotEqual(a, b);
     }
+
+    [Fact]
+    public void StationFingerprint_IgnoresQualityMetadata()
+    {
+        var cal = new CalibrationManager();
+        cal.LoadExtrinsic(new ExtrinsicProfile
+        {
+            StationId = "st1",
+            CameraId = "cam",
+            Affine = [1, 0, 0, 0, 1, 0],
+            Rms = 0.01,
+            MaxResidual = 0.02,
+            PointResiduals = [0.01, 0.02],
+            CalibratedAt = new DateTime(2020, 1, 1),
+        });
+        var a = cal.ComputeStationSha256("st1");
+
+        cal.LoadExtrinsic(new ExtrinsicProfile
+        {
+            StationId = "st1",
+            CameraId = "cam",
+            Affine = [1, 0, 0, 0, 1, 0],
+            Rms = 9,
+            MaxResidual = 9,
+            PointResiduals = [9, 9, 9],
+            CalibratedAt = new DateTime(2026, 8, 26),
+        });
+        Assert.Equal(a, cal.ComputeStationSha256("st1"));
+    }
+
+    [Fact]
+    public void StationFingerprint_ExtrinsicIncludesIntrinsic()
+    {
+        var cal = new CalibrationManager();
+        cal.LoadExtrinsic(new ExtrinsicProfile
+        {
+            StationId = "st1",
+            CameraId = "cam",
+            Affine = [1, 0, 0, 0, 1, 0],
+            Width = 64,
+            Height = 64,
+        });
+        cal.LoadIntrinsic(DummyIntrinsic("cam", 800));
+        var withA = cal.ComputeStationSha256("st1", undistortCameraId: "cam");
+
+        cal.LoadIntrinsic(DummyIntrinsic("cam", 900));
+        var withB = cal.ComputeStationSha256("st1", undistortCameraId: "cam");
+        Assert.NotEqual(withA, withB);
+
+        var checker = new AssetIntegrityChecker(
+            new AppConfig { AssetIntegrity = { Enabled = true } },
+            new ModelManager(_dir),
+            cal,
+            NullLogger<AssetIntegrityChecker>.Instance);
+        var recipe = new RecipeConfig
+        {
+            Name = "A01",
+            CameraId = "cam",
+            StationId = "st1",
+            AngleMode = AngleMode.DualBlobCenterLine,
+            StationSha256 = withA,
+        };
+        Assert.Equal("STATION_HASH_MISMATCH", checker.Check(recipe));
+
+        recipe.StationSha256 = withB;
+        Assert.Null(checker.Check(recipe));
+    }
+
+    private static IntrinsicProfile DummyIntrinsic(string cameraId, double fx) => new()
+    {
+        CameraId = cameraId,
+        Width = 64,
+        Height = 64,
+        CameraMatrix = [fx, 0, 32, 0, fx, 32, 0, 0, 1],
+        DistCoeffs = [0, 0, 0, 0, 0],
+    };
 }

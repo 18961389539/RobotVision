@@ -27,7 +27,7 @@ public sealed class MaskTemplateStrategy(ModelManager models) : IAngleStrategy
     {
         var useRefineTemplate = recipe.Template.RefineMethod == SegmentRefineMethod.Template;
         if (useRefineTemplate && string.IsNullOrEmpty(recipe.Template.TemplateImageBase64))
-            throw new VisionException(VisionErrorCode.InternalError,
+            throw new VisionException(VisionErrorCode.InvalidRecipeConfig,
                 "分割+精修（模板匹配方法）未示教模板（配方页「示教模板」自动生成，或改用直线拟合方法）");
         Mat? template = useRefineTemplate
             ? MaskTemplateMatcher.DecodeTemplatePng(recipe.Template.TemplateImageBase64)

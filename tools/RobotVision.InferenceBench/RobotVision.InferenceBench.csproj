@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RobotVision.InferenceBench</AssemblyName>
+    <RootNamespace>RobotVision.InferenceBench</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RobotVision.InferenceBench.Shared\RobotVision.InferenceBench.Shared.csproj" />
+    <ProjectReference Include="..\RobotVision.InferenceBench.OpenVino\RobotVision.InferenceBench.OpenVino.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\RobotVision.Infrastructure\RobotVision.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <!-- OpenVINO 对照在独立 ov-worker 进程，避免与主进程抢同一套 native / 会话 -->
+  <Target Name="CopyOpenVinoWorker" AfterTargets="Build">
+    <PropertyGroup>
+      <_OvOut>$(MSBuildThisFileDirectory)..\RobotVision.InferenceBench.OpenVino\bin\$(Configuration)\$(TargetFramework)\</_OvOut>
+      <_OvDest>$(TargetDir)ov-worker\</_OvDest>
+    </PropertyGroup>
+    <ItemGroup>
+      <_OvFiles Include="$(_OvOut)**\*.*" Condition="Exists('$(_OvOut)RobotVision.InferenceBench.OpenVino.exe')" />
+    </ItemGroup>
+    <MakeDir Directories="$(_OvDest)" Condition="Exists('$(_OvOut)RobotVision.InferenceBench.OpenVino.exe')" />
+    <Copy SourceFiles="@(_OvFiles)"
+          DestinationFiles="@(_OvFiles->'$(_OvDest)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_OvFiles)' != ''" />
+  </Target>
+
+</Project>

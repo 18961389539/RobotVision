@@ -4,9 +4,7 @@
 // 用法：
 //   RobotVision.Diag [--model <onnx路径>] [--replay <回放目录>] [--image <图片路径>]
 // 退出码：0 = 对照一致（像素偏差在容差内）；1 = 对照不一致或执行失败（供 CI/脚本判断）。
-using Microsoft.ML.OnnxRuntime;
 using YoloDotNet;
-using YoloDotNet.ExecutionProvider.Cpu;
 using YoloDotNet.Models;
 using SkiaSharp;
 using OpenCvSharp;
@@ -22,8 +20,21 @@ string Arg(string key, string fallback)
     return i >= 0 && i + 1 < argsList.Count ? argsList[i + 1] : fallback;
 }
 
-var modelPath = Arg("--model", @"D:\Code\RobotVision\models\a01_kpt.onnx");
-var replayDir = Arg("--replay", @"D:\Code\RobotVision\data\replay");
+static string FindRepoRoot()
+{
+    var dir = AppContext.BaseDirectory;
+    for (var i = 0; i < 10 && !string.IsNullOrEmpty(dir); i++)
+    {
+        if (File.Exists(Path.Combine(dir, "RobotVision.sln")))
+            return dir;
+        dir = Path.GetDirectoryName(dir);
+    }
+    return Directory.GetCurrentDirectory();
+}
+
+var repo = FindRepoRoot();
+var modelPath = Arg("--model", Path.Combine(repo, "models", "a01_kpt.onnx"));
+var replayDir = Arg("--replay", Path.Combine(repo, "data", "replay"));
 var imagePath = Arg("--image", Path.Combine(replayDir, "people.jpg"));
 
 const int PixelTolerance = 10; // 每通道允许偏差（0~255）
@@ -50,7 +61,7 @@ Console.WriteLine($"FileCamera: {image.Width}x{image.Height} channels={image.Cha
 
 // 2. 内参去畸变（读取与 App 相同的标定档案）
 var calib = new CalibrationManager();
-calib.LoadDirectory(@"D:\Code\RobotVision\data\calibration");
+calib.LoadDirectory(Path.Combine(repo, "data", "calibration"));
 using var undistorted = calib.Undistort("cam_file", image);
 Console.WriteLine($"Undistort: {undistorted.Width}x{undistorted.Height} channels={undistorted.Channels}");
 
@@ -60,7 +71,7 @@ using var bitmap = MatSkiaConverter.ToSKBitmap(undistortedMat);
 Console.WriteLine($"SKBitmap: {bitmap.Width}x{bitmap.Height} colorType={bitmap.ColorType} alpha={bitmap.AlphaType}");
 
 // 4. 推理
-using var yolo = new Yolo(new YoloOptions { ExecutionProvider = new CpuExecutionProvider(modelPath) });
+using var yolo = YoloDotNetEngineFactory.CreateYolo(modelPath, "OpenVinoGpu");
 
 var results = yolo.RunPoseEstimation(bitmap, 0.5, 0.7);
 Console.WriteLine($"复刻管线 conf=0.5: 检出 {results.Count} 个目标");

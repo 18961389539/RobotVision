@@ -16,7 +16,7 @@ namespace RobotVision.Infrastructure.Communication;
 ///   请求: 配方键,X,Y,RZ（键=名称或序列号）         应答: 同上（OnArm 工位校验拍照位姿，不一致 1012）
 ///   请求: PING               应答: PONG
 ///   请求: STATUS             应答: OK,ready|busy,队列深度,队列上限,最近耗时ms,连续失败,联锁0|1
-///   请求: CLEARINHIBIT[,配方] 应答: OK,CLEARED
+///   请求: CLEARINHIBIT 或 CLEARINHIBIT,键（键=配方名或序列号）  应答: OK,CLEARED
 ///   出错: ERR,错误码,消息
 /// 错误消息契约：业务错误保留 Sanitize 后的可读消息；InternalError 固定为
 /// INTERNAL_ERROR（详情只进日志）；未知命令/缺参数/参数格式错误用固定 ASCII 模板。
@@ -108,7 +108,7 @@ public sealed class TcpServerManager : IDisposable
     public Func<TcpServerState>? StateProvider { get; set; }
 
     /// <summary>
-    /// CLEARINHIBIT 命令：解除连续失败联锁。参数为配方名或空（全部）。
+    /// CLEARINHIBIT 命令：解除连续失败联锁。参数为配方名、序列号或空（全部）。
     /// 未注入时该命令按未知命令处理。
     /// </summary>
     public Func<string?, string>? ClearInhibitHandler { get; set; }
@@ -651,7 +651,7 @@ public sealed class TcpServerManager : IDisposable
         if (string.Equals(line, "STATUS", StringComparison.OrdinalIgnoreCase))
             return FormatStatus(StateProvider?.Invoke());
 
-        if (line.StartsWith("CLEARINHIBIT", StringComparison.OrdinalIgnoreCase))
+        if (IsClearInhibitCommand(line))
         {
             if (ClearInhibitHandler is null)
                 return FormatReply(VisionResult.Fail("", VisionErrorCode.UnknownCommand, "UNKNOWN_COMMAND", 0));
@@ -769,6 +769,18 @@ public sealed class TcpServerManager : IDisposable
             return "OK,ready,0,0,0";
         var inhibited = state.Inhibited != 0 ? 1 : 0;
         return $"OK,{(state.Ready ? "ready" : "busy")},{state.QueueDepth},{state.MaxQueueDepth},{state.LastElapsedMs:0},{state.ConsecutiveFails},{inhibited}";
+    }
+
+    /// <summary>
+    /// CLEARINHIBIT 或 CLEARINHIBIT,键（键=配方名或序列号）。
+    /// 前缀粘连（CLEARINHIBITED）不当作本命令，以免误解除全部联锁。
+    /// </summary>
+    public static bool IsClearInhibitCommand(string line)
+    {
+        var trimmed = line.Trim();
+        if (string.Equals(trimmed, "CLEARINHIBIT", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return trimmed.StartsWith("CLEARINHIBIT,", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>CLEARINHIBIT 或 CLEARINHIBIT,配方名 → 配方名或 null（全部）。</summary>

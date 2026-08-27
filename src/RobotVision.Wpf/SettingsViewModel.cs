@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure.Communication;
+using RobotVision.Infrastructure.Inference;
 
 namespace RobotVision.WpfHost;
 
@@ -30,6 +31,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     private readonly VisionService _vision;
     private readonly FailureImageStore _failures;
     private readonly AppSettingsStore _store;
+    private readonly IInferenceEngineFactory? _inference;
     private readonly DispatcherTimer _timer;
 
     /// <summary>最近一次载入/保存时的参数快照（脏标记基准）。</summary>
@@ -105,18 +107,23 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     [ObservableProperty]
     private string _status = "";
 
+    [ObservableProperty]
+    private string _inferenceStatus = "";
+
     public SettingsViewModel(
         AppConfig cfg,
         TcpServerManager tcp,
         VisionService vision,
         FailureImageStore failures,
-        AppSettingsStore store)
+        AppSettingsStore store,
+        IInferenceEngineFactory? inference = null)
     {
         _cfg = cfg;
         _tcp = tcp;
         _vision = vision;
         _failures = failures;
         _store = store;
+        _inference = inference;
 
         LoadFromRuntime();
 
@@ -157,10 +164,21 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
 
     public void StopTimer() => _timer.Stop();
 
-    private void RefreshStatus() =>
+    private void RefreshStatus()
+    {
         Status = $"监听 {_tcp.ListenEndPoint} · {(_tcp.IsRunning ? "运行中" : "已停止")} · " +
                  $"当前连接 {_tcp.ConnectedClients} · 累计接入 {_tcp.TotalConnections} · " +
                  $"拒绝 {_tcp.RejectedConnections} · 累计请求 {_tcp.TotalRequests}";
+        var configured = string.IsNullOrWhiteSpace(_cfg.Inference.Provider) ? "OpenVinoGpu" : _cfg.Inference.Provider;
+        if (_inference is null)
+            InferenceStatus = $"推理 {configured}（改 appsettings Inference:Provider 后重启）";
+        else if (_inference.GpuUnavailable)
+            InferenceStatus = $"推理配置 {configured} · 实际 OpenVINO CPU（GPU 不可用，重启后才再试）";
+        else if (string.IsNullOrEmpty(_inference.ActiveDevice))
+            InferenceStatus = $"推理配置 {configured} · 尚未加载模型";
+        else
+            InferenceStatus = $"推理配置 {configured} · 实际 OpenVINO {_inference.ActiveDevice}";
+    }
 
     [RelayCommand]
     private void Save()
@@ -199,7 +217,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
             }
             else
             {
-                Message = "已保存并应用（全部参数即时生效）" + RestartSuffix(restartNeeded);
+                Message = "已保存并应用" + (restartNeeded
+                    ? RestartSuffix(true)
+                    : "（可热生效的参数已立即生效；推理 Provider 需改 appsettings 后重启）");
             }
 
             _baseline = CurrentValues();

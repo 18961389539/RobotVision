@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\src\RobotVision.Infrastructure\RobotVision.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\RobotVision.Hosting\RobotVision.Hosting.csproj" />
     <ProjectReference Include="..\..\tools\RobotVision.CalibTool\RobotVision.CalibTool.csproj" />
+    <ProjectReference Include="..\..\tools\RobotVision.InferenceBench.Shared\RobotVision.InferenceBench.Shared.csproj" />
   </ItemGroup>
 
 </Project>

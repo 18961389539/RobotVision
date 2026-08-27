@@ -29,6 +29,15 @@ public interface IInferenceEngineFactory
 {
     IInferenceEngine Create(string modelPath);
 
+    /// <summary>appsettings Inference:Provider 原文。</summary>
+    string Provider => "";
+
+    /// <summary>最近一次成功会话实际设备（GPU / CPU）；尚未加载时为空。</summary>
+    string ActiveDevice => "";
+
+    /// <summary>已确认 GPU 不可用（模型文件有效但 GPU 创建失败、CPU 成功），后续会话跳过 GPU。</summary>
+    bool GpuUnavailable => false;
+
     /// <summary>加载模型并读取任务类型（随即释放引擎）。</summary>
     InferenceTask? DetectTask(string modelPath) => InferenceTaskDetector.Detect(this, modelPath);
 }

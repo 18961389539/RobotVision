@@ -62,4 +62,22 @@ public class OutputOffsetTests
         Assert.Equal(0.1, recipe.OutputOffset.X);
         Assert.StartsWith("abcd", recipe.ModelSha256[0]);
     }
+
+    [Fact]
+    public void Validate_NullOutputOffset_TreatedAsZero()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "A01",
+            CameraId = "cam",
+            AngleMode = AngleMode.KeyPointLine,
+            Models = ["m.onnx"],
+            OutputOffset = null!,
+        };
+        RecipeLoader.Validate(recipe);
+        Assert.NotNull(recipe.OutputOffset);
+        Assert.True(recipe.OutputOffset.IsZero);
+        var clone = recipe.Clone();
+        Assert.True(clone.OutputOffset.IsZero);
+    }
 }

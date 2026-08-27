@@ -95,6 +95,7 @@ public sealed class TestServer : IAsyncDisposable
             ],
         };
         configure?.Invoke(cfg, root);
+        var requestedTimeout = cfg.TimeoutMs;
 
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Warning));
@@ -110,6 +111,11 @@ public sealed class TestServer : IAsyncDisposable
 
         var tcp = provider.GetRequiredService<TcpServerManager>();
         var vision = provider.GetRequiredService<VisionService>();
+        if (requestedTimeout >= 500 && requestedTimeout < AppConfig.DefaultRequestTimeoutMs)
+        {
+            cfg.TimeoutMs = requestedTimeout;
+            tcp.TimeoutMs = requestedTimeout;
+        }
 
         // 为虚拟相机加载零畸变内参档案：取图后的去畸变步骤可正常执行
         // （否则管线在 Undistort 处返回 1004，无法覆盖取图/推理路径）

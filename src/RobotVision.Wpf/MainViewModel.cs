@@ -100,6 +100,13 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
     [ObservableProperty]
     private bool _triggerSuccess;
 
+    /// <summary>连续失败联锁提示（1018）；空 = 不显示横幅。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasInterlock))]
+    private string _interlockText = "";
+
+    public bool HasInterlock => !string.IsNullOrEmpty(InterlockText);
+
     /// <summary>监控页参数浮动面板展开状态（图像主导布局，与相机/配方页同构）。</summary>
     [ObservableProperty]
     private bool _isParamPanelVisible = true;
@@ -113,6 +120,31 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
 
     [RelayCommand]
     private void ToggleLogPanel() => IsLogPanelVisible = !IsLogPanelVisible;
+
+    [RelayCommand]
+    private void ClearInhibit()
+    {
+        _vision.ClearInhibit();
+        RefreshInterlock();
+    }
+
+    private void RefreshInterlock()
+    {
+        if (!_vision.AnyInhibited)
+        {
+            InterlockText = "";
+            return;
+        }
+
+        var limit = Math.Max(1, _vision.ConsecutiveFailLimit);
+        var locked = _vision.GetRecipeStats()
+            .Where(s => s.ConsecutiveFails >= limit)
+            .Select(s => $"{s.Recipe}×{s.ConsecutiveFails}")
+            .ToList();
+        InterlockText = locked.Count == 0
+            ? "连续失败联锁已触发（1018）。排除现场问题后点「解除联锁」。"
+            : $"连续失败联锁：{string.Join("、", locked)}。TRIGGER 返回 1018。";
+    }
 
     /// <summary>日志级别过滤选项。</summary>
     public IReadOnlyList<string> LogFilterOptions { get; } = ["全部", "警告及错误", "仅错误"];
@@ -173,8 +205,10 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         {
             IsTcpRunning = _tcp.IsRunning;
             TcpStatus = $"TCP {_tcp.ConnectedClients} 客户端 · 队列 {_vision.QueueDepth}/{_vision.MaxQueueDepth}";
+            RefreshInterlock();
         };
         _statusTimer.Start();
+        RefreshInterlock();
     }
 
     /// <summary>重建相机下拉（保留仍存在的选中项）；相机管理页增删相机后由 MonitorPage Loaded 调用。</summary>

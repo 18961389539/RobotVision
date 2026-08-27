@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using RobotVision.Core.Assets;
 using RobotVision.Core.Models;
@@ -17,6 +18,8 @@ public sealed class AssetIntegrityChecker(
     CalibrationManager calibration,
     ILogger<AssetIntegrityChecker> log)
 {
+    private readonly ConcurrentDictionary<string, byte> _unpinnedWarned = new(StringComparer.OrdinalIgnoreCase);
+
     public bool IsEnabled => cfg.AssetIntegrity.Enabled;
 
     /// <summary>通过返回 null；失败返回 1017 消息（ASCII，可上协议线）。</summary>
@@ -63,7 +66,16 @@ public sealed class AssetIntegrityChecker(
                 }
 
                 var pinned = i < recipe.ModelSha256.Count ? recipe.ModelSha256[i] : "";
-                if (!string.IsNullOrWhiteSpace(pinned) && !FileSha256.EqualsHex(pinned, actual))
+                if (string.IsNullOrWhiteSpace(pinned))
+                {
+                    var warnKey = $"{recipe.Name}\0{file}";
+                    if (_unpinnedWarned.TryAdd(warnKey, 0))
+                    {
+                        log.LogWarning("配方 {Recipe} 未钉扎模型 {Model} 的 SHA-256，同名替换不会被 1017 拦住",
+                            recipe.Name, file);
+                    }
+                }
+                else if (!FileSha256.EqualsHex(pinned, actual))
                     return "MODEL_HASH_MISMATCH";
 
                 if (cfg.AssetIntegrity.RequireManifest && manifest is not null)
@@ -80,7 +92,8 @@ public sealed class AssetIntegrityChecker(
             !string.IsNullOrWhiteSpace(recipe.StationId))
         {
             var includeRotation = recipe.RotationCompensation == RotationCompensationMode.EccentricTool;
-            var actual = calibration.ComputeStationSha256(recipe.StationId, includeRotation);
+            var actual = calibration.ComputeStationSha256(
+                recipe.StationId, includeRotation, recipe.CameraId);
             if (actual is null || !FileSha256.EqualsHex(recipe.StationSha256, actual))
                 return "STATION_HASH_MISMATCH";
         }
@@ -110,7 +123,8 @@ public sealed class AssetIntegrityChecker(
         if (!string.IsNullOrWhiteSpace(recipe.StationId))
         {
             var includeRotation = recipe.RotationCompensation == RotationCompensationMode.EccentricTool;
-            station = calibration.ComputeStationSha256(recipe.StationId, includeRotation);
+            station = calibration.ComputeStationSha256(
+                recipe.StationId, includeRotation, recipe.CameraId);
         }
 
         return (hashes, station);
