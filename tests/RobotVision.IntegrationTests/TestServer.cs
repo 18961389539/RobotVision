@@ -57,6 +57,7 @@ public sealed class TestServer : IAsyncDisposable
             CalibrationFolder = Path.Combine(root, "calibration"),
             FileLogging = new FileLoggingConfig { Enabled = false },
             FailureImage = new FailureImageConfig { Folder = Path.Combine(root, "failures") },
+            ResultLog = new ResultLogConfig { Enabled = true, Folder = Path.Combine(root, "results") },
             Cameras =
             [
                 new CameraConfig { Id = "cam_virtual", Type = "Virtual", Width = 128, Height = 96, Pattern = "Bars" },

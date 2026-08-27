@@ -60,6 +60,12 @@ public sealed class AppConfig
     /// <summary>过程能力落盘与连续失败联锁。</summary>
     public ProcessHealthConfig ProcessHealth { get; set; } = new();
 
+    /// <summary>结果日志（JSON Lines 按天）：成功与失败结果的原始留档，供追溯/统计/导入分析。</summary>
+    public ResultLogConfig ResultLog { get; set; } = new();
+
+    /// <summary>成功产品现场图留存（默认关）：开启后成功检测也存图，供复检/工艺分析。</summary>
+    public CaptureSuccessConfig CaptureSuccess { get; set; } = new();
+
     public List<CameraConfig> Cameras { get; set; } = [];
 
     public List<LightControllerConfig> LightControllers { get; set; } = [];
@@ -129,6 +135,39 @@ public sealed class ProcessHealthConfig
 
     /// <summary>按日 TSV 保留天数；≤0 不按天清理。</summary>
     public int RetainedDays { get; set; } = 90;
+}
+
+/// <summary>
+/// 结果日志配置（JSON Lines 按天滚动）：每次触发的成功/失败结果原始留档。
+/// 供产线追溯（"这批料 14:00 检的角度"）、合格率/角度分布统计、长期趋势分析，
+/// 字段固定为将来导入 SQLite 预留。写入为异步追加，不影响检测节拍。
+/// </summary>
+public sealed class ResultLogConfig
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>日志目录（相对路径按目录解析规则锚定：exe 目录优先，工作目录回退）。</summary>
+    public string Folder { get; set; } = "data/results";
+
+    /// <summary>按天滚动保留天数；≤0 不清理。</summary>
+    public int RetainedDays { get; set; } = 30;
+}
+
+/// <summary>
+/// 成功产品现场图留存（默认关）：开启后成功检测也保存去畸变图 + 元数据，
+/// 供复检/工艺分析；默认关闭避免产线高速节拍下磁盘暴涨。
+/// </summary>
+public sealed class CaptureSuccessConfig
+{
+    public bool Enabled { get; set; }
+
+    public string Folder { get; set; } = "data/captures";
+
+    /// <summary>缩图最大宽度（0 = 原图；产线量大利建议开缩图，如 1280）。</summary>
+    public int MaxWidth { get; set; }
+
+    /// <summary>按天目录保留天数；≤0 不清理。</summary>
+    public int RetainedDays { get; set; } = 30;
 }
 
 public sealed class FileLoggingConfig

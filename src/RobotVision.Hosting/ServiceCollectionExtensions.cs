@@ -203,6 +203,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(AngleStrategyTypeRegistry.Default);
         services.AddSingleton(sp => new FailureImageStore(
             cfg.FailureImage, sp.GetRequiredService<ILogger<FailureImageStore>>()));
+        services.AddSingleton(sp => new ResultLogStore(
+            cfg.ResultLog, sp.GetRequiredService<ILogger<ResultLogStore>>()));
+        services.AddSingleton(sp => new SuccessCaptureStore(
+            cfg.CaptureSuccess, sp.GetRequiredService<ILogger<SuccessCaptureStore>>()));
 
         var metricsFolder = cfg.ResolveMetricsFolder();
         services.AddSingleton(sp =>
@@ -219,7 +223,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<FailureImageStore>(),
             sp.GetRequiredService<ILogger<VisionService>>(),
             sp.GetRequiredService<AssetIntegrityChecker>(),
-            sp.GetRequiredService<ProcessHealthStore>())
+            sp.GetRequiredService<ProcessHealthStore>(),
+            sp.GetRequiredService<ResultLogStore>(),
+            sp.GetRequiredService<SuccessCaptureStore>())
         {
             MaxQueueDepth = Math.Max(1, cfg.MaxQueueDepth),
             MaxConcurrent = Math.Clamp(cfg.MaxConcurrent, 1, Math.Max(1, cfg.MaxQueueDepth)),
@@ -262,8 +268,27 @@ public static class ServiceCollectionExtensions
                     vision.MaxConsecutiveFails, vision.AnyInhibited ? 1 : 0),
                 ClearInhibitHandler = recipe =>
                 {
-                    vision.ClearInhibit(recipe);
-                    return string.IsNullOrEmpty(recipe) ? "OK,CLEARED" : $"OK,CLEARED,{recipe}";
+                    if (string.IsNullOrEmpty(recipe))
+                    {
+                        vision.ClearInhibit();
+                        return "OK,CLEARED";
+                    }
+
+                    var (name, resolveError) = recipes.ResolveTriggerKey(recipe);
+                    if (resolveError is not null)
+                    {
+                        var code = resolveError switch
+                        {
+                            "INVALID_RECIPE_NAME" or "INVALID_SERIAL" or "TRIGGER_ARGUMENT_COUNT"
+                                or "INVALID_POSE_NUMBER" => VisionErrorCode.InvalidTriggerArgument,
+                            _ => VisionErrorCode.UnknownRecipe,
+                        };
+                        return TcpServerManager.FormatReply(
+                            VisionResult.Fail(recipe, code, resolveError, 0));
+                    }
+
+                    vision.ClearInhibit(name);
+                    return "OK,CLEARED";
                 },
             };
         });

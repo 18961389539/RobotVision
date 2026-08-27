@@ -156,6 +156,95 @@ public class SmokePipelineIntegrationTests : IClassFixture<SmokePipelineIntegrat
         result.Message.Should().Contain("分辨率");
     }
 
+    [Fact]
+    public async Task Trigger_DualBlob_ResultLogWritten()
+    {
+        // 成功触发后:data/results/ 应有 JSON Lines 记录(坐标/配方/耗时)
+        _fixture.Server.WriteRecipe("BLOB_LOG", """
+            {"cameraId":"cam_file","stationId":"st1","angleMode":"DualBlobCenterLine"}
+            """);
+
+        var result = await RunWithBudget(_fixture.Server, "BLOB_LOG");
+        result.Ok.Should().BeTrue();
+
+        var logDir = _fixture.Server.Cfg.ResultLog.Folder;
+        var file = WaitForFile(logDir, "results-*.jsonl");
+        file.Should().NotBeEmpty("成功触发后结果日志应落盘");
+        var line = File.ReadAllLines(file).First();
+        line.Should().Contain("BLOB_LOG");
+        line.Should().Contain("\"Code\":0"); // 成功码
+        line.Should().Contain("\"X\":15");   // 主质心 150px × 0.1 = 15mm
+    }
+
+    [Fact]
+    public async Task Trigger_DualBlob_CaptureSuccess_StoresImage_WhenEnabled()
+    {
+        // CaptureSuccess 开关开启时:成功检测也存图(data/captures/yyyy-MM-dd/*.png + json)
+        await using var server = await TestServer.StartAsync((cfg, root) =>
+        {
+            var replay = Path.Combine(root, "replay_dual");
+            WriteDualBlobImage(replay);
+            cfg.Cameras[1].Folder = replay;
+            cfg.CaptureSuccess = new CaptureSuccessConfig
+            {
+                Enabled = true,
+                Folder = Path.Combine(root, "captures"),
+                MaxWidth = 0,
+            };
+        });
+        LoadCalibrationFor(server);
+        server.WriteRecipe("CAP", """
+            {"cameraId":"cam_file","stationId":"st1","angleMode":"DualBlobCenterLine"}
+            """);
+
+        var result = await RunWithBudget(server, "CAP");
+        result.Ok.Should().BeTrue();
+
+        var captureDir = server.Cfg.CaptureSuccess.Folder;
+        var png = WaitForFile(Path.Combine(captureDir, DateTime.Now.ToString("yyyy-MM-dd")), "*_OK.png");
+        png.Should().NotBeEmpty("开启成功存图后应有 OK 现场图");
+        // 元数据 JSON 与图同名
+        File.Exists(Path.ChangeExtension(png, ".json")).Should().BeTrue("应有同名元数据 JSON");
+    }
+
+    /// <summary>为独立 TestServer 加载 cam_file 内参 + st1 工位外参（与 fixture 初始化同配置）。</summary>
+    private static void LoadCalibrationFor(TestServer server)
+    {
+        var cal = server.Provider.GetRequiredService<CalibrationManager>();
+        cal.LoadIntrinsic(new IntrinsicProfile
+        {
+            CameraId = "cam_file",
+            Width = ImageSize,
+            Height = ImageSize,
+            CameraMatrix = [100, 0, ImageSize / 2.0, 0, 100, ImageSize / 2.0, 0, 0, 1],
+            DistCoeffs = [0, 0, 0, 0, 0],
+        });
+        cal.LoadExtrinsic(new ExtrinsicProfile
+        {
+            StationId = "st1",
+            CameraId = "cam_file",
+            Affine = [0.1, 0, 0, 0, 0.1, 0],
+            Rms = 0.01,
+            MaxResidual = 0.02,
+            Width = ImageSize,
+            Height = ImageSize,
+        });
+    }
+
+    /// <summary>轮询等待目录中出现匹配文件(后台异步写盘)。</summary>
+    private static string WaitForFile(string dir, string pattern, int timeoutMs = 5000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            var file = Directory.Exists(dir) ? Directory.GetFiles(dir, pattern).FirstOrDefault() : null;
+            if (file is not null)
+                return file;
+            Thread.Sleep(50);
+        }
+        return "";
+    }
+
     /// <summary>
     /// 共享 TestServer：一个 DI 容器 + 两组回放相机（dualblob / plain）+ None 灯光控制器
     /// + cam_file/cam_plain 内参 + st1/st_plain/st_drift 外参。全部用例复用，避免重复冷启动。

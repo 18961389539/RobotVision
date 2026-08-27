@@ -34,7 +34,9 @@ public sealed class VisionService(
     FailureImageStore failureImages,
     ILogger<VisionService> log,
     AssetIntegrityChecker? assets = null,
-    ProcessHealthStore? health = null)
+    ProcessHealthStore? health = null,
+    ResultLogStore? resultLog = null,
+    SuccessCaptureStore? captures = null)
 {
     private PipelineScheduler? _scheduler;
 
@@ -139,14 +141,43 @@ public sealed class VisionService(
     /// 不一致抛 1012——位姿漂移后旧外参映射已失效，静默执行会输出错位坐标。
     /// pose=null 时：OnArm 已记录示教位姿则 1014；否则跳过校验（Fixed / 旧档案）。
     /// </summary>
-    public Task<VisionResult> RunAsync(string recipeName, TcpClientPose? pose, CancellationToken ct) =>
-        Scheduler.RunAsync(recipeName,
+    public Task<VisionResult> RunAsync(string recipeName, TcpClientPose? pose, CancellationToken ct)
+    {
+        EnsureHealthRestored();
+        // 联锁在入队前短路：被锁配方连打不得占 MaxQueueDepth，避免把其他工位打成 1009。
+        if (health?.IsInhibited(_metrics, recipeName) == true)
+            return Task.FromResult(VisionResult.Fail(recipeName, VisionErrorCode.ProcessUnhealthy,
+                "PROCESS_UNHEALTHY", 0));
+
+        return Scheduler.RunAsync(recipeName,
             (name, token) => ProcessCoreInnerAsync(name, pose, token),
             result =>
             {
+                // 结果日志：每次触发的原始留档（含联锁拒绝，分析时按 Code 过滤）。
+                // 成功/失败同一格式，供追溯与统计（data/results/ 按天 JSON Lines）。
+                resultLog?.Record(result, LookupContext(result.RecipeName));
+
+                // 已在队列内才撞上联锁的请求：不记过程失败、不追加 TSV，以免 PLC 重试刷良率。
+                if (result.ErrorCode == VisionErrorCode.ProcessUnhealthy)
+                    return;
                 _metrics.Record(result);
                 health?.OnCompleted(result, _metrics);
             }, ct);
+    }
+
+    /// <summary>从配方解析相机/工位（供结果日志关联上下文；未知配方返回 null，不影响日志）。</summary>
+    private (string CameraId, string StationId)? LookupContext(string recipeName)
+    {
+        try
+        {
+            var recipe = recipes.Get(recipeName);
+            return (recipe.CameraId, recipe.StationId ?? "");
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private async Task<VisionResult> ProcessCoreInnerAsync(string recipeName, TcpClientPose? pose, CancellationToken ct)
     {
@@ -234,11 +265,13 @@ public sealed class VisionService(
 
             if (pixelPoses.Count == 0)
             {
+                var missElapsed = stopwatch.Elapsed.TotalMilliseconds;
                 var miss = VisionResult.Fail(recipeName, VisionErrorCode.NoTargetFound,
-                    "未检出目标", stopwatch.Elapsed.TotalMilliseconds);
+                    "未检出目标", missElapsed);
                 failureImages.Save(recipeName, undistorted, miss, failureCtx);
-                log.LogInformation("配方 {Recipe}: 未检出目标，总耗时 {Elapsed:0}ms（取图 {Grab:0} · 去畸变 {Undistort:0} · 推理 {Inference:0}）",
-                    recipeName, stopwatch.Elapsed.TotalMilliseconds, grabMs, undistortMs, inferenceMs);
+                log.LogInformation("配方 {Recipe}: 未检出目标，总耗时 {Elapsed:0}ms（{Stages}）",
+                    recipeName, missElapsed,
+                    FormatStageMs(mappingMode, grabMs, undistortMs, inferenceMs, missElapsed));
                 return miss;
             }
 
@@ -258,13 +291,20 @@ public sealed class VisionService(
             // 与 Poses 一一对应的置信度透传（UI/留存可用，TCP 应答格式不含）
             var confidences = pixelPoses.Select(p => p.Score).ToList();
 
-            log.LogInformation("配方 {Recipe}: 检出 {Count} 个目标，总耗时 {Elapsed:0}ms（取图 {Grab:0} · 去畸变 {Undistort:0} · 推理 {Inference:0} · 后处理 {Post:0}）",
-                recipeName, robotPoses.Count, stopwatch.Elapsed.TotalMilliseconds,
-                grabMs, undistortMs, inferenceMs,
-                stopwatch.Elapsed.TotalMilliseconds - inferenceMs);
+            var elapsed = stopwatch.Elapsed.TotalMilliseconds;
+            log.LogInformation("配方 {Recipe}: 检出 {Count} 个目标，总耗时 {Elapsed:0}ms（{Stages}）",
+                recipeName, robotPoses.Count, elapsed,
+                FormatStageMs(mappingMode, grabMs, undistortMs, inferenceMs, elapsed));
 
-            return VisionResult.Success(recipeName, robotPoses,
+            var success = VisionResult.Success(recipeName, robotPoses,
                 stopwatch.Elapsed.TotalMilliseconds, confidences);
+
+            // 成功产品现场图留存（开关 CaptureSuccess.Enabled，默认关）：
+            // 克隆在调用线程完成，PNG 编码/写盘在后台线程池，不阻塞管线
+            if (captures is not null)
+                captures.Save(recipeName, undistorted, robotPoses, success, failureCtx);
+
+            return success;
         }
         catch (RecipeNotFoundException)
         {
@@ -304,6 +344,23 @@ public sealed class VisionService(
             Scheduler.CompleteExecution(stopwatch.Elapsed.TotalMilliseconds);
             undistorted?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// 各阶段耗时（非累计）：取图 / 去畸变或克隆 / 推理 / 后处理。
+    /// 比例与多项式工位跳过内参 Remap，只克隆原图，标签用「克隆」以免误以为做了去畸变。
+    /// </summary>
+    internal static string FormatStageMs(
+        StationMappingMode mode, double grabEndMs, double prepEndMs, double inferEndMs, double totalMs)
+    {
+        var grab = grabEndMs;
+        var prep = Math.Max(0, prepEndMs - grabEndMs);
+        var infer = Math.Max(0, inferEndMs - prepEndMs);
+        var post = Math.Max(0, totalMs - inferEndMs);
+        var prepName = mode is StationMappingMode.Scale or StationMappingMode.Polynomial
+            ? "克隆"
+            : "去畸变";
+        return $"取图 {grab:0} · {prepName} {prep:0} · 推理 {infer:0} · 后处理 {post:0}";
     }
 
     /// <summary>失败留存诊断上下文（相机/工位/模型/阈值/触发源，写进 JSON 元数据）。</summary>
