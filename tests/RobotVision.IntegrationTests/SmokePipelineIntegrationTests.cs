@@ -203,8 +203,12 @@ public class SmokePipelineIntegrationTests : IClassFixture<SmokePipelineIntegrat
         var captureDir = server.Cfg.CaptureSuccess.Folder;
         var png = WaitForFile(Path.Combine(captureDir, DateTime.Now.ToString("yyyy-MM-dd")), "*_OK.png");
         png.Should().NotBeEmpty("开启成功存图后应有 OK 现场图");
-        // 元数据 JSON 与图同名
-        File.Exists(Path.ChangeExtension(png, ".json")).Should().BeTrue("应有同名元数据 JSON");
+        // 元数据 JSON 与图同名;同后台线程 PNG 先写、JSON 后写,轮询等待
+        var metaPath = Path.ChangeExtension(png, ".json");
+        var metaDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (!File.Exists(metaPath) && DateTime.UtcNow < metaDeadline)
+            Thread.Sleep(50);
+        File.Exists(metaPath).Should().BeTrue("应有同名元数据 JSON");
     }
 
     /// <summary>为独立 TestServer 加载 cam_file 内参 + st1 工位外参（与 fixture 初始化同配置）。</summary>

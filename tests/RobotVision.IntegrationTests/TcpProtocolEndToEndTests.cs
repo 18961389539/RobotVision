@@ -181,20 +181,27 @@ public class TcpProtocolEndToEndTests
     [Fact]
     public async Task Status_BecomesBusy_DuringProcessing()
     {
-        await using var server = await TestServer.StartAsync();
-        // 慢相机（间隔 300ms）占住管线；模型存在 → 引用校验通过 → 进入取图阶段
-        server.Cfg.Cameras[0].IntervalMs = 300;
+        // 推理引擎注入 500ms 延时占住管线(Fake 引擎默认瞬时完成,busy 窗口不可见)；
+        // 配方用 KeyPointLine → 走 PoseEstimation(OnPose)
+        await using var server = await TestServer.StartAsync(engineFactory: () => new TestInferenceEngine
+        {
+            OnPose = _ =>
+            {
+                Thread.Sleep(500);
+                return [];
+            },
+        });
         server.WriteRecipe("SLOW", """
             {"cameraId": "cam_virtual", "angleMode": "KeyPointLine", "models": ["a01_kpt.onnx"], "keypointIndexA": 0, "keypointIndexB": 1}
             """);
 
         var trigger = server.SendAsync("SLOW");
-        await Task.Delay(100); // 保证取图进行中
+        await Task.Delay(100); // 保证推理进行中
         var status = await server.SendAsync("STATUS");
 
-        // 排队中/处理中 → busy
+        // 处理中 → busy
         status.Should().StartWith("OK,busy,");
         var reply = await trigger;
-        reply.Should().StartWith("ERR,1007,"); // 虚拟相机图案无目标，管线走完
+        reply.Should().StartWith("ERR,1007,"); // Fake 引擎空结果 → 未检出，管线走完
     }
 }

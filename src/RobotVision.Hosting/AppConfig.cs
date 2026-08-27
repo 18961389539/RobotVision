@@ -87,9 +87,9 @@ public sealed class FailureImageConfig
 
 public sealed class InferenceConfig
 {
-    /// <summary>推理 Provider：Cpu（默认）。换 GPU 需引用对应 YoloDotNet.ExecutionProvider
-    /// 包并在 YoloDotNetEngineFactory 补充分支（未实现的 Provider 首次加载模型时报错）。</summary>
-    public string Provider { get; set; } = "Cpu";
+    /// <summary>推理 Provider：OpenVinoGpu（默认，Intel 核显）。GPU 会话创建失败时自动回退 OpenVINO CPU 并打警告。
+    /// 也可显式设为 OpenVinoCpu。YoloDotNet 每进程只能一种 EP，产线不混编 CPU+OpenVINO 池。</summary>
+    public string Provider { get; set; } = "OpenVinoGpu";
 
     /// <summary>LRU 会话上限：超过后卸载最久未使用的会话（0 或负数 = 不限制）。</summary>
     public int MaxSessions { get; set; } = 8;
@@ -197,7 +197,7 @@ public sealed class CameraConfig
     /// <summary>File 相机：回放帧间隔（ms），0 = 不限速。与 Virtual 的 IntervalMs 共用字段。</summary>
     public int IntervalMs { get; set; } = 0;
 
-    /// <summary>Basler / GigEVision：序列号或 IP；留空时自动绑定枚举到的第一台。</summary>
+    /// <summary>Basler / GigEVision：序列号或 IP。留空仅当现场恰好一台时绑定；多台必须填写，对不上不会回落第一台。</summary>
     public string DeviceId { get; set; } = "";
 
     /// <summary>Basler / GigEVision：曝光时间（µs）；null = 不下发，使用相机当前值。</summary>
@@ -321,7 +321,8 @@ public static class AppConfigExtensions
     public static string ResolveMetricsFolder(this AppConfig cfg) => ResolveFolder(cfg.ProcessHealth.Folder);
 
     /// <summary>
-    /// 启动时对齐固定超时策略：采集 60s、请求总超时 ≥90s（UI 不暴露，避免旧配置 3s/5s 带病运行）。
+    /// 启动时对齐超时下限：请求总超时 ≥90s（避免旧配置 3s/5s 带病运行）。
+    /// 硬件相机 GrabTimeoutMs 仅在未设或已大于等于总超时时才改成默认 60s，不覆盖合法自定义值。
     /// </summary>
     public static void NormalizeVisionTiming(this AppConfig cfg)
     {
@@ -332,13 +333,17 @@ public static class AppConfigExtensions
         {
             if (!IsHardwareCameraType(camera.Type))
                 continue;
-            camera.GrabTimeoutMs = AppConfig.DefaultGrabTimeoutMs;
+            if (camera.GrabTimeoutMs <= 0 || camera.GrabTimeoutMs >= cfg.TimeoutMs)
+                camera.GrabTimeoutMs = Math.Min(AppConfig.DefaultGrabTimeoutMs, Math.Max(1, cfg.TimeoutMs - 1));
         }
     }
 
-    private static bool IsHardwareCameraType(string type) =>
+    public static bool IsHardwareCameraType(string type) =>
         string.Equals(type, "Basler", StringComparison.OrdinalIgnoreCase)
         || string.Equals(type, "GigEVision", StringComparison.OrdinalIgnoreCase);
+
+    public static bool UsesGrabTimeout(this CameraConfig camera) =>
+        IsHardwareCameraType(camera.Type);
 
     public static string ResolveCameraFolder(this CameraConfig cfg) => ResolveFolder(cfg.Folder);
 }

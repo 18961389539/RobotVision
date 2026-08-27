@@ -2,8 +2,10 @@ using System.Net.Sockets;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using OpenCvSharp;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure.Communication;
+using RobotVision.Infrastructure.Inference;
 
 namespace RobotVision.IntegrationTests;
 
@@ -34,28 +36,38 @@ public sealed class TestServer : IAsyncDisposable
         RecipeFolder = Path.Combine(root, "recipes");
     }
 
-    public static async Task<TestServer> StartAsync(Action<AppConfig, string>? configure = null)
+    public static async Task<TestServer> StartAsync(
+        Action<AppConfig, string>? configure = null,
+        Func<TestInferenceEngine>? engineFactory = null)
     {
         var root = Path.Combine(Path.GetTempPath(), "rv_it_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(root, "recipes"));
         Directory.CreateDirectory(Path.Combine(root, "calibration"));
         Directory.CreateDirectory(Path.Combine(root, "replay"));
 
-        // 仓库根（bin/Debug/net8.0-windows → ../../../../../ 共 5 级）下存在真实模型与回放图，
-        // 集成测试直接复用：配方引用校验可通过，并可跑真实推理链路
         var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         var repoModels = Path.Combine(repoRoot, "models");
         var repoReplay = Path.Combine(repoRoot, "data", "replay");
 
-        // *.onnx 不入库：CI checkout 后 models/ 为空，错误路径测试（1015/1007/1014/1012/1004 等）
-        // 引用的模型会提前变成 1005。ModelManager 仅检查 File.Exists，补占位空文件即可恢复语义；
-        // 本地已有真实模型文件时跳过；no_such*.onnx 等"模型缺失"用例故意不建。
-        Directory.CreateDirectory(repoModels);
-        foreach (var model in new[] { "a01_kpt.onnx" })
+        // 占位模型写到临时目录，绝不往仓库 models/ 写空文件。
+        // Fake 引擎覆盖真实 ONNX；ModelManager.Load 仍要求文件存在且非空。
+        var modelsDir = Path.Combine(root, "models");
+        Directory.CreateDirectory(modelsDir);
+        var dest = Path.Combine(modelsDir, "a01_kpt.onnx");
+        var real = Directory.Exists(repoModels)
+            ? Directory.EnumerateFiles(repoModels, "*.onnx").FirstOrDefault(p => new FileInfo(p).Length > 0)
+            : null;
+        if (real is not null)
+            File.Copy(real, dest, overwrite: true);
+        else
+            File.WriteAllText(dest, "placeholder");
+
+        // FileCamera 构造要求目录非空且图片可解码；CI 上 data/replay 不入库 → 生成占位图
+        var replayDir = Path.Combine(root, "replay");
+        if (!Directory.Exists(repoReplay))
         {
-            var modelPath = Path.Combine(repoModels, model);
-            if (!File.Exists(modelPath))
-                File.WriteAllBytes(modelPath, []);
+            using var placeholder = new Mat(64, 64, MatType.CV_8UC3, new Scalar(96, 96, 96));
+            Cv2.ImWrite(Path.Combine(replayDir, "placeholder.png"), placeholder);
         }
 
         var cfg = new AppConfig
@@ -64,11 +76,14 @@ public sealed class TestServer : IAsyncDisposable
             TcpPort = FreeTcpPort(),
             TimeoutMs = 5000,
             RecipesFolder = Path.Combine(root, "recipes"),
-            ModelsFolder = repoModels,
+            ModelsFolder = modelsDir,
             CalibrationFolder = Path.Combine(root, "calibration"),
             FileLogging = new FileLoggingConfig { Enabled = false },
             FailureImage = new FailureImageConfig { Folder = Path.Combine(root, "failures") },
             ResultLog = new ResultLogConfig { Enabled = true, Folder = Path.Combine(root, "results") },
+            // 联锁/统计状态必须每实例独立:默认 data/metrics 按 exe 锚定,所有 TestServer 共享
+            // 同一文件会导致计数跨测试泄漏(Total 虚高、残留联锁 1018)
+            ProcessHealth = new ProcessHealthConfig { Folder = Path.Combine(root, "metrics") },
             Cameras =
             [
                 new CameraConfig { Id = "cam_virtual", Type = "Virtual", Width = 128, Height = 96, Pattern = "Bars" },
@@ -82,8 +97,15 @@ public sealed class TestServer : IAsyncDisposable
         configure?.Invoke(cfg, root);
 
         var services = new ServiceCollection();
-        services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
+        services.AddLogging(b => b.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Warning));
         services.AddRobotVision(cfg);
+
+        // 覆盖 AddRobotVision 内的真实 ONNX 引擎工厂(后注册优先)：
+        // 集成测试不依赖真实模型(不入库)，Fake 引擎默认空结果 → 推理"未检出"走 1007 路径；
+        // 免模型策略(DualBlob 等)不经推理引擎，成功路径不受影响。
+        // 测试可传 engineFactory 定制引擎(如注入耗时模拟 busy 窗口)。
+        services.AddSingleton<IInferenceEngineFactory>(
+            new TestInferenceEngineFactory(engineFactory ?? (() => new TestInferenceEngine())));
         var provider = services.BuildServiceProvider();
 
         var tcp = provider.GetRequiredService<TcpServerManager>();

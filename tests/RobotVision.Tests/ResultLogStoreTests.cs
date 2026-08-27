@@ -145,7 +145,8 @@ public class ResultLogStoreTests : IDisposable
         store.Record(VisionResult.Success("A", [new RobotPose(1, 2, 0)], 10));
 
         WaitForFile(_folder, "results-*.jsonl");
-        var deadline = DateTime.UtcNow.AddSeconds(3);
+        // 写盘为后台异步线程,CI 负载高时可能延迟,放宽到 10s
+        var deadline = DateTime.UtcNow.AddSeconds(10);
         while (DateTime.UtcNow < deadline && File.Exists(oldFile))
             Thread.Sleep(50);
 

@@ -28,14 +28,20 @@ public static class ServiceCollectionExtensions
         // 启动值域校验：TimeoutMs/MaxQueueDepth/MaxConcurrent/TcpPort/白名单/相机取图超时联动等
         // 非法值直接启动失败（抛出清晰异常），避免 TimeoutMs=100 之类的配置静默生效带病运行
         // （与 AppSettingsStore.Validate 保存时校验同规则，保存能过、启动就能过）
-        // 固定超时策略（采集 60s / 请求总 90s）：启动前对齐，再跑值域校验
+        var bootWarnings = new List<string>();
+        var timeoutBefore = cfg.TimeoutMs;
         cfg.NormalizeVisionTiming();
+        if (cfg.TimeoutMs != timeoutBefore)
+        {
+            bootWarnings.Add(
+                $"TimeoutMs={timeoutBefore} 低于下限 {AppConfig.DefaultRequestTimeoutMs}，已抬到 {cfg.TimeoutMs}。" +
+                "PLC Socket 收包超时须大于此值，文档按 90s 配置，不要再用 5s/10s。");
+        }
         AppSettingsStore.ValidateConfig(cfg);
 
         // 目录缺失等启动告警：组装阶段宿主日志尚未可用（自建 LoggerFactory 只输出控制台、
         // 不进文件日志，无头部署会丢），改为暂存文本、由宿主日志管道补发一次
         // （见文件底部 BootWarningLogService，AddRobotVision 末尾统一注册）。
-        var bootWarnings = new List<string>();
 
         var recipesFolder = cfg.ResolveAndPrepareRecipesFolder();
         var modelsFolder = cfg.ResolveModelsFolder();
@@ -103,6 +109,14 @@ public static class ServiceCollectionExtensions
                         continue;
                     }
 
+                    if (AppConfigExtensions.IsHardwareCameraType(camera.Type) &&
+                        string.IsNullOrWhiteSpace(camera.DeviceId))
+                    {
+                        log.LogWarning(
+                            "相机 {Id} 未填写 DeviceId：仅当现场只有一台该类型相机时才能打开，多台将拒绝绑定",
+                            camera.Id);
+                    }
+
                     // 超时预算软校验（与具体类型无关：所有带 GrabTimeoutMs 语义的相机通用）
                     if (camera.GrabTimeoutMs > 0 && camera.GrabTimeoutMs >= cfg.TimeoutMs)
                         log.LogWarning("相机 {Id} GrabTimeoutMs={Grab} 不小于总超时 TimeoutMs={Total}，取图超时将表现为 1008 而非 1003，建议调小",
@@ -126,11 +140,16 @@ public static class ServiceCollectionExtensions
             return manager;
         });
 
-        // 推理引擎工厂：Provider 可配（appsettings Inference:Provider，默认 Cpu）；
-        // 工厂同时注册为服务，供模型管理页的测试推理创建独立引擎（不占用产线会话）
-        var engineFactory = new YoloDotNetEngineFactory(cfg.Inference.Provider);
-        services.AddSingleton<IInferenceEngineFactory>(engineFactory);
-        services.AddSingleton(new ModelManager(modelsFolder, engineFactory, cfg.Inference.MaxSessions));
+        // 推理引擎工厂：Provider 可配（appsettings Inference:Provider，默认 OpenVinoGpu；
+        // GPU 会话失败且 CPU 成功则回退并粘性）。模型管理页测试推理走 ModelManager，与产线同锁。
+        services.AddSingleton<IInferenceEngineFactory>(sp =>
+            new YoloDotNetEngineFactory(
+                cfg.Inference.Provider,
+                sp.GetService<ILogger<YoloDotNetEngineFactory>>()));
+        services.AddSingleton(sp => new ModelManager(
+            modelsFolder,
+            sp.GetRequiredService<IInferenceEngineFactory>(),
+            cfg.Inference.MaxSessions));
 
         // 光源控制器：None 类型为无操作虚拟实现（调试兜底），
         // 真实控制器（串口/Modbus/TCP）实现 ILightControllerFactory 并注册到
@@ -365,7 +384,7 @@ public static class ServiceCollectionExtensions
         foreach (var model in recipe.Models)
         {
             if (!models.ModelFileExists(model))
-                return new RecipeReferenceError($"模型文件不存在: {model}", VisionErrorCode.ModelNotAvailable);
+                return new RecipeReferenceError($"模型文件不存在或为空: {model}", VisionErrorCode.ModelNotAvailable);
         }
 
         if (!string.IsNullOrEmpty(recipe.StationId) &&
