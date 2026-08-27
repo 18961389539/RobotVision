@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CI 串行测试配置:关闭 xUnit 跨集合并行。
+  原因:ModelManagerRaceTests/VisionServiceQueueTests 等并发/时序敏感测试在
+  CI 多核并行下出现偶发失败(线程池挤占、慢机器时序),串行大幅提升稳定性;
+  全量串行约 8-10 分钟,在免费额度内。
+-->
+<RunSettings>
+  <xUnit>
+    <MaxParallelThreads>1</MaxParallelThreads>
+    <ParallelizeTestCollections>false</ParallelizeTestCollections>
+  </xUnit>
+</RunSettings>

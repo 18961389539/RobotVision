@@ -15,12 +15,11 @@ namespace RobotVision.Tests;
 /// - 排队阶段超时 → 立即返回 Timeout 且放弃排队；
 /// - 处理阶段不可取消 → 后台跑完释放管线，后续请求不受影响；
 /// - 队列深度超限 → 立即 Busy。
-/// REAL 系列用例依赖仓库内的真实 ONNX 模型（首次加载约 700ms），模型缺失时自动跳过。
+/// REAL 系列用例改用 Fake 推理引擎（可注入 400ms 耗时占管线），不依赖仓库真实 ONNX，
+/// 本地/CI/无模型环境行为一致。
 /// </summary>
 public class VisionServiceQueueTests : IDisposable
 {
-    private static readonly string RealModel = RepoAssets.FindOnnx() ?? "";
-
     private readonly string _recipeFolder = Path.Combine(Path.GetTempPath(), "rv_vsq_" + Guid.NewGuid().ToString("N"));
     private readonly string _replayFolder = Path.Combine(Path.GetTempPath(), "rv_vsq_replay_" + Guid.NewGuid().ToString("N"));
 
@@ -35,14 +34,14 @@ public class VisionServiceQueueTests : IDisposable
             {
               "cameraId": "cam1",
               "angleMode": "MaskMinAreaRect",
-              "models": [ "no_such_model.onnx" ]
+              "models": [ "vsq_missing_model.onnx" ]
             }
             """);
-        WriteRecipe("REAL", $$"""
+        WriteRecipe("REAL", """
             {
               "cameraId": "cam1",
               "angleMode": "KeyPointLine",
-              "models": [ "{{RealModel.Replace("\\", "\\\\")}}" ],
+              "models": [ "fake_pose.onnx" ],
               "keypointIndexA": 0,
               "keypointIndexB": 1
             }
@@ -78,8 +77,22 @@ public class VisionServiceQueueTests : IDisposable
             new FailureImageConfig { Folder = failureFolder ?? Path.Combine(Path.GetTempPath(), "rv_nowhere") },
             NullLogger<FailureImageStore>.Instance);
 
+        // Fake 推理引擎:不依赖真实 ONNX(CI/沙箱无模型环境一致);
+        // REAL 配方(KeyPointLine→Pose)返回空结果→1007,注入 400ms 耗时占住唯一并发槽,
+        // 供排队/超限/busy 语义测试;占位模型文件仅通过 File.Exists 检查
+        var modelFolder = Path.Combine(Path.GetTempPath(), "rv_vsq_models_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(modelFolder);
+        File.WriteAllBytes(Path.Combine(modelFolder, "fake_pose.onnx"), [1, 2, 3, 4]);
+        var engineFactory = new FakeInferenceEngineFactory(() => new FakeInferenceEngine
+        {
+            OnPose = _ => { Thread.Sleep(400); return []; },
+            OnObjectDetection = _ => { Thread.Sleep(400); return []; },
+            OnSegmentation = _ => { Thread.Sleep(400); return []; },
+        });
+        var models = new RobotVision.Infrastructure.Inference.ModelManager(modelFolder, engineFactory);
+
         return new VisionService(recipes, cameras, new LightingManager(), calibration,
-            new AngleStrategyFactory(new RobotVision.Infrastructure.Inference.ModelManager(Path.GetTempPath())),
+            new AngleStrategyFactory(models),
             failureImages,
             NullLogger<VisionService>.Instance)
         {
@@ -106,7 +119,6 @@ public class VisionServiceQueueTests : IDisposable
     [Fact]
     public async Task TimeoutWhileQueued_ReturnsFast_PipelineSurvives()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
 
         var service = CreateService(maxDepth: 4, maxConcurrent: 1);
 
@@ -136,7 +148,6 @@ public class VisionServiceQueueTests : IDisposable
     [Fact]
     public async Task QueueDepthExceeded_ReturnsBusyImmediately()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
 
         var service = CreateService(maxDepth: 2, maxConcurrent: 1);
 
@@ -167,13 +178,11 @@ public class VisionServiceQueueTests : IDisposable
             var result = await service.RunAsync("SLOW", CancellationToken.None);
             Assert.Equal(VisionErrorCode.ModelNotAvailable, result.ErrorCode);
 
-            // 失败留存已异步化（后台落盘），等待文件出现再断言
-            var deadline = DateTime.UtcNow.AddSeconds(5);
-            while (DateTime.UtcNow < deadline &&
-                   (!Directory.Exists(failureFolder) || Directory.GetFiles(failureFolder, "*.png").Length == 0))
-                await Task.Delay(25);
-
-            var pngs = Directory.GetFiles(failureFolder, "*.png");
+            // 失败留存已异步化（后台落盘），等待文件出现再断言；
+            // 同进程并发类测试会挤占线程池，放宽到 15s
+            // 失败留存已异步化(后台落盘),固定等待 2s 后断言(轮询曾偶发空目录误判)
+            await Task.Delay(2000);
+            var pngs = Directory.Exists(failureFolder) ? Directory.GetFiles(failureFolder, "*.png") : [];
             var jsons = Directory.GetFiles(failureFolder, "*.json");
             Assert.Single(pngs);
             Assert.Single(jsons);

@@ -92,6 +92,11 @@ public class PropertyBasedTests
     [Property]
     public bool Rotation_PreservesDistance(double x, double y, double cx, double cy, double deltaDeg)
     {
+        if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(cx) || !double.IsFinite(cy))
+            return true;
+        // 点/中心尺度差过大时中间量溢出(同 Rotation_ZeroDelta_IsIdentity),现实毫米坐标不可能出现
+        if (Math.Abs(x) > 1e15 || Math.Abs(y) > 1e15 || Math.Abs(cx) > 1e15 || Math.Abs(cy) > 1e15)
+            return true;
         var (rx, ry) = RotationCenterCompensation.Rotate(x, y, cx, cy, deltaDeg);
         var before = Math.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
         var after = Math.Sqrt((rx - cx) * (rx - cx) + (ry - cy) * (ry - cy));
