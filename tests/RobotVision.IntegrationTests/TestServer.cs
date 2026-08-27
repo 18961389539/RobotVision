@@ -47,6 +47,17 @@ public sealed class TestServer : IAsyncDisposable
         var repoModels = Path.Combine(repoRoot, "models");
         var repoReplay = Path.Combine(repoRoot, "data", "replay");
 
+        // *.onnx 不入库：CI checkout 后 models/ 为空，错误路径测试（1015/1007/1014/1012/1004 等）
+        // 引用的模型会提前变成 1005。ModelManager 仅检查 File.Exists，补占位空文件即可恢复语义；
+        // 本地已有真实模型文件时跳过；no_such*.onnx 等"模型缺失"用例故意不建。
+        Directory.CreateDirectory(repoModels);
+        foreach (var model in new[] { "a01_kpt.onnx" })
+        {
+            var modelPath = Path.Combine(repoModels, model);
+            if (!File.Exists(modelPath))
+                File.WriteAllBytes(modelPath, []);
+        }
+
         var cfg = new AppConfig
         {
             IpAddress = "127.0.0.1",

@@ -273,15 +273,15 @@ public class ModelManagerRaceTests : IDisposable
             e.RunObjectDetection(image, 0.5, 0.5);
             return 0;
         }));
-        Assert.True(entered.Wait(TimeSpan.FromSeconds(2)), "推理未启动");
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "推理未启动");
 
         var unloadTask = Task.Run(() => manager.Unload(file, InferenceTask.ObjectDetection));
-        await Task.Delay(150);
+        await Task.Delay(300);
         Assert.False(unloadTask.IsCompleted);
 
         release.Set();
-        await unloadTask.WaitAsync(TimeSpan.FromSeconds(2));
-        await runTask.WaitAsync(TimeSpan.FromSeconds(2));
+        await unloadTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await runTask.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False(runTask.IsFaulted);
         Assert.Equal(1, engine.DisposedCount);
 

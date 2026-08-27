@@ -104,6 +104,10 @@ public class PropertyBasedTests
     {
         if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(cx) || !double.IsFinite(cy))
             return true;
+        // 点/中心尺度差过大（如 y=-1.8e308、cy=+1.8e308）时中间量溢出为 Infinity，
+        // 浮点容差无法兜底；现实坐标（毫米量级）不可能出现，跳过而非判失败
+        if (Math.Abs(x) > 1e15 || Math.Abs(y) > 1e15 || Math.Abs(cx) > 1e15 || Math.Abs(cy) > 1e15)
+            return true;
         var (rx, ry) = RotationCenterCompensation.Rotate(x, y, cx, cy, 0);
         // 尺度感知容差：点坐标与旋转中心尺度差极大时浮点消去误差不可避免（如 cy=1.8e308）
         var tolX = 1e-9 * Math.Max(1, Math.Max(Math.Abs(x), Math.Abs(cx)));
