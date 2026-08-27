@@ -18,6 +18,8 @@
 - 过程联锁(ProcessHealth):连续失败达阈值后禁止触发(1018),支持界面/CLEARINHIBIT 解除
 - 资产完整性(AssetIntegrity):模型/标定档案与配方钉扎 SHA-256 校验(1017)
 - 配方输出偏移(OutputOffsetOptions)
+- 成功结果留档(ResultLog):每次触发成功/失败追加 `data/results/*.jsonl`(坐标/角度/置信度/耗时),供追溯与合格率/分布/趋势统计
+- OK 产品存图开关(CaptureSuccess.Enabled,默认关):成功检测可存现场图
 
 ### 修复
 

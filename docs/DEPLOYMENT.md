@@ -26,6 +26,8 @@ RobotVision/
 │   ├── calibration/         标定档案(内参/外参/旋转中心)—— 现场数据,需备份
 │   ├── captures/            采集留档
 │   ├── failures/            失败现场图(滚动保留,默认 200 张)
+│   ├── results/             结果日志(JSON Lines 按天,成功/失败留档,默认保留 30 天)
+│   ├── captures/            成功产品现场图(开关 CaptureSuccess.Enabled,默认关)
 │   └── metrics/             过程健康指标(联锁依据,默认保留 90 天)
 └── logs/                    Serilog 日志
 ```
@@ -105,4 +107,6 @@ RobotVision/
 | `PoseCheck.Enabled/XyToleranceMm/RzToleranceDeg` | true / 0.5 / 0.5 | OnArm 位姿校验容差 |
 | `AssetIntegrity.Enabled` | true | 模型/标定哈希校验(1017) |
 | `ProcessHealth.ConsecutiveFailLimit/InhibitOnLimit` | 5 / true | 连续失败联锁(1018) |
+| `ResultLog.Enabled/Folder/RetainedDays` | true / data/results / 30 | 成功/失败结果留档(JSON Lines) |
+| `CaptureSuccess.Enabled/Folder/MaxWidth` | false / data/captures / 0 | OK 产品存图开关;MaxWidth>0 缩图 |
 | `Cameras[].Type` | — | GigE / Basler / File / Virtual |
