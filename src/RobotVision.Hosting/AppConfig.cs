@@ -66,6 +66,9 @@ public sealed class AppConfig
     /// <summary>成功产品现场图留存（默认关）：开启后成功检测也存图，供复检/工艺分析。</summary>
     public CaptureSuccessConfig CaptureSuccess { get; set; } = new();
 
+    /// <summary>本机 CPU 对话助手（连接 llama-server，不在视觉进程内加载权重）。</summary>
+    public ChatConfig Chat { get; set; } = new();
+
     public List<CameraConfig> Cameras { get; set; } = [];
 
     public List<LightControllerConfig> LightControllers { get; set; } = [];
@@ -177,6 +180,43 @@ public sealed class CaptureSuccessConfig
 
     /// <summary>按天目录保留天数；≤0 不清理。</summary>
     public int RetainedDays { get; set; } = 30;
+}
+
+/// <summary>
+/// 本机对话：WPF 只做界面，推理走 OpenAI 兼容 HTTP（默认 llama-server :8080）。
+/// 不加载 HuggingFace BF16；请用 Q4 GGUF + CPU llama-server。
+/// </summary>
+public sealed class ChatConfig
+{
+    public string Endpoint { get; set; } = "http://127.0.0.1:8080";
+
+    /// <summary>请求中的 model 字段；llama-server 可填任意占位名。</summary>
+    public string Model { get; set; } = "qwen";
+
+    public int MaxTokens { get; set; } = 512;
+
+    /// <summary>人设与工具纪律；空则回退 <see cref="Chat.ChatSystemPrompt.Default"/>。</summary>
+    public string SystemPrompt { get; set; } = Chat.ChatSystemPrompt.Default;
+
+    /// <summary>true = 对话页自动拉起 llama-server（CPU）。</summary>
+    public bool AutoStart { get; set; } = true;
+
+    /// <summary>llama-server.exe；空则按常见目录查找。</summary>
+    public string LlamaServerPath { get; set; } = @"E:\光模块\llm\llama-cpp\llama-server.exe";
+
+    /// <summary>Q4 GGUF 路径。</summary>
+    public string GgufPath { get; set; } = @"E:\光模块\llm\Qwen3.5-4B-Q4_K_M.gguf";
+
+    public int Port { get; set; } = 8080;
+
+    /// <summary>CPU 线程数；14700 建议 8（性能核）。</summary>
+    public int Threads { get; set; } = 8;
+
+    /// <summary>llama-server 上下文长度（token）。CPU 4B Q4 默认 8192。</summary>
+    public int ContextSize { get; set; } = 8192;
+
+    /// <summary>等待模型加载的秒数。</summary>
+    public int LoadTimeoutSeconds { get; set; } = 180;
 }
 
 public sealed class FileLoggingConfig

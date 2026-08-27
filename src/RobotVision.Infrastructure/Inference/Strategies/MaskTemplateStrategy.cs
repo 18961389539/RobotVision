@@ -71,6 +71,8 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
 
                         PixelPose pose;
                         PixelPoint[]? tabMarker = null;
+                        OverlayLine[]? debugLines = null;
+                        OverlayDot[]? debugDots = null;
                         if (template is not null)
                         {
                             pose = RefineByTemplate(roiView, points, template, recipe, segmentation.Confidence, pack);
@@ -86,13 +88,15 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
                         }
                         else if (recipe.Template.RefineMethod == SegmentRefineMethod.CaliperTab)
                         {
-                            var r = MaskCaliperTab.Refine(roiView, points);
-                            if (r is null)
+                            var attempt = MaskCaliperTab.TryRefine(roiView, points);
+                            MapCaliperDebug(attempt.Viz, ox, oy, out debugLines, out debugDots);
+                            if (attempt.Pose is null)
                             {
                                 pose = FallbackCoarse(points, segmentation.Confidence);
                             }
                             else
                             {
+                                var r = attempt.Pose;
                                 pose = new PixelPose(r.Center.X, r.Center.Y, r.AngleDeg, segmentation.Confidence);
                                 tabMarker =
                                 [
@@ -115,6 +119,8 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
                                     ? null
                                     : [new PixelPoint(tabMarker[0].X + ox, tabMarker[0].Y + oy),
                                        new PixelPoint(tabMarker[1].X + ox, tabMarker[1].Y + oy)],
+                                DebugLines = debugLines,
+                                DebugDots = debugDots,
                                 Label = segmentation.Label,
                             },
                         });
@@ -141,6 +147,51 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
     {
         var (center, angle) = MinAreaRectGeometry.LongAxis(contourPoints);
         return new PixelPose(center.X, center.Y, angle, segConfidence);
+    }
+
+    private static void MapCaliperDebug(
+        MaskCaliperTab.CaliperViz viz, double ox, double oy,
+        out OverlayLine[]? lines, out OverlayDot[]? dots)
+    {
+        PixelPoint Map(Point2d p) => new(p.X + ox, p.Y + oy);
+        OverlayLine Line(MaskCaliperTab.Segment s, OverlayLineKind kind) =>
+            new(Map(s.A), Map(s.B), kind);
+
+        var nLines = viz.SearchBars.Count + viz.InvalidBars.Count
+            + (viz.FittedMinus is null ? 0 : 1) + (viz.FittedPlus is null ? 0 : 1);
+        var nDots = viz.Inliers.Count + viz.Rejected.Count;
+        if (nLines == 0 && nDots == 0)
+        {
+            lines = null;
+            dots = null;
+            return;
+        }
+
+        var lineBuf = nLines == 0 ? Array.Empty<OverlayLine>() : new OverlayLine[nLines];
+        var i = 0;
+        foreach (var bar in viz.SearchBars)
+            lineBuf[i++] = Line(bar, OverlayLineKind.Caliper);
+        foreach (var bar in viz.InvalidBars)
+            lineBuf[i++] = Line(bar, OverlayLineKind.InvalidCaliper);
+        if (viz.FittedMinus is { } fm)
+            lineBuf[i++] = Line(fm, OverlayLineKind.FittedEdge);
+        if (viz.FittedPlus is { } fp)
+            lineBuf[i++] = Line(fp, OverlayLineKind.FittedEdge);
+        lines = nLines == 0 ? null : lineBuf;
+
+        if (nDots == 0)
+        {
+            dots = null;
+            return;
+        }
+
+        var dotBuf = new OverlayDot[nDots];
+        var d = 0;
+        foreach (var p in viz.Inliers)
+            dotBuf[d++] = new OverlayDot(Map(p), OverlayDotKind.Inlier);
+        foreach (var p in viz.Rejected)
+            dotBuf[d++] = new OverlayDot(Map(p), OverlayDotKind.Rejected);
+        dots = dotBuf;
     }
 
     /// <summary>直线拟合精修：掩码长边 Huber 拟合修正粗角度，中心取轮廓均值（亚像素）。

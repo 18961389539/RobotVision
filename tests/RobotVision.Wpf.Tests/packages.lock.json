@@ -473,6 +473,19 @@
         "resolved": "13.0.1",
         "contentHash": "ppPFpBcvxdsfUonNcvITKqLl3bqxWbDCZIzDWHzjpdAHRFfZe0Dw9HmA0+za13IdyrgJwpkDTDA9fHaxOrt20A=="
       },
+      "OxyPlot.Core": {
+        "type": "Transitive",
+        "resolved": "2.2.0",
+        "contentHash": "QhXNdXR5FPpro/VoLx3BOp6AhQo7YrbfmWEZ9cgY+pnYM7RYORZjnu+aDMA8ka9A1r8hLkX//NbCPZNUv+l8qA=="
+      },
+      "OxyPlot.Wpf.Shared": {
+        "type": "Transitive",
+        "resolved": "2.2.0",
+        "contentHash": "JoOD/feTOlKFmgXqeTNrl4Ze0i0L6WizPapNw9pXwot+cnI0qhFgYv3tFjlSdu51hZw0EgmcgeRXMtm5bkueYA==",
+        "dependencies": {
+          "OxyPlot.Core": "2.2.0"
+        }
+      },
       "runtime.debian.8-x64.runtime.native.System.Security.Cryptography.OpenSsl": {
         "type": "Transitive",
         "resolved": "4.3.2",
@@ -1575,6 +1588,7 @@
           "CommunityToolkit.Mvvm": "[8.3.2, )",
           "ImageViewerControl": "[1.0.0, )",
           "Microsoft.Extensions.Hosting": "[8.0.1, )",
+          "OxyPlot.Wpf": "[2.2.0, )",
           "RobotVision.Hosting": "[1.0.0, )",
           "WPF-UI": "[3.1.1, )"
         }
@@ -1745,6 +1759,16 @@
         "requested": "[4.10.0.20240615, )",
         "resolved": "4.10.0.20240615",
         "contentHash": "+BmRAXnKdwJxJ8qzjrXXK/bbQ/KpEwe9RM+X+/wf9hQ+ULPY1BP7k31LQTQRiEpPLGZGWfJUF2bchkW9cqT8cw=="
+      },
+      "OxyPlot.Wpf": {
+        "type": "CentralTransitive",
+        "requested": "[2.2.0, )",
+        "resolved": "2.2.0",
+        "contentHash": "69KzgsMWpJSZmeXZt07FwfV7B1D4CM1nl0MWMj4wjrCsb3USBMo32up1+fQIjxp5tHCPdGwX9VWhSxW8nsY7pQ==",
+        "dependencies": {
+          "OxyPlot.Core": "2.2.0",
+          "OxyPlot.Wpf.Shared": "2.2.0"
+        }
       },
       "Serilog": {
         "type": "CentralTransitive",

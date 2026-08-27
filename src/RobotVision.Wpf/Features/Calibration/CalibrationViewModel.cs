@@ -445,6 +445,27 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
         }, stationId => $"已保存工位 {stationId} 的比例档案（{stationId}.scale.json）");
     }
 
+    /// <summary>新建比例档案：清空表单并取消选中（避免选中卡片回填），填写新工位 Id 后保存即为新建。</summary>
+    [RelayCommand]
+    private void NewScale()
+    {
+        this.Commit();
+        _suppressScaleSelectionLoad = true;
+        SelectedScale = null;
+        _suppressScaleSelectionLoad = false;
+        ScaleStationId = "";
+        ScaleCameraId = "";
+        ScaleWidth = 0;
+        ScaleHeight = 0;
+        ScaleX = 0;
+        ScaleY = 0;
+        RefLengthMm = 0;
+        RefLengthPx = 0;
+        ScalePreviewImage = null;
+        ScaleFormMessageIsError = false;
+        ScaleFormMessage = "已清空表单：填写新工位 Id 后点「保存比例档案」即可新建";
+    }
+
     partial void OnSelectedScaleChanged(ScaleCardItem? value)
     {
         if (value is null || _suppressScaleSelectionLoad)

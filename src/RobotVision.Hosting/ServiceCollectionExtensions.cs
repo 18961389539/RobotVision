@@ -15,6 +15,7 @@ using RobotVision.Infrastructure.Lighting;
 namespace RobotVision.Hosting;
 
 using RobotVision.Hosting.Cameras;
+using RobotVision.Hosting.Chat;
 using RobotVision.Hosting.Lighting;
 
 /// <summary>
@@ -55,6 +56,19 @@ public static class ServiceCollectionExtensions
         Directory.CreateDirectory(calibrationFolder);
 
         services.AddSingleton(cfg);
+        services.AddSingleton(cfg.Chat);
+        services.AddSingleton<OpenAiChatClient>();
+        services.AddSingleton<LlamaServerHost>();
+        services.AddHostedService(sp => sp.GetRequiredService<LlamaServerHost>());
+        services.AddSingleton<ILocalChatClient>(sp => new ManagedLlamaChatClient(
+            sp.GetRequiredService<LlamaServerHost>(),
+            sp.GetRequiredService<OpenAiChatClient>(),
+            sp.GetRequiredService<ChatConfig>()));
+        services.AddSingleton<StationChatTools>();
+        services.AddSingleton<WebChatClient>();
+        services.AddSingleton(sp => new ChatToolRegistry(
+            sp.GetRequiredService<StationChatTools>().Tools.Concat(sp.GetRequiredService<WebChatClient>().Tools)));
+        services.AddSingleton<ChatAgent>();
         services.AddSingleton<CameraConfigStore>(new CameraConfigStore(cfg));
         services.AddSingleton<LightingConfigStore>(new LightingConfigStore(cfg));
 

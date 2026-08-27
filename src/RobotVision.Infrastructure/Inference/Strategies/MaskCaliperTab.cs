@@ -48,6 +48,27 @@ public static class MaskCaliperTab
         Point2d TabMarkerFrom,
         Point2d TabMarkerTo);
 
+    /// <summary>卡尺搜索条 / 拟合边（ROI 像素坐标）。</summary>
+    public readonly record struct Segment(Point2d A, Point2d B);
+
+    /// <summary>一次精修的画面几何：成功、失败都尽量带齐，供配方测试叠加。</summary>
+    public sealed record CaliperViz(
+        IReadOnlyList<Segment> SearchBars,
+        IReadOnlyList<Segment> InvalidBars,
+        IReadOnlyList<Point2d> Inliers,
+        IReadOnlyList<Point2d> Rejected,
+        Segment? FittedMinus,
+        Segment? FittedPlus)
+    {
+        public static readonly CaliperViz Empty = new([], [], [], [], null, null);
+    }
+
+    /// <summary>精修结果；<see cref="Pose"/> 为 null 时策略回退粗角，但 <see cref="Viz"/> 仍可画卡尺。</summary>
+    public sealed record CaliperAttempt(Result? Pose, CaliperViz Viz)
+    {
+        public static CaliperAttempt Miss(CaliperViz? viz = null) => new(null, viz ?? CaliperViz.Empty);
+    }
+
     internal readonly record struct DebugInfo(
         int ValidProbes,
         double ParallelDeg,
@@ -63,11 +84,15 @@ public static class MaskCaliperTab
     /// 在原图上按粗外接矩形自动放置双边卡尺。失败返回 null（策略走粗角 [0,180)）。
     /// 输入轮廓与图像均为同一坐标系（ROI 内）。
     /// </summary>
-    public static Result? Refine(Mat image, IReadOnlyList<Point2f> contour)
+    public static Result? Refine(Mat image, IReadOnlyList<Point2f> contour) =>
+        TryRefine(image, contour).Pose;
+
+    /// <summary>与 <see cref="Refine"/> 相同，但失败也带回探针/抓边/拟合边，供画面调试。</summary>
+    public static CaliperAttempt TryRefine(Mat image, IReadOnlyList<Point2f> contour)
     {
         LastDebug = default;
         if (image.Empty() || contour.Count < 4)
-            return null;
+            return CaliperAttempt.Miss();
 
         Mat gray = image;
         var owned = false;
@@ -91,13 +116,13 @@ public static class MaskCaliperTab
         }
     }
 
-    private static Result? RefineGray(Mat gray, IReadOnlyList<Point2f> contour)
+    private static CaliperAttempt RefineGray(Mat gray, IReadOnlyList<Point2f> contour)
     {
         var rect = Cv2.MinAreaRect(contour);
         var longLen = Math.Max(rect.Size.Width, rect.Size.Height);
         var shortLen = Math.Min(rect.Size.Width, rect.Size.Height);
         if (longLen < 16 || shortLen < 8)
-            return null;
+            return CaliperAttempt.Miss();
 
         // 与 UprightCrop / LongAxis 同一套未折 180° 的长边角：0° 时长边沿 +x，+短轴朝下
         var theta0 = AngleGeometry.NormalizeDeg(
@@ -113,35 +138,52 @@ public static class MaskCaliperTab
         var halfLong = longLen / 2.0;
         var tSpan = halfLong * (1.0 - 2.0 * EndInsetRatio);
         if (tSpan < 8)
-            return null;
+            return CaliperAttempt.Miss();
 
         var search = shortLen / 2.0 + Math.Max(16.0, 0.40 * shortLen);
         var searchI = Math.Max(8, (int)Math.Ceiling(search));
 
+        var searchBars = new List<Segment>(ProbeCount);
+        var invalidBars = new List<Segment>(ProbeCount);
         var minus = new List<(double T, double S)>(ProbeCount);
         var plus = new List<(double T, double S)>(ProbeCount);
+
+        Point2d At(double t, double s) => new(c0x + t * lx + s * sx, c0y + t * ly + s * sy);
+        Segment ProbeBar(double t) => new(At(t, -searchI), At(t, searchI));
 
         for (var i = 0; i < ProbeCount; i++)
         {
             var u = ProbeCount == 1 ? 0.5 : (double)i / (ProbeCount - 1);
             var t = -tSpan + 2.0 * tSpan * u;
-            var px = c0x + t * lx;
-            var py = c0y + t * ly;
-            if (!TryProbeEdges(gray, px, py, lx, ly, sx, sy, searchI, shortLen,
+            var bar = ProbeBar(t);
+            if (!TryProbeEdges(gray, At(t, 0).X, At(t, 0).Y, lx, ly, sx, sy, searchI, shortLen,
                     out var sMinus, out var sPlus))
+            {
+                invalidBars.Add(bar);
                 continue;
+            }
+
+            searchBars.Add(bar);
             minus.Add((t, sMinus));
             plus.Add((t, sPlus));
         }
 
         var inMinus = FilterMedian(minus, shortLen);
         var inPlus = FilterMedian(plus, shortLen);
+        var inliers = new List<Point2d>(minus.Count + plus.Count);
+        var rejected = new List<Point2d>();
+        ClassifyHits(minus, inMinus, At, inliers, rejected);
+        ClassifyHits(plus, inPlus, At, inliers, rejected);
         LastDebug = LastDebug with { ValidProbes = Math.Min(inMinus.Count, inPlus.Count) };
+
+        CaliperViz Viz(Segment? fittedMinus = null, Segment? fittedPlus = null) =>
+            BuildViz(searchBars, invalidBars, inliers, rejected, fittedMinus, fittedPlus);
+
         if (inMinus.Count < MinInliersPerSide || inPlus.Count < MinInliersPerSide)
-            return null;
+            return CaliperAttempt.Miss(Viz());
 
         if (!TryFitSlope(inMinus, out var a1, out var b1) || !TryFitSlope(inPlus, out var a2, out var b2))
-            return null;
+            return CaliperAttempt.Miss(Viz());
 
         var d1 = Math.Atan(a1) * 180.0 / Math.PI;
         var d2 = Math.Atan(a2) * 180.0 / Math.PI;
@@ -154,11 +196,14 @@ public static class MaskCaliperTab
             WidthPx = width,
             AngleUndirectedDeg = AngleGeometry.NormalizeDeg(theta0 + delta),
         };
+
+        var fittedMinus = FitEdge(tSpan, a1, b1, At);
+        var fittedPlus = FitEdge(tSpan, a2, b2, At);
         if (parallel > MaxParallelDeg)
-            return null;
+            return CaliperAttempt.Miss(Viz(fittedMinus, fittedPlus));
         var ratio = width / shortLen;
         if (ratio < WidthRatioLo || ratio > WidthRatioHi)
-            return null;
+            return CaliperAttempt.Miss(Viz(fittedMinus, fittedPlus));
 
         var sMid = (b1 + b2) / 2.0;
         var cx = c0x + sMid * sx;
@@ -183,7 +228,7 @@ public static class MaskCaliperTab
         };
 
         if (tab.Sign is null)
-            return null;
+            return CaliperAttempt.Miss(Viz(fittedMinus, fittedPlus));
 
         var directed = tab.Sign is < 0
             ? thetaFit + 180.0
@@ -193,13 +238,54 @@ public static class MaskCaliperTab
         var tabDirX = (tab.Sign is < 0 ? -1.0 : 1.0) * fsx;
         var tabDirY = (tab.Sign is < 0 ? -1.0 : 1.0) * fsy;
         var markerLen = width / 2.0 + Math.Max(MinTabSearchPx, TabSearchRatio * width);
-        return new Result(
-            angle,
-            new Point2d(cx, cy),
-            tab.Sign,
-            new Point2d(cx, cy),
-            new Point2d(cx + tabDirX * markerLen, cy + tabDirY * markerLen));
+        return new CaliperAttempt(
+            new Result(
+                angle,
+                new Point2d(cx, cy),
+                tab.Sign,
+                new Point2d(cx, cy),
+                new Point2d(cx + tabDirX * markerLen, cy + tabDirY * markerLen)),
+            Viz(fittedMinus, fittedPlus));
     }
+
+    private static void ClassifyHits(
+        List<(double T, double S)> samples,
+        List<(double T, double S)> kept,
+        Func<double, double, Point2d> at,
+        List<Point2d> inliers,
+        List<Point2d> rejected)
+    {
+        var keep = kept.ToHashSet();
+        foreach (var p in samples)
+        {
+            var pt = at(p.T, p.S);
+            if (keep.Contains(p))
+                inliers.Add(pt);
+            else
+                rejected.Add(pt);
+        }
+    }
+
+    private static Segment FitEdge(double tSpan, double a, double b, Func<double, double, Point2d> at)
+    {
+        Point2d End(double t) => at(t, a * t + b);
+        return new Segment(End(-tSpan), End(tSpan));
+    }
+
+    private static CaliperViz BuildViz(
+        List<Segment> searchBars,
+        List<Segment> invalidBars,
+        List<Point2d> inliers,
+        List<Point2d> rejected,
+        Segment? fittedMinus,
+        Segment? fittedPlus) =>
+        new(
+            searchBars.ToArray(),
+            invalidBars.ToArray(),
+            inliers.ToArray(),
+            rejected.ToArray(),
+            fittedMinus,
+            fittedPlus);
 
     /// <summary>沿短轴采剖面：从两侧外侧向中心找第一条壳体边（亮场亮→暗），避免内孔/槽抢峰。</summary>
     private static bool TryProbeEdges(

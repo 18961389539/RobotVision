@@ -273,7 +273,7 @@ public sealed partial class RecipeTestSession : ObservableObject
                 return;
             _vision.FrameProcessed -= OnTestFrameProcessed;
 
-            OverlayDrawer.DrawPoses(image, snapshot.Poses);
+            OverlayDrawer.DrawPoses(image, snapshot.Poses, drawDebug: true);
             var source = ImageConverter.ToBitmapSource(image);
             UiDispatch.Begin(() => ResultImage = source);
         }

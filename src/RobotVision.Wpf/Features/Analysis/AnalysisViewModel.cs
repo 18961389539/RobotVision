@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Text;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OxyPlot;
 using RobotVision.Hosting;
 
 namespace RobotVision.WpfHost.Features.Analysis;
@@ -17,13 +19,21 @@ public sealed record HistogramBar(string Label, int Count, double Ratio);
 
 public sealed record CodeShareRow(string Label, long Count, double Ratio, string CountText);
 
+public sealed record AnalysisTrendBar(string Label, long Total, long Ok, double Ratio, string Detail);
+
+public sealed record AnalysisRecipeYield(
+    string Recipe, long Total, long Ok, double Yield, double Ratio, string YieldText);
+
 /// <summary>
 /// 结果分析：只读查询本机 SQLite（不挡检测节拍）。
-/// 筛选时间/配方/成败 → 合格率与位姿均值、角度分布、错误码分布、明细表。
+/// 筛选时间/配方/工位/相机/成败/关键字 → 合格率、离散度、角度分布、结果码、
+/// 时间趋势、按配方合格率、明细表；可导出 CSV。
 /// </summary>
 public partial class AnalysisViewModel : ObservableObject
 {
     public const string AllRecipes = "全部配方";
+    public const string AllStations = "全部工位";
+    public const string AllCameras = "全部相机";
     public const string RangeToday = "今天";
     public const string Range7Days = "近7天";
     public const string Range30Days = "近30天";
@@ -33,7 +43,7 @@ public partial class AnalysisViewModel : ObservableObject
     public const string OutcomeFail = "失败";
 
     private const int TableLimit = 500;
-    private const int HistogramBins = 12;
+    private const int HistogramBins = ResultAnalysis.DefaultHistogramBins;
 
     private readonly SqliteResultStore _db;
     private readonly ResultLogStore? _results;
@@ -49,6 +59,10 @@ public partial class AnalysisViewModel : ObservableObject
 
     public ObservableCollection<string> RecipeOptions { get; } = [];
 
+    public ObservableCollection<string> StationOptions { get; } = [];
+
+    public ObservableCollection<string> CameraOptions { get; } = [];
+
     public ObservableCollection<string> OutcomeOptions { get; } = [OutcomeAll, OutcomeOk, OutcomeFail];
 
     public ObservableCollection<AnalysisRow> Rows { get; } = [];
@@ -57,6 +71,10 @@ public partial class AnalysisViewModel : ObservableObject
 
     public ObservableCollection<CodeShareRow> CodeRows { get; } = [];
 
+    public ObservableCollection<AnalysisTrendBar> TrendBars { get; } = [];
+
+    public ObservableCollection<AnalysisRecipeYield> RecipeYields { get; } = [];
+
     [ObservableProperty]
     private string _range = RangeToday;
 
@@ -64,7 +82,16 @@ public partial class AnalysisViewModel : ObservableObject
     private string _recipeFilter = AllRecipes;
 
     [ObservableProperty]
+    private string _stationFilter = AllStations;
+
+    [ObservableProperty]
+    private string _cameraFilter = AllCameras;
+
+    [ObservableProperty]
     private string _outcome = OutcomeAll;
+
+    [ObservableProperty]
+    private string _keyword = "";
 
     [ObservableProperty]
     private string _message = "尚未加载";
@@ -91,6 +118,9 @@ public partial class AnalysisViewModel : ObservableObject
     private string _avgAngleText = "—";
 
     [ObservableProperty]
+    private string _angleStdText = "—";
+
+    [ObservableProperty]
     private string _avgMsText = "—";
 
     [ObservableProperty]
@@ -103,6 +133,12 @@ public partial class AnalysisViewModel : ObservableObject
     private string _codeSummary = "暂无错误码统计";
 
     [ObservableProperty]
+    private string _trendSummary = "暂无趋势";
+
+    [ObservableProperty]
+    private string _recipeYieldSummary = "暂无配方统计";
+
+    [ObservableProperty]
     private bool _hasRows;
 
     [ObservableProperty]
@@ -112,13 +148,65 @@ public partial class AnalysisViewModel : ObservableObject
     private bool _hasCodeRows;
 
     [ObservableProperty]
+    private bool _hasTrendBars;
+
+    [ObservableProperty]
+    private bool _hasRecipeYields;
+
+    [ObservableProperty]
     private bool _isBusy;
+
+    [ObservableProperty]
+    private PlotModel _anglePlot = AnalysisPlots.Empty("暂无角度样本");
+
+    [ObservableProperty]
+    private PlotModel _codePlot = AnalysisPlots.Empty("暂无结果码");
+
+    [ObservableProperty]
+    private PlotModel _trendPlot = AnalysisPlots.Empty("暂无趋势");
+
+    [ObservableProperty]
+    private PlotModel _recipePlot = AnalysisPlots.Empty("暂无配方统计");
+
+    [ObservableProperty]
+    private PlotModel _xyPlot = AnalysisPlots.Empty("暂无 XY 坐标");
+
+    [ObservableProperty]
+    private PlotModel _elapsedPlot = AnalysisPlots.Empty("暂无耗时样本");
+
+    [ObservableProperty]
+    private string _xySummary = "暂无 XY 坐标";
+
+    [ObservableProperty]
+    private string _elapsedSummary = "暂无耗时样本";
+
+    [ObservableProperty]
+    private bool _hasXyPlot;
+
+    [ObservableProperty]
+    private bool _hasElapsedBars;
+
+    public IPlotController InspectPlotController => AnalysisPlots.Inspect;
+
+    public IPlotController ExplorePlotController => AnalysisPlots.Explore;
+
+    public void InvalidatePlots()
+    {
+        AnglePlot.InvalidatePlot(true);
+        CodePlot.InvalidatePlot(true);
+        TrendPlot.InvalidatePlot(true);
+        RecipePlot.InvalidatePlot(true);
+        XyPlot.InvalidatePlot(true);
+        ElapsedPlot.InvalidatePlot(true);
+    }
 
     public AnalysisViewModel(SqliteResultStore db, ResultLogStore? results = null)
     {
         _db = db;
         _results = results;
         RecipeOptions.Add(AllRecipes);
+        StationOptions.Add(AllStations);
+        CameraOptions.Add(AllCameras);
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
         _timer.Tick += (_, _) =>
         {
@@ -143,7 +231,25 @@ public partial class AnalysisViewModel : ObservableObject
             _ = RefreshAsync();
     }
 
+    partial void OnStationFilterChanged(string value)
+    {
+        if (_ready && !_suppressFilter)
+            _ = RefreshAsync();
+    }
+
+    partial void OnCameraFilterChanged(string value)
+    {
+        if (_ready && !_suppressFilter)
+            _ = RefreshAsync();
+    }
+
     partial void OnOutcomeChanged(string value)
+    {
+        if (_ready && !_suppressFilter)
+            _ = RefreshAsync();
+    }
+
+    partial void OnKeywordChanged(string value)
     {
         if (_ready && !_suppressFilter)
             _ = RefreshAsync();
@@ -161,9 +267,10 @@ public partial class AnalysisViewModel : ObservableObject
         Message = "加载中…";
 
         var query = BuildQuery();
+        var grain = Range == RangeToday ? "hour" : "day";
         try
         {
-            var snapshot = await Task.Run(() => LoadSnapshot(query), token);
+            var snapshot = await Task.Run(() => LoadSnapshot(query, grain), token);
             if (token.IsCancellationRequested)
                 return;
             ApplySnapshot(snapshot);
@@ -187,6 +294,48 @@ public partial class AnalysisViewModel : ObservableObject
     [RelayCommand]
     private void OpenFolder() => Explorer.OpenFolder(_db.Folder);
 
+    [RelayCommand]
+    private void ExportCsv()
+    {
+        try
+        {
+            var query = BuildQuery() with { Limit = 10_000, Offset = 0 };
+            var rows = _db.Query(query);
+            if (rows.Count == 0)
+            {
+                Message = "没有可导出的记录";
+                return;
+            }
+
+            Directory.CreateDirectory(_db.Folder);
+            var path = Path.Combine(_db.Folder, $"analysis_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            var sb = new StringBuilder();
+            sb.AppendLine("time,recipe,station,camera,x,y,angle,confidence,count,elapsed_ms,code,message");
+            foreach (var row in rows)
+            {
+                sb.Append(Csv(row.T)).Append(',')
+                    .Append(Csv(row.Recipe)).Append(',')
+                    .Append(Csv(row.Station)).Append(',')
+                    .Append(Csv(row.Camera)).Append(',')
+                    .Append(Num(row.X)).Append(',')
+                    .Append(Num(row.Y)).Append(',')
+                    .Append(Num(row.Angle)).Append(',')
+                    .Append(Num(row.Confidence)).Append(',')
+                    .Append(row.Count.ToString(CultureInfo.InvariantCulture)).Append(',')
+                    .Append(row.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
+                    .Append(row.Code.ToString(CultureInfo.InvariantCulture)).Append(',')
+                    .Append(Csv(row.Message)).AppendLine();
+            }
+            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            Message = $"已导出 {rows.Count} 条 → {Path.GetFileName(path)}";
+            Explorer.OpenFolder(_db.Folder);
+        }
+        catch (Exception ex)
+        {
+            Message = "导出失败: " + ex.Message;
+        }
+    }
+
     internal ResultDbQuery BuildQuery()
     {
         var now = Clock();
@@ -206,63 +355,45 @@ public partial class AnalysisViewModel : ObservableObject
         var recipe = string.IsNullOrWhiteSpace(RecipeFilter) || RecipeFilter == AllRecipes
             ? null
             : RecipeFilter;
+        var station = string.IsNullOrWhiteSpace(StationFilter) || StationFilter == AllStations
+            ? null
+            : StationFilter;
+        var camera = string.IsNullOrWhiteSpace(CameraFilter) || CameraFilter == AllCameras
+            ? null
+            : CameraFilter;
         return new ResultDbQuery
         {
             From = from,
             To = now,
             Recipe = recipe,
+            Station = station,
+            Camera = camera,
             OkOnly = okOnly,
+            MessageContains = string.IsNullOrWhiteSpace(Keyword) ? null : Keyword.Trim(),
             Limit = TableLimit,
         };
     }
 
-    internal static List<HistogramBar> BuildHistogram(IReadOnlyList<double> values, int binCount = HistogramBins)
-    {
-        if (values.Count == 0 || binCount < 1)
-            return [];
-        var min = values.Min();
-        var max = values.Max();
-        if (!double.IsFinite(min) || !double.IsFinite(max))
-            return [];
-        if (Math.Abs(max - min) < 1e-9)
-            return [new HistogramBar($"{min.ToString("0.###", CultureInfo.InvariantCulture)}°", values.Count, 1)];
+    internal static List<HistogramBar> BuildHistogram(IReadOnlyList<double> values, int binCount = HistogramBins) =>
+        ResultAnalysis.BuildHistogram(values, binCount)
+            .Select(b => new HistogramBar(b.Label, b.Count, b.Ratio))
+            .ToList();
 
-        var span = max - min;
-        var bins = new int[binCount];
-        foreach (var value in values)
-        {
-            if (!double.IsFinite(value))
-                continue;
-            var index = (int)((value - min) / span * binCount);
-            if (index >= binCount)
-                index = binCount - 1;
-            if (index < 0)
-                index = 0;
-            bins[index]++;
-        }
-
-        var peak = bins.Max();
-        var bars = new List<HistogramBar>(binCount);
-        for (var i = 0; i < binCount; i++)
-        {
-            var start = min + span * i / binCount;
-            var end = min + span * (i + 1) / binCount;
-            var ratio = peak == 0 ? 0 : (double)bins[i] / peak;
-            bars.Add(new HistogramBar(
-                $"{start.ToString("0.0", CultureInfo.InvariantCulture)}~{end.ToString("0.0", CultureInfo.InvariantCulture)}°",
-                bins[i], ratio));
-        }
-        return bars;
-    }
-
-    private Snapshot LoadSnapshot(ResultDbQuery query)
+    private Snapshot LoadSnapshot(ResultDbQuery query, string grain)
     {
         return new Snapshot(
             _db.Summarize(query),
+            _db.QuerySpread(query),
             _db.Query(query),
             _db.ListRecipes(),
+            _db.ListStations(),
+            _db.ListCameras(),
             _db.QueryAngles(query),
             _db.CountByCode(query),
+            _db.QueryTrend(query, grain),
+            _db.SummarizeByRecipe(query),
+            _db.QueryXy(query),
+            _db.QueryElapsedMs(query),
             File.Exists(_db.DatabasePath));
     }
 
@@ -271,12 +402,9 @@ public partial class AnalysisViewModel : ObservableObject
         _suppressFilter = true;
         try
         {
-            var keepRecipe = RecipeFilter;
-            RecipeOptions.Clear();
-            RecipeOptions.Add(AllRecipes);
-            foreach (var name in snapshot.Recipes)
-                RecipeOptions.Add(name);
-            RecipeFilter = RecipeOptions.Contains(keepRecipe) ? keepRecipe : AllRecipes;
+            ReplaceOptions(RecipeOptions, AllRecipes, snapshot.Recipes, () => RecipeFilter, v => RecipeFilter = v);
+            ReplaceOptions(StationOptions, AllStations, snapshot.Stations, () => StationFilter, v => StationFilter = v);
+            ReplaceOptions(CameraOptions, AllCameras, snapshot.Cameras, () => CameraFilter, v => CameraFilter = v);
         }
         finally
         {
@@ -293,6 +421,9 @@ public partial class AnalysisViewModel : ObservableObject
         AvgXText = FormatNum(summary.AvgX);
         AvgYText = FormatNum(summary.AvgY);
         AvgAngleText = summary.AvgAngle is { } ang ? ang.ToString("0.###", CultureInfo.InvariantCulture) + "°" : "—";
+        AngleStdText = snapshot.Spread.StdAngle is { } std
+            ? "σ " + std.ToString("0.###", CultureInfo.InvariantCulture) + "°"
+            : "σ —";
         AvgMsText = summary.AvgMs is { } ms ? ms.ToString("0", CultureInfo.InvariantCulture) + " ms" : "—";
 
         Rows.Clear();
@@ -311,18 +442,82 @@ public partial class AnalysisViewModel : ObservableObject
         HasAngleBars = AngleBars.Count > 0;
         AngleSummary = snapshot.Angles.Count == 0
             ? "暂无角度样本"
-            : $"n={snapshot.Angles.Count} · 均角 {AvgAngleText}";
+            : SpreadLine(snapshot.Spread);
 
         var codePeak = snapshot.Codes.Count == 0 ? 0 : snapshot.Codes.Max(c => c.Count);
         CodeRows.Clear();
         foreach (var item in snapshot.Codes)
         {
-            var label = item.Code == 0 ? "合格" : item.Code.ToString(CultureInfo.InvariantCulture);
             var ratio = codePeak == 0 ? 0 : (double)item.Count / codePeak;
-            CodeRows.Add(new CodeShareRow(label, item.Count, ratio, item.Count.ToString("N0")));
+            CodeRows.Add(new CodeShareRow(
+                ResultAnalysis.DescribeCode(item.Code), item.Count, ratio,
+                item.Count.ToString("N0")));
         }
         HasCodeRows = CodeRows.Count > 0;
         CodeSummary = snapshot.Codes.Count == 0 ? "暂无分布" : $"{snapshot.Codes.Count} 种结果码";
+
+        var trendPeak = snapshot.Trend.Count == 0 ? 0 : snapshot.Trend.Max(t => t.Total);
+        TrendBars.Clear();
+        foreach (var bucket in snapshot.Trend)
+        {
+            var ratio = trendPeak == 0 ? 0 : (double)bucket.Total / trendPeak;
+            var yield = bucket.Total == 0 ? 0 : 100.0 * bucket.Ok / bucket.Total;
+            TrendBars.Add(new AnalysisTrendBar(
+                ShortTrendLabel(bucket.Label),
+                bucket.Total,
+                bucket.Ok,
+                ratio,
+                $"{bucket.Total} · {yield.ToString("0.0", CultureInfo.InvariantCulture)}%"));
+        }
+        HasTrendBars = TrendBars.Count > 0;
+        TrendSummary = snapshot.Trend.Count == 0
+            ? "暂无趋势"
+            : Range == RangeToday
+                ? $"按小时 · {snapshot.Trend.Count} 桶"
+                : $"按日 · {snapshot.Trend.Count} 桶";
+
+        var yieldPeak = snapshot.ByRecipe.Count == 0 ? 0 : snapshot.ByRecipe.Max(r => r.Total);
+        RecipeYields.Clear();
+        foreach (var item in snapshot.ByRecipe)
+        {
+            var yld = item.Total == 0 ? 0 : 100.0 * item.Ok / item.Total;
+            var ratio = yieldPeak == 0 ? 0 : (double)item.Total / yieldPeak;
+            RecipeYields.Add(new AnalysisRecipeYield(
+                item.Recipe, item.Total, item.Ok, yld, ratio,
+                yld.ToString("0.0", CultureInfo.InvariantCulture) + "%"));
+        }
+        HasRecipeYields = RecipeYields.Count > 0;
+        RecipeYieldSummary = snapshot.ByRecipe.Count == 0
+            ? "暂无配方统计"
+            : $"{snapshot.ByRecipe.Count} 个配方";
+
+        HasXyPlot = snapshot.Xy.Count > 0;
+        XySummary = snapshot.Xy.Count == 0
+            ? "暂无 XY 坐标"
+            : $"n={snapshot.Xy.Count} · 绿=合格 红=失败";
+        HasElapsedBars = snapshot.Elapsed.Count > 0;
+        ElapsedSummary = snapshot.Elapsed.Count == 0
+            ? "暂无耗时样本"
+            : snapshot.Spread.StdMs is { } stdMs
+                ? $"n={snapshot.Elapsed.Count} · σ {stdMs.ToString("0", CultureInfo.InvariantCulture)} ms"
+                : $"n={snapshot.Elapsed.Count}";
+
+        AnglePlot = AnalysisPlots.Histogram(
+            ResultAnalysis.BuildHistogram(snapshot.Angles),
+            mean: summary.AvgAngle,
+            std: snapshot.Spread.StdAngle);
+        CodePlot = AnalysisPlots.CodeShare(snapshot.Codes);
+        TrendPlot = AnalysisPlots.Trend(snapshot.Trend);
+        RecipePlot = AnalysisPlots.RecipeYield(snapshot.ByRecipe);
+        XyPlot = AnalysisPlots.Scatter(
+            snapshot.Xy, summary.AvgX, summary.AvgY, snapshot.Spread.StdX, snapshot.Spread.StdY);
+        ElapsedPlot = AnalysisPlots.Histogram(
+            ResultAnalysis.BuildHistogram(snapshot.Elapsed, unit: " ms"),
+            AnalysisPlots.Yield,
+            summary.AvgMs,
+            snapshot.Spread.StdMs,
+            " ms");
+        InvalidatePlots();
 
         if (!snapshot.DatabaseExists)
         {
@@ -337,8 +532,39 @@ public partial class AnalysisViewModel : ObservableObject
         else
         {
             var writeHint = _results is { SqliteEnabled: false } ? "（当前未写入新结果）" : "";
-            Message = $"{Range} · {RecipeFilter} · {Outcome}{writeHint}";
+            Message = $"{Range} · {RecipeFilter} · {StationFilter} · {Outcome}{writeHint}";
         }
+    }
+
+    private static void ReplaceOptions(
+        ObservableCollection<string> target, string allLabel, IReadOnlyList<string> names,
+        Func<string> get, Action<string> set)
+    {
+        var keep = get();
+        target.Clear();
+        target.Add(allLabel);
+        foreach (var name in names)
+            target.Add(name);
+        set(target.Contains(keep) ? keep : allLabel);
+    }
+
+    private static string SpreadLine(ResultPoseSpread spread)
+    {
+        if (spread.StdAngle is null && spread.MinAngle is null)
+            return "暂无角度样本";
+        var std = spread.StdAngle is { } s ? $"σ {s.ToString("0.###", CultureInfo.InvariantCulture)}°" : "σ —";
+        if (spread.MinAngle is { } min && spread.MaxAngle is { } max)
+            return $"{std} · {min.ToString("0.0", CultureInfo.InvariantCulture)}~{max.ToString("0.0", CultureInfo.InvariantCulture)}°";
+        return std;
+    }
+
+    private static string ShortTrendLabel(string label)
+    {
+        if (label.Length >= 16 && label[10] == ' ')
+            return label[11..]; // HH:00
+        if (label.Length >= 10)
+            return label[5..]; // MM-DD
+        return label;
     }
 
     private static AnalysisRow ToRow(ResultDbRow row)
@@ -360,11 +586,29 @@ public partial class AnalysisViewModel : ObservableObject
     private static string FormatNum(double? value) =>
         value is { } n ? n.ToString("0.###", CultureInfo.InvariantCulture) : "—";
 
+    private static string Num(double? value) =>
+        value is { } n ? n.ToString("0.###", CultureInfo.InvariantCulture) : "";
+
+    private static string Csv(string? value)
+    {
+        var s = value ?? "";
+        if (s.Contains(',') || s.Contains('"') || s.Contains('\n') || s.Contains('\r'))
+            return "\"" + s.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+        return s;
+    }
+
     private sealed record Snapshot(
         ResultDbSummary Summary,
+        ResultPoseSpread Spread,
         IReadOnlyList<ResultDbRow> Rows,
         IReadOnlyList<string> Recipes,
+        IReadOnlyList<string> Stations,
+        IReadOnlyList<string> Cameras,
         IReadOnlyList<double> Angles,
         IReadOnlyList<ResultCodeCount> Codes,
+        IReadOnlyList<ResultTrendBucket> Trend,
+        IReadOnlyList<ResultRecipeStat> ByRecipe,
+        IReadOnlyList<ResultXyPoint> Xy,
+        IReadOnlyList<double> Elapsed,
         bool DatabaseExists);
 }

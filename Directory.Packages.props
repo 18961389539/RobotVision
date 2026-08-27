@@ -39,6 +39,7 @@
     <!-- UI -->
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.3.2" />
     <PackageVersion Include="WPF-UI" Version="3.1.1" />
+    <PackageVersion Include="OxyPlot.Wpf" Version="2.2.0" />
 
     <!-- 硬件：串口 -->
     <PackageVersion Include="System.IO.Ports" Version="8.0.0" />

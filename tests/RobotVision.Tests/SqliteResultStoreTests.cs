@@ -34,7 +34,9 @@ public class SqliteResultStoreTests : IDisposable
         string recipe = "A01",
         double? x = 10, double? y = 20, double? angle = 1.5, double? confidence = 0.9,
         int count = 1, int code = 0, string message = "",
-        IReadOnlyList<ResultPoseLog>? poses = null)
+        IReadOnlyList<ResultPoseLog>? poses = null,
+        string station = "st1",
+        string camera = "cam")
     {
         poses ??= x is null
             ? []
@@ -42,8 +44,8 @@ public class SqliteResultStoreTests : IDisposable
         return new ResultLogEntry(
             T: DateTimeOffset.Now.ToString("O"),
             Recipe: recipe,
-            Station: "st1",
-            Camera: "cam",
+            Station: station,
+            Camera: camera,
             X: x, Y: y, Angle: angle, Confidence: confidence,
             Count: count, ElapsedMs: 12.5, Code: code, Message: message,
             Poses: poses);
@@ -117,6 +119,56 @@ public class SqliteResultStoreTests : IDisposable
         Assert.Equal(1, db.Count(new ResultDbQuery { Recipe = "A01", Code = 0 }));
         Assert.Equal(1, db.Count(new ResultDbQuery { Code = 1007 }));
         Assert.Equal("A02", Assert.Single(db.Query(new ResultDbQuery { Recipe = "A02" })).Recipe);
+    }
+
+    [Fact]
+    public void Query_FiltersByStationAndCamera()
+    {
+        using var db = new SqliteResultStore(Config(), NullLogger<SqliteResultStore>.Instance);
+        var t = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        db.Insert(Entry(station: "S1", camera: "cam_a"), t);
+        db.Insert(Entry(station: "S2", camera: "cam_a"), t + 1);
+        db.Insert(Entry(station: "S1", camera: "cam_b"), t + 2);
+
+        Assert.Equal(2, db.Count(new ResultDbQuery { Station = "s1" }));
+        Assert.Equal(2, db.Count(new ResultDbQuery { Camera = "CAM_A" }));
+        Assert.Equal(1, db.Count(new ResultDbQuery { Station = "S1", Camera = "cam_b" }));
+    }
+
+    [Fact]
+    public void Query_MessageContains_AndSpreadByRecipeTrend()
+    {
+        using var db = new SqliteResultStore(Config(), NullLogger<SqliteResultStore>.Instance);
+        var day = new DateTimeOffset(2026, 8, 27, 10, 0, 0, TimeSpan.FromHours(8));
+        db.Insert(Entry("A01", x: 10, y: 0, angle: 0, station: "S1"), day.ToUnixTimeMilliseconds());
+        db.Insert(Entry("A01", x: 20, y: 0, angle: 10, station: "S1"), day.AddHours(1).ToUnixTimeMilliseconds());
+        db.Insert(Entry("B02", x: null, y: null, angle: null, count: 0, code: 1007,
+                message: "未检出目标", poses: [], station: "S2"),
+            day.AddDays(1).ToUnixTimeMilliseconds());
+
+        Assert.Equal(1, db.Count(new ResultDbQuery { MessageContains = "未检出" }));
+        Assert.Equal(0, db.Count(new ResultDbQuery { MessageContains = "timeout" }));
+
+        var spread = db.QuerySpread(new ResultDbQuery { OkOnly = true });
+        Assert.NotNull(spread.StdAngle);
+        Assert.Equal(0, spread.MinAngle!.Value, 3);
+        Assert.Equal(10, spread.MaxAngle!.Value, 3);
+
+        var byRecipe = db.SummarizeByRecipe();
+        Assert.Equal(2, byRecipe.Count);
+        var a01 = Assert.Single(byRecipe, r => r.Recipe == "A01");
+        Assert.Equal(2, a01.Total);
+        Assert.Equal(2, a01.Ok);
+
+        var trend = db.QueryTrend(grain: "day");
+        Assert.True(trend.Count >= 2);
+        Assert.Contains(trend, b => b.Failed >= 1);
+        Assert.Equal(["S1", "S2"], db.ListStations());
+
+        var xy = db.QueryXy();
+        Assert.Equal(2, xy.Count);
+        Assert.All(xy, p => Assert.Equal(0, p.Code));
+        Assert.Equal(3, db.QueryElapsedMs().Count);
     }
 
     [Fact]

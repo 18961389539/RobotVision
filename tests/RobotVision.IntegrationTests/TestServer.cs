@@ -81,6 +81,7 @@ public sealed class TestServer : IAsyncDisposable
             FileLogging = new FileLoggingConfig { Enabled = false },
             FailureImage = new FailureImageConfig { Folder = Path.Combine(root, "failures") },
             ResultLog = new ResultLogConfig { Enabled = true, Folder = Path.Combine(root, "results") },
+            Chat = new ChatConfig { AutoStart = false },
             // 联锁/统计状态必须每实例独立:默认 data/metrics 按 exe 锚定,所有 TestServer 共享
             // 同一文件会导致计数跨测试泄漏(Total 虚高、残留联锁 1018)
             ProcessHealth = new ProcessHealthConfig { Folder = Path.Combine(root, "metrics") },

@@ -49,8 +49,24 @@ public class AnalysisViewModelTests
         vm.RecipeOptions.Should().Equal(AnalysisViewModel.AllRecipes, "A01", "B02");
         vm.HasAngleBars.Should().BeTrue();
         vm.HasCodeRows.Should().BeTrue();
-        vm.CodeRows.Select(r => r.Label).Should().Contain(new[] { "合格", "1007" });
+        vm.CodeRows.Select(r => r.Label).Should().Contain(["合格", "1007 未检出"]);
+        vm.HasRecipeYields.Should().BeTrue();
+        vm.RecipeYields.Should().HaveCount(2);
+        vm.HasTrendBars.Should().BeTrue();
+        vm.AngleStdText.Should().StartWith("σ");
         vm.AvgAngleText.Should().Contain("°");
+        vm.HasXyPlot.Should().BeTrue();
+        vm.HasElapsedBars.Should().BeTrue();
+        vm.AnglePlot.Series.Should().NotBeEmpty();
+        vm.AnglePlot.Annotations.Should().Contain(a => a is OxyPlot.Annotations.LineAnnotation);
+        vm.CodePlot.Series.Should().NotBeEmpty();
+        vm.TrendPlot.Series.Should().HaveCount(3);
+        vm.RecipePlot.Series.Should().NotBeEmpty();
+        vm.XyPlot.Series.Should().NotBeEmpty();
+        vm.XyPlot.Annotations.Should().Contain(a => a is OxyPlot.Annotations.LineAnnotation);
+        vm.ElapsedPlot.Series.Should().NotBeEmpty();
+        foreach (var plot in new[] { vm.AnglePlot, vm.CodePlot, vm.TrendPlot, vm.RecipePlot, vm.XyPlot, vm.ElapsedPlot })
+            plot.Invoking(p => p.Update(true)).Should().NotThrow();
     }
 
     [Fact]
@@ -90,6 +106,44 @@ public class AnalysisViewModelTests
         vm.TotalText.Should().Be("1");
         vm.Rows.Should().ContainSingle().Which.Ok.Should().BeFalse();
         vm.BuildQuery().OkOnly.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task StationFilter_LimitsRows()
+    {
+        using var dir = new TestInfra.TempDir("rv_analysis_station");
+        using var db = OpenDb(dir);
+        var now = DateTimeOffset.Now;
+        Insert(db, "A01", now, 1, 1, 0, 0, station: "S1");
+        Insert(db, "A01", now.AddSeconds(1), 2, 2, 1, 0, station: "S2");
+
+        var vm = new AnalysisViewModel(db) { Clock = () => now.AddMinutes(1) };
+        vm.Range = AnalysisViewModel.RangeAll;
+        await vm.RefreshAsync();
+        vm.StationFilter = "S2";
+        await vm.RefreshAsync();
+
+        vm.TotalText.Should().Be("1");
+        vm.Rows.Should().ContainSingle().Which.Station.Should().Be("S2");
+        vm.StationOptions.Should().Contain(["全部工位", "S1", "S2"]);
+    }
+
+    [Fact]
+    public async Task Keyword_FiltersMessage()
+    {
+        using var dir = new TestInfra.TempDir("rv_analysis_kw");
+        using var db = OpenDb(dir);
+        var now = DateTimeOffset.Now;
+        Insert(db, "A01", now, null, null, null, 1007, message: "未检出目标");
+        Insert(db, "A01", now.AddSeconds(1), null, null, null, 1003, message: "取图失败");
+
+        var vm = new AnalysisViewModel(db) { Clock = () => now.AddMinutes(1) };
+        vm.Range = AnalysisViewModel.RangeAll;
+        vm.Keyword = "取图";
+        await vm.RefreshAsync();
+
+        vm.TotalText.Should().Be("1");
+        vm.Rows.Should().ContainSingle().Which.Code.Should().Be(1003);
     }
 
     [Fact]
@@ -156,15 +210,16 @@ public class AnalysisViewModelTests
 
     private static void Insert(
         SqliteResultStore db, string recipe, DateTimeOffset at,
-        double? x, double? y, double? angle, int code)
+        double? x, double? y, double? angle, int code,
+        string station = "st", string camera = "cam", string? message = null)
     {
         var poses = code == 0 && x is not null
             ? new ResultPoseLog[] { new(x.Value, y ?? 0, angle ?? 0, 0.9) }
             : Array.Empty<ResultPoseLog>();
         db.Insert(new ResultLogEntry(
-            at.ToString("O"), recipe, "st", "cam",
+            at.ToString("O"), recipe, station, camera,
             x, y, angle, code == 0 ? 0.9 : null,
-            poses.Length, 12, code, code == 0 ? "" : "fail", poses),
+            poses.Length, 12, code, message ?? (code == 0 ? "" : "fail"), poses),
             at.ToUnixTimeMilliseconds());
     }
 }

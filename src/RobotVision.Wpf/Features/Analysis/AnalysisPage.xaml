@@ -2,330 +2,379 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:oxy="http://oxyplot.org/wpf"
       Title="结果分析"
-      Background="{DynamicResource ApplicationBackgroundBrush}">
+      Background="{DynamicResource ApplicationBackgroundBrush}"
+      ScrollViewer.VerticalScrollBarVisibility="Disabled">
     <Page.InputBindings>
         <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
     </Page.InputBindings>
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <Style x:Key="PlotCard" TargetType="{x:Type ui:Card}">
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Margin" Value="4" />
+        </Style>
     </Page.Resources>
 
     <Grid Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="220" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- 筛选 -->
         <ui:Card Grid.Row="0" Margin="0,0,0,8" Padding="12,10">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="112" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="140" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="118" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="时间" VerticalAlignment="Center" FontSize="12"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <ComboBox Grid.Column="1" ItemsSource="{Binding RangeOptions}"
-                          SelectedItem="{Binding Range}" Margin="8,0,16,0" FontSize="12" />
-                <TextBlock Grid.Column="2" Text="配方" VerticalAlignment="Center" FontSize="12"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <ComboBox Grid.Column="3" ItemsSource="{Binding RecipeOptions}"
-                          SelectedItem="{Binding RecipeFilter}" Margin="8,0,16,0" FontSize="12" />
-                <TextBlock Grid.Column="4" Text="结果" VerticalAlignment="Center" FontSize="12"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <ComboBox Grid.Column="5" ItemsSource="{Binding OutcomeOptions}"
-                          SelectedItem="{Binding Outcome}" Margin="8,0,16,0" FontSize="12" />
-                <TextBlock Grid.Column="6" Text="{Binding Message}" VerticalAlignment="Center"
-                           FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding Message}"
+            <StackPanel>
+                <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="时间" VerticalAlignment="Center" FontSize="12" Margin="0,0,8,4"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <ComboBox ItemsSource="{Binding RangeOptions}" SelectedItem="{Binding Range}"
+                              Width="100" Margin="0,0,16,4" FontSize="12" />
+                    <TextBlock Text="配方" VerticalAlignment="Center" FontSize="12" Margin="0,0,8,4"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <ComboBox ItemsSource="{Binding RecipeOptions}" SelectedItem="{Binding RecipeFilter}"
+                              MinWidth="120" MaxWidth="180" Margin="0,0,16,4" FontSize="12" />
+                    <TextBlock Text="工位" VerticalAlignment="Center" FontSize="12" Margin="0,0,8,4"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <ComboBox ItemsSource="{Binding StationOptions}" SelectedItem="{Binding StationFilter}"
+                              MinWidth="100" MaxWidth="160" Margin="0,0,16,4" FontSize="12" />
+                    <TextBlock Text="相机" VerticalAlignment="Center" FontSize="12" Margin="0,0,8,4"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <ComboBox ItemsSource="{Binding CameraOptions}" SelectedItem="{Binding CameraFilter}"
+                              MinWidth="100" MaxWidth="160" Margin="0,0,16,4" FontSize="12" />
+                    <TextBlock Text="结果" VerticalAlignment="Center" FontSize="12" Margin="0,0,8,4"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <ComboBox ItemsSource="{Binding OutcomeOptions}" SelectedItem="{Binding Outcome}"
+                              Width="88" Margin="0,0,16,4" FontSize="12" />
+                    <TextBlock Text="关键字" VerticalAlignment="Center" FontSize="12" Margin="0,0,8,4"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBox Text="{Binding Keyword, UpdateSourceTrigger=PropertyChanged, Delay=400}"
+                             Width="140" Margin="0,0,16,4" FontSize="12"
+                             ToolTip="匹配失败原因 / 消息" />
+                    <ui:Button Content="刷新" Padding="12,4" FontSize="12" Margin="0,0,8,4"
+                               ToolTip="F5" Command="{Binding RefreshCommand}" />
+                    <ui:Button Content="导出 CSV" Padding="12,4" FontSize="12" Margin="0,0,8,4"
+                               Command="{Binding ExportCsvCommand}" />
+                    <ui:Button Content="打开目录" Padding="12,4" FontSize="12" Margin="0,0,0,4"
+                               Command="{Binding OpenFolderCommand}" />
+                </WrapPanel>
+                <TextBlock Text="{Binding Message}" FontSize="12" Margin="0,6,0,0"
+                           TextTrimming="CharacterEllipsis" ToolTip="{Binding Message}"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                <ui:Button Grid.Column="7" Content="刷新" Padding="12,4" FontSize="12"
-                           ToolTip="F5" Command="{Binding RefreshCommand}" />
-                <ui:Button Grid.Column="8" Content="打开目录" Margin="8,0,0,0" Padding="12,4" FontSize="12"
-                           Command="{Binding OpenFolderCommand}" />
-            </Grid>
+            </StackPanel>
         </ui:Card>
 
-        <!-- 指标 -->
-        <ui:Card Grid.Row="1" Margin="0,0,0,8" Padding="16,10">
-            <UniformGrid Columns="6">
-                <StackPanel>
-                    <TextBlock Text="总触发" FontSize="11"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="{Binding TotalText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
-                </StackPanel>
-                <StackPanel Margin="12,0,0,0">
-                    <TextBlock Text="合格" FontSize="11"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="{Binding OkText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
-                </StackPanel>
-                <StackPanel Margin="12,0,0,0">
-                    <TextBlock Text="失败" FontSize="11"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="{Binding FailText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
-                </StackPanel>
-                <StackPanel Margin="12,0,0,0">
-                    <TextBlock Text="合格率" FontSize="11"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="{Binding YieldText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
-                </StackPanel>
-                <StackPanel Margin="12,0,0,0">
-                    <TextBlock Text="平均角度" FontSize="11"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="{Binding AvgAngleText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
-                    <TextBlock FontSize="11" Margin="0,2,0,0"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}">
-                        <Run Text="X " /><Run Text="{Binding AvgXText, Mode=OneWay}" />
-                        <Run Text="  Y " /><Run Text="{Binding AvgYText, Mode=OneWay}" />
-                    </TextBlock>
-                </StackPanel>
-                <StackPanel Margin="12,0,0,0">
-                    <TextBlock Text="平均耗时" FontSize="11"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="{Binding AvgMsText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
-                </StackPanel>
-            </UniformGrid>
-        </ui:Card>
-
-        <Grid Grid.Row="2" Margin="0,0,0,8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="8" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <ui:Card Padding="12,10">
+        <TabControl Grid.Row="1" SelectedIndex="0" SelectionChanged="OnAnalysisTabChanged">
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="图表与总结" Padding="4,2" />
+                </TabItem.Header>
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Grid Margin="0,0,0,8">
-                        <ui:TextBlock FontTypography="BodyStrong" Text="角度分布" />
-                        <TextBlock HorizontalAlignment="Right" FontSize="11"
-                                   Text="{Binding AngleSummary}"
-                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    </Grid>
-                    <TextBlock Grid.Row="1" Text="暂无角度样本。合格记录的首个目标角度会显示在这里。"
-                               TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasAngleBars}" Value="False">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                                  Visibility="{Binding HasAngleBars, Converter={StaticResource BoolToVisibilityConverter}}">
-                        <ItemsControl ItemsSource="{Binding AngleBars}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid Margin="0,0,0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="96" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="40" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Label}" FontSize="11" VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                        <ProgressBar Grid.Column="1" Height="8" Minimum="0" Maximum="1"
-                                                     Value="{Binding Ratio}" Margin="8,0"
-                                                     VerticalAlignment="Center" />
-                                        <TextBlock Grid.Column="2" Text="{Binding Count}" FontSize="11"
-                                                   TextAlignment="Right" VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </Grid>
-            </ui:Card>
 
-            <ui:Card Grid.Column="2" Padding="12,10">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <Grid Margin="0,0,0,8">
-                        <ui:TextBlock FontTypography="BodyStrong" Text="结果码分布" />
-                        <TextBlock HorizontalAlignment="Right" FontSize="11"
-                                   Text="{Binding CodeSummary}"
-                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    </Grid>
-                    <TextBlock Grid.Row="1" Text="暂无结果码分布。"
-                               TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasCodeRows}" Value="False">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                                  Visibility="{Binding HasCodeRows, Converter={StaticResource BoolToVisibilityConverter}}">
-                        <ItemsControl ItemsSource="{Binding CodeRows}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid Margin="0,0,0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="72" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="48" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Label}" FontSize="12" VerticalAlignment="Center"
-                                                   FontWeight="SemiBold" />
-                                        <ProgressBar Grid.Column="1" Height="8" Minimum="0" Maximum="1"
-                                                     Value="{Binding Ratio}" Margin="8,0"
-                                                     VerticalAlignment="Center" />
-                                        <TextBlock Grid.Column="2" Text="{Binding CountText}" FontSize="11"
-                                                   TextAlignment="Right" VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </Grid>
-            </ui:Card>
-        </Grid>
+                    <ui:Card Grid.Row="0" Margin="0,8,0,8" Padding="16,10">
+                        <UniformGrid Columns="6">
+                            <StackPanel>
+                                <TextBlock Text="总触发" FontSize="11"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Text="{Binding TotalText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <StackPanel Margin="12,0,0,0">
+                                <TextBlock Text="合格" FontSize="11"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Text="{Binding OkText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <StackPanel Margin="12,0,0,0">
+                                <TextBlock Text="失败" FontSize="11"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Text="{Binding FailText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <StackPanel Margin="12,0,0,0">
+                                <TextBlock Text="合格率" FontSize="11"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Text="{Binding YieldText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <StackPanel Margin="12,0,0,0">
+                                <TextBlock Text="平均角度" FontSize="11"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Text="{Binding AvgAngleText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
+                                <TextBlock FontSize="11" Margin="0,2,0,0"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                                    <Run Text="{Binding AngleStdText, Mode=OneWay}" />
+                                    <Run Text="  X " /><Run Text="{Binding AvgXText, Mode=OneWay}" />
+                                    <Run Text="  Y " /><Run Text="{Binding AvgYText, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                            <StackPanel Margin="12,0,0,0">
+                                <TextBlock Text="平均耗时" FontSize="11"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Text="{Binding AvgMsText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </UniformGrid>
+                    </ui:Card>
 
-        <ui:Card Grid.Row="3" Padding="0">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <Grid Margin="12,10,12,6">
-                    <ui:TextBlock FontTypography="BodyStrong" Text="明细" />
-                    <TextBlock HorizontalAlignment="Right" FontSize="11"
-                               Text="{Binding TableSummary}"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                </Grid>
-                <Grid Grid.Row="1">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <Grid Margin="12,0,12,4" Visibility="{Binding HasRows, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid Grid.Row="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" MinHeight="220" />
+                            <RowDefinition Height="*" MinHeight="220" />
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="112" />
-                            <ColumnDefinition Width="72" />
-                            <ColumnDefinition Width="72" />
-                            <ColumnDefinition Width="72" />
-                            <ColumnDefinition Width="72" />
-                            <ColumnDefinition Width="56" />
-                            <ColumnDefinition Width="56" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="52" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="时间" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Grid.Column="1" Text="配方" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Grid.Column="2" Text="X" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Grid.Column="3" Text="Y" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Grid.Column="4" Text="角度" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Grid.Column="5" Text="置信" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Grid.Column="6" Text="结果" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Grid.Column="7" Text="工位" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Grid.Column="8" Text="耗时" FontSize="11" TextAlignment="Right"
-                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    </Grid>
-                    <TextBlock Grid.Row="1" Text="暂无明细。确认 ResultLog.Sqlite 已开启并已触发检测。"
-                               TextWrapping="Wrap" Margin="12" FontSize="12"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasRows}" Value="False">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                    <ListBox Grid.Row="1" ItemsSource="{Binding Rows}" FontFamily="Consolas"
-                             Background="Transparent" BorderThickness="0" Margin="4,0,4,8"
-                             Visibility="{Binding HasRows, Converter={StaticResource BoolToVisibilityConverter}}"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             VirtualizingStackPanel.IsVirtualizing="True">
-                        <ListBox.ItemContainerStyle>
-                            <Style TargetType="ListBoxItem">
-                                <Setter Property="Background" Value="Transparent" />
-                                <Setter Property="BorderThickness" Value="0" />
-                                <Setter Property="Padding" Value="8,3" />
-                            </Style>
-                        </ListBox.ItemContainerStyle>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="112" />
-                                        <ColumnDefinition Width="72" />
-                                        <ColumnDefinition Width="72" />
-                                        <ColumnDefinition Width="72" />
-                                        <ColumnDefinition Width="72" />
-                                        <ColumnDefinition Width="56" />
-                                        <ColumnDefinition Width="56" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="52" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding TimeText}" FontSize="11"
-                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Recipe}" FontSize="11"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="2" Text="{Binding XText}" FontSize="11" />
-                                    <TextBlock Grid.Column="3" Text="{Binding YText}" FontSize="11" />
-                                    <TextBlock Grid.Column="4" Text="{Binding AngleText}" FontSize="11" />
-                                    <TextBlock Grid.Column="5" Text="{Binding ConfText}" FontSize="11"
-                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                    <TextBlock Grid.Column="6" Text="{Binding ResultText}" FontSize="11"
-                                               FontWeight="SemiBold">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Ok}" Value="True">
-                                                        <Setter Property="Foreground" Value="#6BCB77" />
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Ok}" Value="False">
-                                                        <Setter Property="Foreground" Value="#FF6B6B" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                    <TextBlock Grid.Column="7" Text="{Binding Station}" FontSize="11"
-                                               TextTrimming="CharacterEllipsis"
-                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                    <TextBlock Grid.Column="8" Text="{Binding ElapsedText}" FontSize="11"
-                                               TextAlignment="Right"
+
+                        <ui:Card Grid.Row="0" Grid.Column="0" Style="{StaticResource PlotCard}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid Margin="0,0,0,2">
+                                    <ui:TextBlock FontTypography="BodyStrong" Text="角度分布" />
+                                    <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                               Text="{Binding AngleSummary}"
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 </Grid>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                                <oxy:PlotView Grid.Row="1" Model="{Binding AnglePlot}"
+                                              Controller="{Binding InspectPlotController}"
+                                              IsMouseWheelEnabled="False"
+                                              MinHeight="200"
+                                              Background="#202020" />
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="0" Grid.Column="1" Style="{StaticResource PlotCard}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid Margin="0,0,0,2">
+                                    <ui:TextBlock FontTypography="BodyStrong" Text="结果码构成" />
+                                    <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                               Text="{Binding CodeSummary}"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                </Grid>
+                                <oxy:PlotView Grid.Row="1" Model="{Binding CodePlot}"
+                                              Controller="{Binding InspectPlotController}"
+                                              IsMouseWheelEnabled="False"
+                                              MinHeight="200"
+                                              Background="#202020" />
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="0" Grid.Column="2" Style="{StaticResource PlotCard}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid Margin="0,0,0,2">
+                                    <ui:TextBlock FontTypography="BodyStrong" Text="时间趋势" />
+                                    <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                               Text="{Binding TrendSummary}"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                </Grid>
+                                <oxy:PlotView Grid.Row="1" Model="{Binding TrendPlot}"
+                                              Controller="{Binding InspectPlotController}"
+                                              IsMouseWheelEnabled="False"
+                                              MinHeight="200"
+                                              Background="#202020" />
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="1" Grid.Column="0" Style="{StaticResource PlotCard}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid Margin="0,0,0,2">
+                                    <ui:TextBlock FontTypography="BodyStrong" Text="按配方合格率" />
+                                    <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                               Text="{Binding RecipeYieldSummary}"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                </Grid>
+                                <oxy:PlotView Grid.Row="1" Model="{Binding RecipePlot}"
+                                              Controller="{Binding InspectPlotController}"
+                                              IsMouseWheelEnabled="False"
+                                              MinHeight="200"
+                                              Background="#202020" />
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="1" Grid.Column="1" Style="{StaticResource PlotCard}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid Margin="0,0,0,2">
+                                    <ui:TextBlock FontTypography="BodyStrong" Text="位姿 XY" />
+                                    <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                               Text="{Binding XySummary}"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                </Grid>
+                                <oxy:PlotView Grid.Row="1" Model="{Binding XyPlot}"
+                                              Controller="{Binding ExplorePlotController}"
+                                              MinHeight="200"
+                                              Background="#202020" />
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="1" Grid.Column="2" Style="{StaticResource PlotCard}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid Margin="0,0,0,2">
+                                    <ui:TextBlock FontTypography="BodyStrong" Text="耗时分布" />
+                                    <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                               Text="{Binding ElapsedSummary}"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                </Grid>
+                                <oxy:PlotView Grid.Row="1" Model="{Binding ElapsedPlot}"
+                                              Controller="{Binding InspectPlotController}"
+                                              IsMouseWheelEnabled="False"
+                                              MinHeight="200"
+                                              Background="#202020" />
+                            </Grid>
+                        </ui:Card>
+                    </Grid>
                 </Grid>
-            </Grid>
-        </ui:Card>
+            </TabItem>
+
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="查询结果" Padding="4,2" />
+                        <TextBlock Text="{Binding TableSummary}" Margin="8,2,0,2" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ui:Card Margin="0,8,0,0" Padding="0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid Margin="12,10,12,6">
+                            <ui:TextBlock FontTypography="BodyStrong" Text="明细" />
+                            <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                       Text="{Binding TableSummary}"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        </Grid>
+                        <Grid Grid.Row="1">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Grid Margin="12,0,12,4" Visibility="{Binding HasRows, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="112" />
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="52" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="时间" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Grid.Column="1" Text="配方" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Grid.Column="2" Text="X" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Grid.Column="3" Text="Y" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Grid.Column="4" Text="角度" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Grid.Column="5" Text="置信" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Grid.Column="6" Text="结果" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Grid.Column="7" Text="工位" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Grid.Column="8" Text="耗时" FontSize="11" TextAlignment="Right"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            </Grid>
+                            <TextBlock Grid.Row="1" Text="暂无明细。确认 ResultLog.Sqlite 已开启并已触发检测。"
+                                       TextWrapping="Wrap" Margin="12" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasRows}" Value="False">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <ListBox Grid.Row="1" ItemsSource="{Binding Rows}" FontFamily="Consolas"
+                                     Background="Transparent" BorderThickness="0" Margin="4,0,4,8"
+                                     Visibility="{Binding HasRows, Converter={StaticResource BoolToVisibilityConverter}}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     VirtualizingStackPanel.IsVirtualizing="True">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="BorderThickness" Value="0" />
+                                        <Setter Property="Padding" Value="8,3" />
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="112" />
+                                                <ColumnDefinition Width="72" />
+                                                <ColumnDefinition Width="72" />
+                                                <ColumnDefinition Width="72" />
+                                                <ColumnDefinition Width="72" />
+                                                <ColumnDefinition Width="56" />
+                                                <ColumnDefinition Width="56" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="52" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding TimeText}" FontSize="11"
+                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Recipe}" FontSize="11"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="2" Text="{Binding XText}" FontSize="11" />
+                                            <TextBlock Grid.Column="3" Text="{Binding YText}" FontSize="11" />
+                                            <TextBlock Grid.Column="4" Text="{Binding AngleText}" FontSize="11" />
+                                            <TextBlock Grid.Column="5" Text="{Binding ConfText}" FontSize="11"
+                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                            <TextBlock Grid.Column="6" Text="{Binding ResultText}" FontSize="11"
+                                                       FontWeight="SemiBold">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Ok}" Value="True">
+                                                                <Setter Property="Foreground" Value="#6BCB77" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Ok}" Value="False">
+                                                                <Setter Property="Foreground" Value="#FF6B6B" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Grid.Column="7" Text="{Binding Station}" FontSize="11"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                            <TextBlock Grid.Column="8" Text="{Binding ElapsedText}" FontSize="11"
+                                                       TextAlignment="Right"
+                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Grid>
+                </ui:Card>
+            </TabItem>
+        </TabControl>
     </Grid>
 </Page>

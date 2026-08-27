@@ -9,10 +9,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
+using RobotVision.Hosting.Chat;
 using RobotVision.WpfHost.Features.Analysis;
 using RobotVision.WpfHost.Features.Calibration;
 using RobotVision.WpfHost.Features.CalibrationWizard;
 using RobotVision.WpfHost.Features.Cameras;
+using RobotVision.WpfHost.Features.Chat;
 using RobotVision.WpfHost.Features.Communication;
 using RobotVision.WpfHost.Features.Failures;
 using RobotVision.WpfHost.Features.Lightings;
@@ -95,6 +97,7 @@ public partial class App : Application
         builder.Services.AddHostedService<TcpHostedService>();
         builder.Services.AddSingleton<LogSink>();
         builder.Services.AddSingleton<ILoggerProvider>(sp => sp.GetRequiredService<LogSink>());
+        builder.Services.AddSingleton<IChatLogSource>(sp => sp.GetRequiredService<LogSink>());
         builder.Services.AddSingleton<MainViewModel>();
         RegisterPageViewModels(builder.Services);
 
@@ -184,6 +187,7 @@ public partial class App : Application
         services.AddSingleton<FailuresViewModel>();
         services.AddSingleton<AnalysisViewModel>();
         services.AddSingleton<CommunicationViewModel>();
+        services.AddSingleton<ChatViewModel>();
         services.AddSingleton<LogsViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<SystemViewModel>();
@@ -198,9 +202,11 @@ public partial class App : Application
         builder.Configuration.AddJsonFile(
             Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true, reloadOnChange: false);
         var cfg = builder.Configuration.Get<AppConfig>() ?? new AppConfig();
+        cfg.Chat.AutoStart = false;
         builder.Services.AddRobotVision(cfg);
         builder.Services.AddSingleton<LogSink>();
         builder.Services.AddSingleton<ILoggerProvider>(sp => sp.GetRequiredService<LogSink>());
+        builder.Services.AddSingleton<IChatLogSource>(sp => sp.GetRequiredService<LogSink>());
         builder.Services.AddSingleton<MainViewModel>();
         RegisterPageViewModels(builder.Services);
         _host = builder.Build();
@@ -252,6 +258,7 @@ public partial class App : Application
             ("failures", typeof(FailuresPage)),
             ("analysis", typeof(AnalysisPage)),
             ("communication", typeof(CommunicationPage)),
+            ("chat", typeof(ChatPage)),
             ("logs", typeof(LogsPage)),
             ("settings", typeof(SettingsPage)),
             ("system", typeof(SystemPage)),

@@ -16,6 +16,7 @@
         xmlns:settings="clr-namespace:RobotVision.WpfHost.Features.Settings"
         xmlns:sys="clr-namespace:RobotVision.WpfHost.Features.SystemInfo"
         xmlns:about="clr-namespace:RobotVision.WpfHost.Features.About"
+        xmlns:chat="clr-namespace:RobotVision.WpfHost.Features.Chat"
         Title="RobotVision 视觉调试台"
         Width="1280" Height="820"
         MinWidth="960" MinHeight="600"
@@ -87,6 +88,8 @@
                                        Icon="{ui:SymbolIcon DataBarVertical24}" />
                 <ui:NavigationViewItem Content="通信监控" TargetPageType="{x:Type communication:CommunicationPage}"
                                        Icon="{ui:SymbolIcon PlugConnected24}" />
+                <ui:NavigationViewItem Content="工艺助手" TargetPageType="{x:Type chat:ChatPage}"
+                                       Icon="{ui:SymbolIcon Chat24}" />
                 <ui:NavigationViewItem Content="日志浏览" TargetPageType="{x:Type logs:LogsPage}"
                                        Icon="{ui:SymbolIcon DocumentSearch24}" />
                 <ui:NavigationViewItem Content="服务设置" TargetPageType="{x:Type settings:SettingsPage}"

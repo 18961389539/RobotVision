@@ -6,6 +6,7 @@ namespace RobotVision.WpfHost.Shared;
 
 /// <summary>
 /// 检测叠加层：在去畸变图像上绘制中心十字、角度方向箭头与序号/分数。
+/// 配方测试可额外叠加卡尺探针与抓边点（drawDebug）。
 /// </summary>
 public static class OverlayDrawer
 {
@@ -22,16 +23,21 @@ public static class OverlayDrawer
     private static readonly Scalar BoxColor = Scalar.OrangeRed;
     private static readonly Scalar KeyPointLineColor = Scalar.DodgerBlue;
     private static readonly Scalar BaselineColor = Scalar.Yellow;
+    private static readonly Scalar CaliperBarColor = Scalar.Cyan;
+    private static readonly Scalar FittedEdgeColor = Scalar.Magenta;
+    private static readonly Scalar InvalidCaliperColor = Scalar.Gray;
+    private static readonly Scalar InlierDotColor = Scalar.Cyan;
+    private static readonly Scalar RejectedDotColor = Scalar.IndianRed;
 
-    public static void DrawPoses(VisionImage image, IReadOnlyList<PixelPose> poses)
+    public static void DrawPoses(VisionImage image, IReadOnlyList<PixelPose> poses, bool drawDebug = false)
     {
         using var mat = VisionImageCv.AsMat(image);
-        DrawPoses(mat, poses);
+        DrawPoses(mat, poses, drawDebug);
     }
 
-    public static void DrawPoses(Mat image, IReadOnlyList<PixelPose> poses)
+    public static void DrawPoses(Mat image, IReadOnlyList<PixelPose> poses, bool drawDebug = false)
     {
-        DrawOverlays(image, poses);
+        DrawOverlays(image, poses, drawDebug);
 
         for (var i = 0; i < poses.Count; i++)
         {
@@ -53,8 +59,9 @@ public static class OverlayDrawer
         }
     }
 
-    /// <summary>检测叠加（位姿标记下层）：mask 半透明填充 + 轮廓线，检测框，关键点骨架。</summary>
-    private static void DrawOverlays(Mat image, IReadOnlyList<PixelPose> poses)
+    /// <summary>检测叠加（位姿标记下层）：mask 半透明填充 + 轮廓线，检测框，关键点骨架。
+    /// <paramref name="drawDebug"/> 为真时再画卡尺探针/抓边点（配方测试用，监控默认关）。</summary>
+    private static void DrawOverlays(Mat image, IReadOnlyList<PixelPose> poses, bool drawDebug)
     {
         // mask 填充先画到独立覆盖层，最后一次性混合：
         // 逐目标直接混合会让多目标重叠区反复变深，视觉口径不一致
@@ -81,6 +88,9 @@ public static class OverlayDrawer
             var overlay = pose.Overlay;
             if (overlay is null)
                 continue;
+
+            if (drawDebug)
+                DrawCaliperDebug(image, overlay);
 
             // 角度基线（主特征中心 → 次特征中心）：验证双特征配对关系，终点带方向小圆
             if (overlay.Baseline is { Count: 2 } baseline)
@@ -114,6 +124,31 @@ public static class OverlayDrawer
                     Cv2.Circle(image, points[k], 4, color, -1, LineTypes.AntiAlias);
                 }
             }
+        }
+    }
+
+    private static void DrawCaliperDebug(Mat image, PoseOverlay overlay)
+    {
+        if (overlay.DebugLines is { Count: > 0 } lines)
+        {
+            foreach (var line in lines)
+            {
+                var (color, thickness) = line.Kind switch
+                {
+                    OverlayLineKind.FittedEdge => (FittedEdgeColor, 2),
+                    OverlayLineKind.InvalidCaliper => (InvalidCaliperColor, 1),
+                    _ => (CaliperBarColor, 1),
+                };
+                Cv2.Line(image, ToPoint(line.From), ToPoint(line.To), color, thickness, LineTypes.AntiAlias);
+            }
+        }
+
+        if (overlay.DebugDots is not { Count: > 0 } dots)
+            return;
+        foreach (var dot in dots)
+        {
+            var color = dot.Kind == OverlayDotKind.Rejected ? RejectedDotColor : InlierDotColor;
+            Cv2.Circle(image, ToPoint(dot.At), 3, color, -1, LineTypes.AntiAlias);
         }
     }
 

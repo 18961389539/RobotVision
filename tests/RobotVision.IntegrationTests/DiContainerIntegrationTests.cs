@@ -5,6 +5,7 @@ using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Cameras;
+using RobotVision.Hosting.Chat;
 using RobotVision.Hosting.Lighting;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Cameras;
@@ -44,6 +45,10 @@ public class DiContainerIntegrationTests
         sp.GetRequiredService<CameraTypeRegistry>().Should().NotBeNull();
         sp.GetRequiredService<LightControllerTypeRegistry>().Should().NotBeNull();
         sp.GetRequiredService<AngleStrategyTypeRegistry>().Should().NotBeNull();
+        sp.GetRequiredService<ChatAgent>().Should().NotBeNull();
+        var tools = sp.GetRequiredService<ChatToolRegistry>().Specs.Select(t => t.Name).ToList();
+        tools.Should().Contain(["capture_frame", "query_results", "manage_recipe", "set_camera", "update_settings",
+            "manage_model", "manage_calibration", "manage_files", "convert_pose", "system_info", "web_search", "web_fetch"]);
     }
 
     [Fact]

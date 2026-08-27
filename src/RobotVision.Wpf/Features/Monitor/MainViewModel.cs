@@ -241,13 +241,13 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
 
         foreach (var option in CameraOptions)
         {
-            if (_cameras.TryGet(option.Id, out var camera) && camera.Kind == CameraKind.Virtual)
+            if (_cameras.TryGet(option.Id, out var camera) && camera?.Kind == CameraKind.Virtual)
                 return option.Id;
         }
 
         foreach (var option in CameraOptions)
         {
-            if (_cameras.TryGet(option.Id, out var camera) && camera.Kind == CameraKind.File)
+            if (_cameras.TryGet(option.Id, out var camera) && camera?.Kind == CameraKind.File)
                 return option.Id;
         }
 

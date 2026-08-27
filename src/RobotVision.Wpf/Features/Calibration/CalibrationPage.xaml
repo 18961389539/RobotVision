@@ -499,11 +499,15 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <ui:TextBlock Text="比例档案" FontTypography="BodyStrong" VerticalAlignment="Center" />
-                                <ui:Button Grid.Column="1" Content="刷新" Padding="8,3" FontSize="11" ToolTip="F5"
+                                <ui:Button Grid.Column="1" Content="新建" Padding="8,3" FontSize="11" Margin="6,0,0,0"
+                                           ToolTip="清空表单，填写新工位 Id 后保存即可新建比例档案"
+                                           Command="{Binding NewScaleCommand}" />
+                                <ui:Button Grid.Column="2" Content="刷新" Padding="8,3" FontSize="11" ToolTip="F5"
                                            Command="{Binding RefreshCommand}" />
-                                <Button Grid.Column="2" Content="收起" Padding="10,4" FontSize="12" Margin="6,0,0,0"
+                                <Button Grid.Column="3" Content="收起" Padding="10,4" FontSize="12" Margin="6,0,0,0"
                                         Command="{Binding ToggleScaleListPanelCommand}" />
                             </Grid>
                             <ListBox Grid.Row="1" Margin="4,0,4,4" ItemsSource="{Binding Scales}"

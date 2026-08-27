@@ -6,17 +6,21 @@ using Microsoft.Extensions.Logging;
 namespace RobotVision.Hosting;
 
 /// <summary>分析页/追溯查询条件。Limit 上限 10000，避免一次把整库拉进 UI。</summary>
-public sealed class ResultDbQuery
+public sealed record ResultDbQuery
 {
     public DateTimeOffset? From { get; init; }
     public DateTimeOffset? To { get; init; }
     public string? Recipe { get; init; }
+    public string? Station { get; init; }
+    public string? Camera { get; init; }
     public int? Code { get; init; }
     /// <summary>
     /// true = 仅合格（code=0）；false = 仅失败（code≠0）；null = 不按成败筛。
     /// 与 <see cref="Code"/> 同时设置时以 Code 为准。
     /// </summary>
     public bool? OkOnly { get; init; }
+    /// <summary>失败原因/消息子串（LIKE，大小写不敏感）。</summary>
+    public string? MessageContains { get; init; }
     public int Limit { get; init; } = 500;
     public int Offset { get; init; }
 }
@@ -213,28 +217,13 @@ public sealed class SqliteResultStore : IDisposable
     }
 
     /// <summary>库中出现过的配方名（分析页下拉）。无库文件时不创建空库。</summary>
-    public IReadOnlyList<string> ListRecipes()
-    {
-        lock (_sync)
-        {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return [];
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            cmd.CommandText =
-                """
-                SELECT DISTINCT recipe FROM results
-                WHERE recipe <> ''
-                ORDER BY recipe COLLATE NOCASE
-                LIMIT 200;
-                """;
-            using var reader = cmd.ExecuteReader();
-            var names = new List<string>();
-            while (reader.Read())
-                names.Add(reader.GetString(0));
-            return names;
-        }
-    }
+    public IReadOnlyList<string> ListRecipes() => ListDistinct("recipe", 200);
+
+    /// <summary>库中出现过的工位。</summary>
+    public IReadOnlyList<string> ListStations() => ListDistinct("station", 100);
+
+    /// <summary>库中出现过的相机。</summary>
+    public IReadOnlyList<string> ListCameras() => ListDistinct("camera", 100);
 
     /// <summary>筛选范围内有角度的样本（上限 10000），供分析页直方图。</summary>
     public IReadOnlyList<double> QueryAngles(ResultDbQuery? query = null)
@@ -255,6 +244,49 @@ public sealed class SqliteResultStore : IDisposable
             while (reader.Read())
                 values.Add(reader.GetDouble(0));
             return values;
+        }
+    }
+
+    /// <summary>筛选范围内耗时样本（上限 10000），供耗时直方图。</summary>
+    public IReadOnlyList<double> QueryElapsedMs(ResultDbQuery? query = null)
+    {
+        query ??= new ResultDbQuery();
+        lock (_sync)
+        {
+            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
+                return [];
+            EnsureOpen();
+            using var cmd = _conn!.CreateCommand();
+            var where = new StringBuilder("WHERE 1=1");
+            ApplyFilters(cmd, query, where);
+            cmd.CommandText = $"SELECT elapsed_ms FROM results {where} LIMIT 10000;";
+            using var reader = cmd.ExecuteReader();
+            var values = new List<double>();
+            while (reader.Read())
+                values.Add(reader.GetDouble(0));
+            return values;
+        }
+    }
+
+    /// <summary>筛选范围内有 XY 的点（上限 4000），供散点图。</summary>
+    public IReadOnlyList<ResultXyPoint> QueryXy(ResultDbQuery? query = null)
+    {
+        query ??= new ResultDbQuery();
+        lock (_sync)
+        {
+            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
+                return [];
+            EnsureOpen();
+            using var cmd = _conn!.CreateCommand();
+            var where = new StringBuilder("WHERE 1=1");
+            ApplyFilters(cmd, query, where);
+            where.Append(" AND x IS NOT NULL AND y IS NOT NULL");
+            cmd.CommandText = $"SELECT x, y, code FROM results {where} LIMIT 4000;";
+            using var reader = cmd.ExecuteReader();
+            var points = new List<ResultXyPoint>();
+            while (reader.Read())
+                points.Add(new ResultXyPoint(reader.GetDouble(0), reader.GetDouble(1), reader.GetInt32(2)));
+            return points;
         }
     }
 
@@ -282,6 +314,127 @@ public sealed class SqliteResultStore : IDisposable
             var rows = new List<ResultCodeCount>();
             while (reader.Read())
                 rows.Add(new ResultCodeCount(reader.GetInt32(0), Convert.ToInt64(reader.GetValue(1))));
+            return rows;
+        }
+    }
+
+    /// <summary>筛选范围内位姿/耗时 min/max/σ（总体标准差，NULL 不计入）。</summary>
+    public ResultPoseSpread QuerySpread(ResultDbQuery? query = null)
+    {
+        query ??= new ResultDbQuery();
+        lock (_sync)
+        {
+            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
+                return EmptySpread();
+            EnsureOpen();
+            using var cmd = _conn!.CreateCommand();
+            var where = new StringBuilder("WHERE 1=1");
+            ApplyFilters(cmd, query, where);
+            cmd.CommandText =
+                $"""
+                 SELECT
+                   MIN(x), MAX(x), AVG(x), AVG(x * x),
+                   MIN(y), MAX(y), AVG(y), AVG(y * y),
+                   MIN(angle), MAX(angle), AVG(angle), AVG(angle * angle),
+                   MIN(elapsed_ms), MAX(elapsed_ms), AVG(elapsed_ms), AVG(elapsed_ms * elapsed_ms),
+                   AVG(confidence)
+                 FROM results
+                 {where};
+                 """;
+            using var reader = cmd.ExecuteReader();
+            if (!reader.Read())
+                return EmptySpread();
+            var avgX = ReadNullableDouble(reader, 2);
+            var avgY = ReadNullableDouble(reader, 6);
+            var avgA = ReadNullableDouble(reader, 10);
+            var avgMs = ReadNullableDouble(reader, 14);
+            return new ResultPoseSpread(
+                ReadNullableDouble(reader, 0), ReadNullableDouble(reader, 1),
+                ResultAnalysis.PopulationStd(avgX, ReadNullableDouble(reader, 3)),
+                ReadNullableDouble(reader, 4), ReadNullableDouble(reader, 5),
+                ResultAnalysis.PopulationStd(avgY, ReadNullableDouble(reader, 7)),
+                ReadNullableDouble(reader, 8), ReadNullableDouble(reader, 9),
+                ResultAnalysis.PopulationStd(avgA, ReadNullableDouble(reader, 11)),
+                ReadNullableDouble(reader, 12), ReadNullableDouble(reader, 13),
+                ResultAnalysis.PopulationStd(avgMs, ReadNullableDouble(reader, 15)),
+                ReadNullableDouble(reader, 16));
+        }
+    }
+
+    /// <summary>按配方聚合合格率，条数多的在前。</summary>
+    public IReadOnlyList<ResultRecipeStat> SummarizeByRecipe(ResultDbQuery? query = null)
+    {
+        query ??= new ResultDbQuery();
+        lock (_sync)
+        {
+            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
+                return [];
+            EnsureOpen();
+            using var cmd = _conn!.CreateCommand();
+            var where = new StringBuilder("WHERE 1=1");
+            ApplyFilters(cmd, query, where);
+            cmd.CommandText =
+                $"""
+                 SELECT recipe,
+                        COUNT(*) AS n,
+                        SUM(CASE WHEN code = 0 THEN 1 ELSE 0 END) AS ok,
+                        AVG(elapsed_ms),
+                        AVG(angle)
+                 FROM results
+                 {where}
+                 GROUP BY recipe COLLATE NOCASE
+                 ORDER BY n DESC
+                 LIMIT 40;
+                 """;
+            using var reader = cmd.ExecuteReader();
+            var rows = new List<ResultRecipeStat>();
+            while (reader.Read())
+            {
+                var total = Convert.ToInt64(reader.GetValue(1));
+                var ok = reader.IsDBNull(2) ? 0 : Convert.ToInt64(reader.GetValue(2));
+                rows.Add(new ResultRecipeStat(
+                    reader.GetString(0), total, ok, total - ok,
+                    ReadNullableDouble(reader, 3),
+                    ReadNullableDouble(reader, 4)));
+            }
+            return rows;
+        }
+    }
+
+    /// <summary>按小时或按日聚合趋势。grain=hour|day，最新 90 桶再按时间正序。</summary>
+    public IReadOnlyList<ResultTrendBucket> QueryTrend(ResultDbQuery? query = null, string grain = "day")
+    {
+        query ??= new ResultDbQuery();
+        var fmt = grain.Equals("hour", StringComparison.OrdinalIgnoreCase) ? "%Y-%m-%d %H:00" : "%Y-%m-%d";
+        lock (_sync)
+        {
+            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
+                return [];
+            EnsureOpen();
+            using var cmd = _conn!.CreateCommand();
+            var where = new StringBuilder("WHERE 1=1");
+            ApplyFilters(cmd, query, where);
+            cmd.CommandText =
+                $"""
+                 SELECT strftime('{fmt}', t_unix / 1000, 'unixepoch', 'localtime') AS bucket,
+                        COUNT(*) AS n,
+                        SUM(CASE WHEN code = 0 THEN 1 ELSE 0 END) AS ok
+                 FROM results
+                 {where}
+                 GROUP BY bucket
+                 ORDER BY bucket DESC
+                 LIMIT 90;
+                 """;
+            using var reader = cmd.ExecuteReader();
+            var rows = new List<ResultTrendBucket>();
+            while (reader.Read())
+            {
+                var label = reader.IsDBNull(0) ? "" : reader.GetString(0);
+                var total = Convert.ToInt64(reader.GetValue(1));
+                var ok = reader.IsDBNull(2) ? 0 : Convert.ToInt64(reader.GetValue(2));
+                rows.Add(new ResultTrendBucket(label, total, ok, total - ok));
+            }
+            rows.Reverse();
             return rows;
         }
     }
@@ -409,6 +562,16 @@ public sealed class SqliteResultStore : IDisposable
             where.Append(" AND recipe = $recipe COLLATE NOCASE");
             cmd.Parameters.AddWithValue("$recipe", query.Recipe.Trim());
         }
+        if (!string.IsNullOrWhiteSpace(query.Station))
+        {
+            where.Append(" AND station = $station COLLATE NOCASE");
+            cmd.Parameters.AddWithValue("$station", query.Station.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(query.Camera))
+        {
+            where.Append(" AND camera = $camera COLLATE NOCASE");
+            cmd.Parameters.AddWithValue("$camera", query.Camera.Trim());
+        }
         if (query.Code is { } code)
         {
             where.Append(" AND code = $code");
@@ -422,7 +585,43 @@ public sealed class SqliteResultStore : IDisposable
         {
             where.Append(" AND code <> 0");
         }
+        if (!string.IsNullOrWhiteSpace(query.MessageContains))
+        {
+            where.Append(" AND message LIKE $msg ESCAPE '\\'");
+            cmd.Parameters.AddWithValue("$msg", "%" + EscapeLike(query.MessageContains.Trim()) + "%");
+        }
     }
+
+    private IReadOnlyList<string> ListDistinct(string column, int limit)
+    {
+        lock (_sync)
+        {
+            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
+                return [];
+            EnsureOpen();
+            using var cmd = _conn!.CreateCommand();
+            cmd.CommandText =
+                $"""
+                 SELECT DISTINCT {column} FROM results
+                 WHERE {column} <> ''
+                 ORDER BY {column} COLLATE NOCASE
+                 LIMIT {limit};
+                 """;
+            using var reader = cmd.ExecuteReader();
+            var names = new List<string>();
+            while (reader.Read())
+                names.Add(reader.GetString(0));
+            return names;
+        }
+    }
+
+    private static ResultPoseSpread EmptySpread() =>
+        new(null, null, null, null, null, null, null, null, null, null, null, null, null);
+
+    private static string EscapeLike(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
     private static ResultDbRow ReadRow(SqliteDataReader reader)
     {

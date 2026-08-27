@@ -251,7 +251,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
                 SegmentRefineMethod.CentroidHoleLine =>
                     "质心连到掩码内最大孔/槽，有头尾。分割须能画出孔或槽。免示教模板。",
                 SegmentRefineMethod.CaliperTab =>
-                    "卡尺自动放在两条长边上（躲开端头与凸起），短轴中心取两线中线；黄线指向暗凸起一侧。切到此方法后抓取原点与模板中心不同，需重新对示教。",
+                    "卡尺自动放在两条长边上（躲开端头与凸起），短轴中心取两线中线；黄线指向暗凸起一侧。配方测试画面会叠加青色探针、抓边点与品红拟合边；监控页默认不画。切到此方法后抓取原点与模板中心不同，需重新对示教。",
                 _ => "",
             };
 

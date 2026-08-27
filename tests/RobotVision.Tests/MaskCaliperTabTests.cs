@@ -114,6 +114,37 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Success_ExposesProbeBarsEdgeHitsAndFittedEdges()
+    {
+        using var img = Paint(tabOnPlusShort: true, rotateDeg: 0);
+        var attempt = MaskCaliperTab.TryRefine(img, AccurateContour(true, 0));
+        Assert.NotNull(attempt.Pose);
+        var viz = attempt.Viz;
+        Assert.True(viz.SearchBars.Count >= 8, $"有效探针 {viz.SearchBars.Count}");
+        Assert.True(viz.Inliers.Count >= 16, $"内点 {viz.Inliers.Count}");
+        Assert.NotNull(viz.FittedMinus);
+        Assert.NotNull(viz.FittedPlus);
+        Assert.Equal(15, viz.SearchBars.Count + viz.InvalidBars.Count);
+
+        double MidY(MaskCaliperTab.Segment s) => (s.A.Y + s.B.Y) / 2.0;
+        var ys = new[] { MidY(viz.FittedMinus.Value), MidY(viz.FittedPlus.Value) }
+            .OrderBy(v => v).ToArray();
+        Assert.InRange(ys[0], H / 2.0 - BodyH / 2.0 - 4, H / 2.0 - BodyH / 2.0 + 4);
+        Assert.InRange(ys[1], H / 2.0 + BodyH / 2.0 - 4, H / 2.0 + BodyH / 2.0 + 4);
+    }
+
+    [Fact]
+    public void NoEdges_StillExposesInvalidProbeBars()
+    {
+        using var blank = new Mat(H, W, MatType.CV_8UC1, new Scalar(240));
+        var attempt = MaskCaliperTab.TryRefine(blank, AccurateContour(true, 0));
+        Assert.Null(attempt.Pose);
+        Assert.Empty(attempt.Viz.SearchBars);
+        Assert.Equal(15, attempt.Viz.InvalidBars.Count);
+        Assert.Null(attempt.Viz.FittedMinus);
+    }
+
+    [Fact]
     public void TabBelowAndAbove_SameBodyCenter()
     {
         using var below = Paint(tabOnPlusShort: true, rotateDeg: 0);

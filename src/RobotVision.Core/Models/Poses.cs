@@ -38,11 +38,37 @@ public sealed record PoseOverlay
     public IReadOnlyList<double>? KeyPointConfidences { get; init; }
 
     /// <summary>角度基线（恰好 2 点：起点=主特征中心，终点=次特征中心）；
-    /// 双特征模式（双模型/双BLOB）提供，用于画面上验证配对关系。</summary>
+    /// 双特征模式（双模型/双BLOB）提供，用于画面上验证配对关系。
+    /// 卡尺+凸起时为中心 → 暗凸起一侧。</summary>
     public IReadOnlyList<PixelPoint>? Baseline { get; init; }
+
+    /// <summary>精修调试线段（卡尺搜索条、拟合边、无效探针）；仅画面用。</summary>
+    public IReadOnlyList<OverlayLine>? DebugLines { get; init; }
+
+    /// <summary>精修调试点（抓边内点/剔点）；仅画面用，不连成骨架。</summary>
+    public IReadOnlyList<OverlayDot>? DebugDots { get; init; }
 
     /// <summary>类别标签（模型输出）；纯图像处理模式为 null。</summary>
     public string? Label { get; init; }
+}
+
+/// <summary>叠加调试线段。</summary>
+public readonly record struct OverlayLine(PixelPoint From, PixelPoint To, OverlayLineKind Kind);
+
+/// <summary>叠加调试点。</summary>
+public readonly record struct OverlayDot(PixelPoint At, OverlayDotKind Kind);
+
+public enum OverlayLineKind
+{
+    Caliper,
+    FittedEdge,
+    InvalidCaliper,
+}
+
+public enum OverlayDotKind
+{
+    Inlier,
+    Rejected,
 }
 
 /// <summary>机器人坐标系下的输出位姿。</summary>

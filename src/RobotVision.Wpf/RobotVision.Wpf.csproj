@@ -12,6 +12,7 @@
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="WPF-UI" />
+    <PackageReference Include="OxyPlot.Wpf" />
   </ItemGroup>
 
   <ItemGroup>

@@ -281,8 +281,8 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         try
         {
-            var sn = device[CameraInfoKey.SerialNumber];
-            var ip = device[CameraInfoKey.DeviceIpAddress];
+            var sn = device[CameraInfoKey.SerialNumber] ?? "";
+            var ip = device[CameraInfoKey.DeviceIpAddress] ?? "";
             return string.IsNullOrEmpty(ip) ? sn : $"{sn}/{ip}";
         }
         catch
@@ -402,7 +402,8 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         var camera = _camera!;
         try
         {
-            if (!string.Equals(camera.CameraInfo[CameraInfoKey.TLType], "GEV", StringComparison.OrdinalIgnoreCase))
+            // CameraInfo 可能为 null(pylon 可空标注),用 ?[ 安全访问,取不到按非 GEV 处理
+            if (!string.Equals(camera.CameraInfo?[CameraInfoKey.TLType], "GEV", StringComparison.OrdinalIgnoreCase))
                 return;
         }
         catch (Exception ex)
@@ -431,7 +432,8 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     private CameraFrame GrabOneFrame()
     {
         var grabWatch = Stopwatch.StartNew();
-        var result = _camera!.StreamGrabber.GrabOne(_grabTimeoutMs, TimeoutHandling.ThrowException);
+        // StreamGrabber 在 pylon 中标注可空;相机已打开且开始采集时必非 null,这里用 ! 断言
+        var result = _camera!.StreamGrabber!.GrabOne(_grabTimeoutMs, TimeoutHandling.ThrowException);
         var acquireMs = grabWatch.Elapsed.TotalMilliseconds;
         using (result)
         {
@@ -469,7 +471,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         try
         {
-            return string.Equals(_camera!.CameraInfo[CameraInfoKey.TLType], "GEV",
+            return string.Equals(_camera!.CameraInfo?[CameraInfoKey.TLType], "GEV",
                 StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception)
@@ -526,8 +528,9 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             return;
         try
         {
-            if (_camera.IsOpen && _camera.StreamGrabber.IsGrabbing)
-                _camera.StreamGrabber.Stop();
+            // StreamGrabber 可能为 null(pylon 可空标注);未就绪时视为未在采集
+            if (_camera.IsOpen && _camera.StreamGrabber is { } grabber && grabber.IsGrabbing)
+                grabber.Stop();
         }
         catch (Exception)
         {
@@ -602,6 +605,9 @@ public sealed class BaslerCamera : ICamera, IExposureControl
                 return resolved;
         }
 
+        // 注册表仅 Windows 可用:非 Windows 直接跳过(CA1416 平台守卫)
+        if (!OperatingSystem.IsWindows())
+            return null;
         try
         {
             using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Basler\pylon");

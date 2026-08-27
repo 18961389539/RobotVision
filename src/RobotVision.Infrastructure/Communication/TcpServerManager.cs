@@ -440,11 +440,15 @@ public sealed class TcpServerManager : IDisposable
             try
             {
                 client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
-                var keepAlive = new byte[12];
-                BitConverter.GetBytes(1).CopyTo(keepAlive, 0);      // 开启
-                BitConverter.GetBytes(5000).CopyTo(keepAlive, 4);   // 首次探测延迟（ms）
-                BitConverter.GetBytes(2000).CopyTo(keepAlive, 8);   // 探测间隔（ms）
-                client.Client.IOControl(IOControlCode.KeepAliveValues, keepAlive, null);
+                // IOControl 的 KeepAliveValues 是 Windows 特性,非 Windows 仅保留 SocketOption 级探测(CA1416 守卫)
+                if (OperatingSystem.IsWindows())
+                {
+                    var keepAlive = new byte[12];
+                    BitConverter.GetBytes(1).CopyTo(keepAlive, 0);      // 开启
+                    BitConverter.GetBytes(5000).CopyTo(keepAlive, 4);   // 首次探测延迟（ms）
+                    BitConverter.GetBytes(2000).CopyTo(keepAlive, 8);   // 探测间隔（ms）
+                    client.Client.IOControl(IOControlCode.KeepAliveValues, keepAlive, null);
+                }
             }
             catch
             {
