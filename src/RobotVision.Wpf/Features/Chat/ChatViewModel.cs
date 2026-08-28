@@ -1,6 +1,10 @@
 using System.Collections.ObjectModel;
+using System.Text.RegularExpressions;
+using System.Windows;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Web.WebView2.Wpf;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Chat;
 
@@ -26,6 +30,26 @@ public sealed partial class ChatBubble : ObservableObject
     private string? _imagePath;
 
     public bool HasImage => !string.IsNullOrEmpty(ImagePath);
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHtml))]
+    private string? _htmlPreview;
+
+    public bool HasHtml => !string.IsNullOrEmpty(HtmlPreview);
+
+    /// <summary>从回复文本提取 HTML 片段：优先 ```html 代码块，其次完整 &lt;html&gt; 文档。</summary>
+    public static string? ExtractHtml(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+        var block = Regex.Match(text, @"```html\s*(.*?)```",
+            RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        if (block.Success && block.Groups[1].Value.Trim().Length > 0)
+            return block.Groups[1].Value.Trim();
+        var doc = Regex.Match(text, @"<(?:!DOCTYPE\s+html|html)[\s\S]*?</html>",
+            RegexOptions.IgnoreCase);
+        return doc.Success ? doc.Value : null;
+    }
 }
 
 /// <summary>本机 CPU 对话页：只连接 llama-server，不加载 9GB 权重。</summary>
@@ -178,6 +202,8 @@ public partial class ChatViewModel : ObservableObject
         }
         finally
         {
+            // 回复结束(或中断)后统一提取 HTML 片段,供气泡"预览 HTML"按钮使用
+            assistant.HtmlPreview = ChatBubble.ExtractHtml(assistant.Text);
             IsBusy = false;
         }
     }
@@ -199,5 +225,45 @@ public partial class ChatViewModel : ObservableObject
             Stop();
         Messages.Clear();
         Status = IsReady ? ReadyStatus : Status;
+    }
+
+    /// <summary>在独立窗口中用 WebView2 预览模型回复里的 HTML。内容为模型生成，
+    /// 静态渲染（禁用脚本），避免恶意脚本注入。</summary>
+    [RelayCommand]
+    private void PreviewHtml(string? html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+            return;
+        try
+        {
+            var view = new WebView2();
+            var window = new Window
+            {
+                Title = "HTML 预览（模型生成内容，脚本已禁用）",
+                Width = 920,
+                Height = 660,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20)),
+                Content = view,
+            };
+            window.Loaded += async (_, _) =>
+            {
+                try
+                {
+                    await view.EnsureCoreWebView2Async();
+                    view.CoreWebView2.Settings.IsScriptEnabled = false;
+                    view.NavigateToString(html);
+                }
+                catch (Exception ex)
+                {
+                    Status = $"网页预览不可用: {ex.Message}";
+                }
+            };
+            window.Show();
+        }
+        catch (Exception ex)
+        {
+            Status = $"网页预览不可用: {ex.Message}";
+        }
     }
 }

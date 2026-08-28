@@ -30,6 +30,7 @@ public sealed class ResultAnalysisTests
         Assert.Equal("合格", ResultAnalysis.DescribeCode(0));
         Assert.Equal("1007 未检出", ResultAnalysis.DescribeCode(1007));
         Assert.Equal("1018 过程联锁", ResultAnalysis.DescribeCode(1018));
+        Assert.Equal("1019 精修失败", ResultAnalysis.DescribeCode(1019));
         Assert.Equal("42", ResultAnalysis.DescribeCode(42));
     }
 

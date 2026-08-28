@@ -75,7 +75,7 @@ namespace ImageViewer.Controls
 
         private static SolidColorBrush CreateInfoTextBackgroundBrush()
         {
-            var brush = new SolidColorBrush(Color.FromArgb(128, 0, 0, 0));
+            var brush = new SolidColorBrush(Color.FromArgb(220, 20, 20, 20));
             brush.Freeze();
             return brush;
         }

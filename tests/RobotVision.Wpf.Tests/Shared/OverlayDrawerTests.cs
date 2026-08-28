@@ -1,5 +1,6 @@
 using OpenCvSharp;
 using RobotVision.Core.Models;
+using RobotVision.Core.Recipe;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.Wpf.Tests;
@@ -34,6 +35,113 @@ public sealed class OverlayDrawerTests
                 ],
             },
         };
+
+    [Fact]
+    public void DrawPoses_Unusable_PaintsNgLabel()
+    {
+        using var mat = new Mat(80, 80, MatType.CV_8UC3, Scalar.All(0));
+        OverlayDrawer.DrawPoses(mat, [new PixelPose(40, 40, 0, 0.12) { Usable = false }]);
+        Assert.True(HasOrangeRedNear(mat, 50, 30), "不可用位姿应标 NG（橙红字）");
+    }
+
+    [Fact]
+    public void DrawNormalizedRoi_PaintsOrangeBox()
+    {
+        using var mat = new Mat(100, 100, MatType.CV_8UC3, Scalar.All(0));
+        OverlayDrawer.DrawNormalizedRoi(mat, new Roi(0.1, 0.2, 0.3, 0.4), "特征");
+        Assert.True(CountOrange(mat) > 8, "特征 ROI 应为橙色框");
+    }
+
+    [Fact]
+    public void DrawNormalizedRoi_GoldLabel_UsesDarkBackingNotGoldText()
+    {
+        using var mat = new Mat(100, 100, MatType.CV_8UC3, new Scalar(220, 220, 220));
+        OverlayDrawer.DrawNormalizedRoi(mat, new Roi(0.2, 0.3, 0.4, 0.3), "建议", Scalar.Gold);
+        Assert.True(HasDarkNear(mat, 20, 28), "金框标签应有深色底");
+        Assert.True(HasLightTextNear(mat, 20, 28), "金框标签应为浅色字");
+    }
+
+    private static int CountOrange(Mat mat)
+    {
+        var n = 0;
+        for (var y = 0; y < mat.Height; y++)
+        for (var x = 0; x < mat.Width; x++)
+        {
+            var p = mat.At<Vec3b>(y, x);
+            if (p.Item2 > 120 && p.Item0 < 80 && p.Item1 > 80)
+                n++;
+        }
+
+        return n;
+    }
+
+    private static bool HasOrangeNear(Mat mat, int x, int y)
+    {
+        for (var dy = -2; dy <= 2; dy++)
+        for (var dx = -2; dx <= 2; dx++)
+        {
+            var xx = x + dx;
+            var yy = y + dy;
+            if ((uint)xx >= (uint)mat.Width || (uint)yy >= (uint)mat.Height)
+                continue;
+            var p = mat.At<Vec3b>(yy, xx);
+            if (p.Item2 > 120 && p.Item0 < 80 && p.Item1 > 80)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasOrangeRedNear(Mat mat, int x, int y)
+    {
+        for (var dy = -8; dy <= 8; dy++)
+        for (var dx = -8; dx <= 8; dx++)
+        {
+            var xx = x + dx;
+            var yy = y + dy;
+            if ((uint)xx >= (uint)mat.Width || (uint)yy >= (uint)mat.Height)
+                continue;
+            var p = mat.At<Vec3b>(yy, xx);
+            if (p.Item2 > 150 && p.Item1 < 120 && p.Item0 < 80)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasDarkNear(Mat mat, int x, int y)
+    {
+        for (var dy = -4; dy <= 4; dy++)
+        for (var dx = -4; dx <= 4; dx++)
+        {
+            var xx = x + dx;
+            var yy = y + dy;
+            if ((uint)xx >= (uint)mat.Width || (uint)yy >= (uint)mat.Height)
+                continue;
+            var p = mat.At<Vec3b>(yy, xx);
+            if (p.Item0 < 60 && p.Item1 < 60 && p.Item2 < 60)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasLightTextNear(Mat mat, int x, int y)
+    {
+        for (var dy = -4; dy <= 4; dy++)
+        for (var dx = -4; dx <= 4; dx++)
+        {
+            var xx = x + dx;
+            var yy = y + dy;
+            if ((uint)xx >= (uint)mat.Width || (uint)yy >= (uint)mat.Height)
+                continue;
+            var p = mat.At<Vec3b>(yy, xx);
+            if (p.Item0 > 200 && p.Item1 > 200 && p.Item2 > 200)
+                return true;
+        }
+
+        return false;
+    }
 
     private static bool HasCyanNear(Mat mat, int x, int y)
     {

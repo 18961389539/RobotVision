@@ -66,7 +66,7 @@ public class AnalysisViewModelTests
         vm.XyPlot.Annotations.Should().Contain(a => a is OxyPlot.Annotations.LineAnnotation);
         vm.ElapsedPlot.Series.Should().NotBeEmpty();
         foreach (var plot in new[] { vm.AnglePlot, vm.CodePlot, vm.TrendPlot, vm.RecipePlot, vm.XyPlot, vm.ElapsedPlot })
-            plot.Invoking(p => p.Update(true)).Should().NotThrow();
+            plot.Invoking(p => p.InvalidatePlot(true)).Should().NotThrow();
     }
 
     [Fact]
@@ -198,6 +198,26 @@ public class AnalysisViewModelTests
 
         vm.HasRows.Should().BeTrue();
         vm.Message.Should().Contain("当前未写入");
+    }
+
+    [Fact]
+    public async Task Refresh_HighRefineFailRate_ShowsHealthHint()
+    {
+        using var dir = new TestInfra.TempDir("rv_analysis_1019");
+        using var db = OpenDb(dir);
+        var now = DateTimeOffset.Now;
+        for (var i = 0; i < 20; i++)
+            Insert(db, "A01", now.AddSeconds(i), null, null, null, 1019);
+        for (var i = 0; i < 5; i++)
+            Insert(db, "A01", now.AddSeconds(20 + i), 1, 1, 0, 0);
+
+        var vm = new AnalysisViewModel(db) { Clock = () => now.AddMinutes(1) };
+        vm.Range = AnalysisViewModel.RangeAll;
+        await vm.RefreshAsync();
+
+        vm.HasHealthHint.Should().BeTrue();
+        vm.HealthHint.Should().Contain("1019");
+        vm.TotalText.Should().Be("25");
     }
 
     private static SqliteResultStore OpenDb(TestInfra.TempDir dir)

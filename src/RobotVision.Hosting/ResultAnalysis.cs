@@ -105,6 +105,7 @@ public static class ResultAnalysis
         1016 => "1016 配方无效",
         1017 => "1017 资产不一致",
         1018 => "1018 过程联锁",
+        1019 => "1019 精修失败",
         1099 => "1099 内部错误",
         _ => code.ToString(CultureInfo.InvariantCulture),
     };

@@ -13,6 +13,8 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="WPF-UI" />
     <PackageReference Include="OxyPlot.Wpf" />
+    <PackageReference Include="Microsoft.Web.WebView2" />
+    <PackageReference Include="Markdig" />
   </ItemGroup>
 
   <ItemGroup>

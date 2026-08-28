@@ -138,7 +138,7 @@ namespace ImageViewer.Controls
             var textBlock = new TextBlock
             {
                 Text = text,
-                Foreground = brush,
+                Foreground = Brushes.White,
                 FontSize = fontSize,
                 FontWeight = FontWeights.Bold,
                 Background = InfoTextBackgroundBrush,

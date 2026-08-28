@@ -1,3 +1,4 @@
+using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 
 namespace RobotVision.WpfHost.Features.Recipe;
@@ -15,6 +16,13 @@ internal interface IRecipeWorkspace
     void CommitEdits();
     void NotifyDirty();
     void NotifyEditorMutated();
+    /// <summary>
+    /// 代码改了 Editor 子对象（POCO、无 INPC）后，通知绑定重读，
+    /// 精修方法下拉框等才会跟着切。脏轮询不要走这条，以免打断正在编辑的输入框。
+    /// </summary>
+    void RefreshEditorBindings();
     /// <summary>测试触发开始：切到结果图视图（有旧图则冻住直到新快照）。</summary>
     void OnTestStarting();
+    /// <summary>把建议特征框写入编辑器并刷新 ROI 绑定。</summary>
+    void ApplySuggestedFeatureRoi(Roi roi);
 }

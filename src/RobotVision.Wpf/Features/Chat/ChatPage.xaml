@@ -104,7 +104,10 @@
                                     </Style>
                                 </Border.Style>
                                 <StackPanel>
-                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="13" />
+                                    <FlowDocumentScrollViewer chat:DocumentBinder.Document="{Binding Text}"
+                                                              IsToolBarVisible="False" Padding="0" Background="Transparent"
+                                                              VerticalScrollBarVisibility="Hidden"
+                                                              HorizontalScrollBarVisibility="Disabled" />
                                     <Image MaxHeight="240" Margin="0,8,0,0" Stretch="Uniform"
                                            Source="{Binding ImagePath}"
                                            RenderOptions.BitmapScalingMode="HighQuality">
@@ -119,6 +122,12 @@
                                             </Style>
                                         </Image.Style>
                                     </Image>
+                                    <Button Content="预览 HTML" FontSize="11" Padding="10,4" Margin="0,8,0,0"
+                                            HorizontalAlignment="Left"
+                                            ToolTip="用 WebView2 渲染模型回复中的 HTML（脚本已禁用）"
+                                            Visibility="{Binding HasHtml, Converter={StaticResource BoolToVisibilityConverter}}"
+                                            Command="{Binding DataContext.PreviewHtmlCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                            CommandParameter="{Binding HtmlPreview}" />
                                 </StackPanel>
                             </Border>
                         </DataTemplate>

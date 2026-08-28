@@ -156,6 +156,11 @@ public sealed class RecipeLoader(string folder)
             throw new InvalidRecipeException(name,
                 "rotationCompensation=EccentricTool 必须配置 stationId（旋转中心档案按工位查找）");
 
+        if (recipe.RotationCompensation == RotationCompensationMode.EccentricTool &&
+            HasUndirectedAngle(recipe))
+            throw new InvalidRecipeException(name,
+                "无头尾，偏心会差 180°；改用分割+精修有向方法（模板/卡尺/孔槽）或关闭偏心补偿");
+
         // 双BLOB模式纯图像处理、不使用模型：跳过一切模型数量校验（多配的模型静默忽略）
         var isBlobMode = recipe.AngleMode == AngleMode.DualBlobCenterLine;
 
@@ -180,6 +185,25 @@ public sealed class RecipeLoader(string folder)
                 throw new InvalidRecipeException(name, "template.matchThreshold 必须在 [0,1]");
             if (recipe.Template.RefineRangeDeg is <= 0 or > 45)
                 throw new InvalidRecipeException(name, "template.refineRangeDeg 必须在 (0,45]");
+            if (recipe.Template.TeachPeakScore is < 0 or > 1)
+                throw new InvalidRecipeException(name, "template.teachPeakScore 必须在 [0,1]");
+            if (!Enum.IsDefined(recipe.Template.HousingEdgePolarity))
+                throw new InvalidRecipeException(name, "template.housingEdgePolarity 无效");
+            if (!Enum.IsDefined(recipe.Template.TabPolarity))
+                throw new InvalidRecipeException(name, "template.tabPolarity 无效");
+            InstanceGeometry.EnsureRatioDefaults(recipe.Template);
+            if (recipe.Template.ExpectedCount is < 0 or > 20)
+                throw new InvalidRecipeException(name, "template.expectedCount 必须在 [0,20]（0=不检查件数）");
+            if (recipe.Template.TeachAreaPx < 0)
+                throw new InvalidRecipeException(name, "template.teachAreaPx 不能为负");
+            if (recipe.Template.TeachAspect < 0)
+                throw new InvalidRecipeException(name, "template.teachAspect 不能为负");
+            if (recipe.Template.AreaRatioLo >= recipe.Template.AreaRatioHi ||
+                recipe.Template.AreaRatioLo <= 0 || recipe.Template.AreaRatioHi > 8)
+                throw new InvalidRecipeException(name, "template.areaRatioLo/Hi 必须满足 0 < lo < hi ≤ 8");
+            if (recipe.Template.AspectRatioLo >= recipe.Template.AspectRatioHi ||
+                recipe.Template.AspectRatioLo <= 0 || recipe.Template.AspectRatioHi > 5)
+                throw new InvalidRecipeException(name, "template.aspectRatioLo/Hi 必须满足 0 < lo < hi ≤ 5");
         }
 
         if (recipe.AngleMode == AngleMode.DualCenterLine && recipe.Models.Count < 2)
@@ -264,7 +288,17 @@ public sealed class RecipeLoader(string folder)
             throw new InvalidRecipeException(recipe.Name, "outputOffset.x/y 绝对值不能超过 100mm（疑似误填；更大偏差请重标定）");
         if (Math.Abs(o.RzDeg) > 180)
             throw new InvalidRecipeException(recipe.Name, "outputOffset.rzDeg 绝对值不能超过 180°");
+        if ((o.TeachX is { } tx && !double.IsFinite(tx)) ||
+            (o.TeachY is { } ty && !double.IsFinite(ty)) ||
+            (o.TeachRzDeg is { } tr && !double.IsFinite(tr)))
+            throw new InvalidRecipeException(recipe.Name, "outputOffset 示教输出必须为有限数字");
     }
+
+    /// <summary>无向角：最小外接矩形，或分割+精修直线拟合。与偏心工具同时用会差 180°。</summary>
+    public static bool HasUndirectedAngle(RecipeConfig recipe) =>
+        recipe.AngleMode == AngleMode.MaskMinAreaRect ||
+        (recipe.AngleMode == AngleMode.MaskTemplate &&
+         recipe.Template.RefineMethod == SegmentRefineMethod.LineFit);
 
     private static void ValidateAssetPins(RecipeConfig recipe)
     {

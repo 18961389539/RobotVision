@@ -73,13 +73,44 @@
                 <Setter Property="BorderThickness" Value="0,0,0,1" />
             </Style>
 
-            <!-- ToolTip：跟随主题、适度留白与停留时长（工控机上短闪即逝的提示不可用） -->
+            <!-- ToolTip：系统默认是 InfoBrush 浅色底。本应用 TextBlock 已统一浅色字，
+                 浅底+浅字看不清；WPF-UI 暗色主题也不覆盖 Popup 铬。必须用不透明深色底板替换模板。 -->
             <Style TargetType="{x:Type ToolTip}" BasedOn="{StaticResource {x:Type ToolTip}}">
+                <Setter Property="OverridesDefaultStyle" Value="True" />
+                <Setter Property="Background" Value="#FF2D2D2D" />
+                <Setter Property="Foreground" Value="#FFF3F3F3" />
+                <Setter Property="BorderBrush" Value="#FF5C5C5C" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="10,6" />
+                <Setter Property="MaxWidth" Value="420" />
+                <Setter Property="HasDropShadow" Value="False" />
                 <Setter Property="ToolTipService.InitialShowDelay" Value="250" />
                 <Setter Property="ToolTipService.ShowDuration" Value="10000" />
                 <Setter Property="ToolTipService.Placement" Value="MousePoint" />
-                <Setter Property="Padding" Value="10,6" />
-                <Setter Property="MaxWidth" Value="420" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ToolTip}">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4"
+                                    Padding="{TemplateBinding Padding}"
+                                    SnapsToDevicePixels="True">
+                                <ContentPresenter
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}">
+                                    <ContentPresenter.Resources>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#FFF3F3F3" />
+                                            <Setter Property="TextWrapping" Value="Wrap" />
+                                            <Setter Property="TextAlignment" Value="Left" />
+                                        </Style>
+                                    </ContentPresenter.Resources>
+                                </ContentPresenter>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
         </ResourceDictionary>
     </Application.Resources>

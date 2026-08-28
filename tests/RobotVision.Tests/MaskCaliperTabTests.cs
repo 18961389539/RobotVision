@@ -1,4 +1,5 @@
 using OpenCvSharp;
+using RobotVision.Core.Recipe;
 using RobotVision.Core.Geometry;
 using RobotVision.Infrastructure.Inference.Strategies;
 using Xunit;
@@ -124,7 +125,8 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
         Assert.True(viz.Inliers.Count >= 16, $"内点 {viz.Inliers.Count}");
         Assert.NotNull(viz.FittedMinus);
         Assert.NotNull(viz.FittedPlus);
-        Assert.Equal(15, viz.SearchBars.Count + viz.InvalidBars.Count);
+        Assert.True(viz.SearchBars.Count + viz.InvalidBars.Count >= 8);
+        Assert.Equal(MaskCaliperTab.LastDebug.ProbeCount, viz.SearchBars.Count + viz.InvalidBars.Count);
 
         double MidY(MaskCaliperTab.Segment s) => (s.A.Y + s.B.Y) / 2.0;
         var ys = new[] { MidY(viz.FittedMinus.Value), MidY(viz.FittedPlus.Value) }
@@ -140,10 +142,46 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
         var attempt = MaskCaliperTab.TryRefine(blank, AccurateContour(true, 0));
         Assert.Null(attempt.Pose);
         Assert.Empty(attempt.Viz.SearchBars);
-        Assert.Equal(15, attempt.Viz.InvalidBars.Count);
+        Assert.True(attempt.Viz.InvalidBars.Count >= 8);
+        Assert.Equal(MaskCaliperTab.LastDebug.ProbeCount, attempt.Viz.InvalidBars.Count);
         Assert.Null(attempt.Viz.FittedMinus);
     }
 
+    [Fact]
+    public void LockedWrongTabSign_ReturnsNull()
+    {
+        using var img = Paint(tabOnPlusShort: true, rotateDeg: 0);
+        var contour = AccurateContour(tabOnPlusShort: true, rotateDeg: 0);
+        var ok = MaskCaliperTab.Refine(img, contour,
+            new CaliperRefineOptions(HousingEdgePolarity.BrightToDark, TabPolarityLock.PlusShortAxis));
+        Assert.NotNull(ok);
+        var ng = MaskCaliperTab.Refine(img, contour,
+            new CaliperRefineOptions(HousingEdgePolarity.BrightToDark, TabPolarityLock.MinusShortAxis));
+        Assert.Null(ng);
+    }
+
+    [Fact]
+    public void DarkField_NeedsDarkToBrightPolarity()
+    {
+        using var img = PaintDarkField(tabOnPlusShort: true, rotateDeg: 0);
+        var contour = AccurateContourDark(tabOnPlusShort: true, rotateDeg: 0);
+        Assert.Null(MaskCaliperTab.Refine(img, contour,
+            new CaliperRefineOptions(HousingEdgePolarity.BrightToDark)));
+        var r = MaskCaliperTab.Refine(img, contour,
+            new CaliperRefineOptions(HousingEdgePolarity.DarkToBright));
+        Assert.NotNull(r);
+        Assert.Equal(1, r.TabSign);
+        Assert.InRange(r.AngleDeg, -2.0, 2.0);
+    }
+
+    [Fact]
+    public void AutoPolarity_PicksDarkFieldWhenBrightFails()
+    {
+        using var img = PaintDarkField(tabOnPlusShort: true, rotateDeg: 0);
+        var r = MaskCaliperTab.Refine(img, AccurateContourDark(true, 0));
+        Assert.NotNull(r);
+        Assert.Equal(1, r.TabSign);
+    }
     [Fact]
     public void TabBelowAndAbove_SameBodyCenter()
     {
@@ -164,6 +202,23 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
         output.WriteLine(
             $"{tag}: {r.Center.X:0.2},{r.Center.Y:0.2}  {r.AngleDeg:0.300}°  tab={r.TabSign}  " +
             $"probes={d.ValidProbes} par={d.ParallelDeg:0.03}° w={d.WidthPx:0.1} diff={d.TabGrayDiff:0.1}");
+    }
+
+    private static Mat PaintDarkField(bool tabOnPlusShort, double rotateDeg)
+    {
+        var img = new Mat(H, W, MatType.CV_8UC1, new Scalar(22));
+        Cv2.FillConvexPoly(img, BodyCorners(rotateDeg), new Scalar(200));
+        Cv2.FillConvexPoly(img, TabCorners(tabOnPlusShort, rotateDeg), new Scalar(40));
+        Cv2.GaussianBlur(img, img, new Size(3, 3), 0.6);
+        return img;
+    }
+
+    private static Point2f[] AccurateContourDark(bool tabOnPlusShort, double rotateDeg)
+    {
+        using var mask = new Mat(H, W, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.FillConvexPoly(mask, BodyCorners(rotateDeg), Scalar.All(255));
+        Cv2.FillConvexPoly(mask, TabCorners(tabOnPlusShort, rotateDeg), Scalar.All(255));
+        return LargestContour(mask);
     }
 
     private static Mat Paint(bool tabOnPlusShort, double rotateDeg)

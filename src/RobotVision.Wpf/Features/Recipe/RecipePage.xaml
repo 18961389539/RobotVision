@@ -278,6 +278,11 @@
                                        Margin="0,0,0,6"
                                        Visibility="{Binding MappingHint,
                                            Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+                            <TextBlock Text="{Binding RecipeHealthHint}" FontSize="11" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                       Margin="0,0,0,6"
+                                       Visibility="{Binding RecipeHealthHint,
+                                           Converter={StaticResource NonEmptyToVisibilityConverter}}" />
                             <TextBlock Text="备注" Margin="0,0,0,4" FontSize="12" />
                             <ui:TextBox Text="{Binding Editor.Description, UpdateSourceTrigger=PropertyChanged}"
                                         FontSize="11" MinHeight="38" TextWrapping="Wrap"
@@ -624,7 +629,7 @@
                                     <ui:Button DockPanel.Dock="Right" Content="示教模板" Padding="10,3" FontSize="11"
                                                Command="{Binding Test.TeachTemplateCommand}"
                                                Visibility="{Binding IsTemplateMethod, Converter={StaticResource BoolToVisibilityConverter}}"
-                                               ToolTip="取图 → 分割 → 转正裁剪存为模板。若启用特征 ROI，只裁该框（头尾/齿脚等局部纹理）；否则裁整个分割目标。仅模板匹配方法需要" />
+                                               ToolTip="连拍 3 帧、分割、转正后中位融合为模板（回放多文件且画面不一致时只用置信最高的一帧）。若启用特征 ROI，只裁该框。仅模板匹配方法需要" />
                                     <ui:TextBlock FontTypography="BodyStrong" Text="精修设置" VerticalAlignment="Center" />
                                 </DockPanel>
                                 <StackPanel Margin="0,0,0,6">
@@ -638,6 +643,35 @@
                                            Text="{Binding RefineMethodHint}"
                                            Visibility="{Binding RefineMethodHint,
                                                Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+                                <CheckBox Content="精修失败时回退粗角（无方向，不推荐）" FontSize="11" Margin="0,0,0,8"
+                                          IsChecked="{Binding Editor.Template.AllowCoarseFallback}"
+                                          ToolTip="关闭（默认）：分割到了但精修不过门返回 1019，避免把无向角送给偏心工具。打开则恢复旧行为。" />
+                                <WrapPanel Margin="0,0,0,8">
+                                    <StackPanel Width="118" Margin="0,0,8,0">
+                                        <TextBlock Text="期望件数" FontSize="11" Margin="0,0,0,4"
+                                                   ToolTip="0=不检查（旧配方）。过门件数不符则全部 1019，不静默截成前 N 个。" />
+                                        <ui:NumberBox Value="{Binding Editor.Template.ExpectedCount}"
+                                                      Minimum="0" Maximum="20" SmallChange="1"
+                                                      SpinButtonPlacementMode="Compact" />
+                                    </StackPanel>
+                                </WrapPanel>
+                                <TextBlock FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap"
+                                           Text="{Binding TeachGeometryHint}" />
+                                <TextBlock FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap"
+                                           Text="{Binding PolarityLockHint}"
+                                           Visibility="{Binding PolarityLockHint,
+                                               Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+                                <StackPanel Margin="0,0,0,8"
+                                            Visibility="{Binding Test.HasRefineAdvice,
+                                                Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"
+                                               Text="{Binding Test.RefineAdviceText}" />
+                                    <ui:Button Content="采用推荐方法" Padding="10,3" FontSize="11" HorizontalAlignment="Left"
+                                               Command="{Binding Test.ApplyRefineAdviceCommand}"
+                                               Visibility="{Binding Test.CanApplyRefineAdvice,
+                                                   Converter={StaticResource BoolToVisibilityConverter}}"
+                                               ToolTip="写入推荐方法、极性、匹配阈值；若建议了特征框也会填上。试触发已用编辑器，保存后才上产线。" />
+                                </StackPanel>
                                 <!-- 模板专属参数（阈值/范围/边缘图/示教状态）：仅模板匹配方法 -->
                                 <StackPanel>
                                     <StackPanel.Style>
@@ -653,14 +687,15 @@
                                     <WrapPanel>
                                         <StackPanel Margin="0,0,8,0" Width="118">
                                             <TextBlock Text="匹配阈值" Margin="0,0,0,4" FontSize="11"
-                                                       ToolTip="低于该值放弃精修，回退粗角度（无方向）" />
+                                                       ToolTip="低于该值视为精修失败（默认 1019，不再输出无向粗角）" />
                                             <ui:NumberBox Value="{Binding Editor.Template.MatchThreshold}"
                                                           Minimum="0" Maximum="1" SmallChange="0.05"
-                                                          SpinButtonPlacementMode="Compact" />
+                                                          SpinButtonPlacementMode="Compact"
+                                                          ToolTip="低于该值视为精修失败。示教成功会按 0.85×示教峰写入。" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,8,0" Width="118">
                                             <TextBlock Text="精修范围(°)" Margin="0,0,0,4" FontSize="11"
-                                                       ToolTip="粗角度基础上的旋转搜索范围（默认 ±5°）" />
+                                                       ToolTip="配方上限；细长壳体运行时会自动收紧（约 ±3°）" />
                                             <ui:NumberBox Value="{Binding Editor.Template.RefineRangeDeg}"
                                                           Minimum="1" Maximum="45" SmallChange="1"
                                                           SpinButtonPlacementMode="Compact" />
@@ -672,6 +707,10 @@
                                                       ToolTip="混合判决：边缘图定角度 + 原图定头尾。中等纹理目标角度抖动约降至 1/5；弱纹理目标请改用直线拟合" />
                                         </StackPanel>
                                     </WrapPanel>
+                                    <TextBlock FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                                               Text="{Binding TeachPeakHint}"
+                                               Visibility="{Binding TeachPeakHint,
+                                                   Converter={StaticResource NonEmptyToVisibilityConverter}}" />
                                     <!-- 状态：已示教（绿）/ 未示教（警示） -->
                                     <TextBlock FontSize="11" Margin="0,6,0,0" Text="✓ 已示教模板"
                                                Foreground="{DynamicResource SystemFillColorSuccessBrush}">
@@ -751,6 +790,11 @@
                                        Margin="0,4,0,0"
                                        Visibility="{Binding RotationCenterHint,
                                            Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+                            <TextBlock Text="{Binding UndirectedEccentricHint}" FontSize="11" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                       Margin="0,4,0,0"
+                                       Visibility="{Binding UndirectedEccentricHint,
+                                           Converter={StaticResource NonEmptyToVisibilityConverter}}" />
                             </StackPanel>
                         </ui:CardExpander>
 
@@ -780,6 +824,16 @@
                                                       SpinButtonPlacementMode="Compact" />
                                     </StackPanel>
                                 </UniformGrid>
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,8,0,6"
+                                           Text="{Binding OutputOffsetTeachHint}" />
+                                <WrapPanel>
+                                    <ui:Button Content="记下本次为示教输出" Padding="10,3" FontSize="11" Margin="0,0,8,4"
+                                               Command="{Binding RecordTeachOutputCommand}"
+                                               ToolTip="把最近一次成功试触发的第 1 个机器人输出记为示教。库里存的也是补偿后的坐标。" />
+                                    <ui:Button Content="用结果库合格均值建议补偿" Padding="10,3" FontSize="11" Margin="0,0,0,4"
+                                               Command="{Binding SuggestOutputOffsetCommand}"
+                                               ToolTip="合格中位 − 示教 = Δ，叠到当前补偿。同一批再点一次 Δ≈0。需要生产 TRIGGER 写入的结果库，试触发不入库。" />
+                                </WrapPanel>
                             </StackPanel>
                         </ui:CardExpander>
 
@@ -966,7 +1020,7 @@
                                        Command="{Binding SaveCommand}" />
                             <ui:Button Grid.Column="1" Content="测试触发" Margin="8,0,0,0"
                                        Command="{Binding Test.TestTriggerCommand}"
-                                       ToolTip="用磁盘上的配方跑一次完整链路，结果显示在主图像区" />
+                                       ToolTip="用当前编辑器（含未保存修改）跑一次完整链路，不写产量。保存后才上产线。" />
                             <ui:Button Grid.Column="2" Content="复制为新配方" Margin="8,0,0,0" FontSize="11"
                                        Command="{Binding CopyCommand}" />
                             <ui:Button Grid.Column="3" Content="删除" Margin="8,0,0,0"
@@ -974,7 +1028,7 @@
                         </Grid>
                         <TextBlock FontSize="10" Margin="0,8,0,0" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                   Text="测试触发仍用磁盘旧配方（未保存修改有提示）；保存即热加载，触发立即生效。滚轮缩放图像，中键或右键拖动画布。" />
+                                   Text="测试触发走当前编辑器（未保存也能试）；保存才热加载上产线。滚轮缩放图像，中键或右键拖动画布。" />
                     </StackPanel>
                 </Border>
             </Grid>

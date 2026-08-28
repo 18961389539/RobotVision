@@ -34,6 +34,9 @@ public class ProcessHealthTests : IDisposable
         metrics.Record(VisionResult.Fail("A01", VisionErrorCode.NotCalibrated, "cal", 10));
         Assert.Equal(3, metrics.GetConsecutiveFails("A01"));
 
+        metrics.Record(VisionResult.Fail("A01", VisionErrorCode.RefineFailed, "refine", 10));
+        Assert.Equal(4, metrics.GetConsecutiveFails("A01"));
+
         metrics.Record(VisionResult.Success("A01", [new RobotPose(1, 2, 3)], 10));
         Assert.Equal(0, metrics.GetConsecutiveFails("A01"));
     }
@@ -110,6 +113,15 @@ public class ProcessHealthTests : IDisposable
 
         var result = await vision.RunAsync("A01", CancellationToken.None);
         Assert.Equal(VisionErrorCode.ProcessUnhealthy, result.ErrorCode);
+
+        var preview = await vision.RunPreviewAsync(new RecipeConfig
+        {
+            Name = "A01",
+            CameraId = "cam_v",
+            AngleMode = AngleMode.KeyPointLine,
+            Models = ["m.onnx"],
+        }, null, CancellationToken.None);
+        Assert.NotEqual(VisionErrorCode.ProcessUnhealthy, preview.ErrorCode);
 
         var tasks = Enumerable.Range(0, 8)
             .Select(_ => vision.RunAsync("A01", CancellationToken.None))

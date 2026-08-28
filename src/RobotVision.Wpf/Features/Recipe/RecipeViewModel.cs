@@ -38,6 +38,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private readonly CalibrationManager _calibration;
     private readonly AngleStrategyTypeRegistry _angleRegistry;
     private readonly AssetIntegrityChecker _assets;
+    private readonly SqliteResultStore? _sqlite;
     private readonly DispatcherTimer _dirtyTimer;
 
     private RecipeConfig? _baseline;
@@ -92,7 +93,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         LightingManager lighting,
         AngleStrategyTypeRegistry angleRegistry,
         TcpServerManager tcp,
-        AssetIntegrityChecker assets)
+        AssetIntegrityChecker assets,
+        SqliteResultStore? sqlite = null)
     {
         _loader = loader;
         _cfg = cfg;
@@ -101,6 +103,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         _calibration = calibration;
         _angleRegistry = angleRegistry;
         _assets = assets;
+        _sqlite = sqlite;
         Roi = new RecipeRoiEditor(this, cameras);
         Lighting = new RecipeLightingEditor(this, lighting);
         Test = new RecipeTestSession(this, vision, cameras, models, calibration, lighting, tcp);
@@ -153,7 +156,16 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(PrimaryModel));
         OnPropertyChanged(nameof(SecondaryModel));
         OnPropertyChanged(nameof(AssetPinStatus));
+        OnPropertyChanged(nameof(CanTestTrigger));
+        OnPropertyChanged(nameof(TeachPeakHint));
+        OnPropertyChanged(nameof(PolarityLockHint));
+        OnPropertyChanged(nameof(TeachGeometryHint));
+        OnPropertyChanged(nameof(UndirectedEccentricHint));
+        OnPropertyChanged(nameof(OutputOffsetTeachHint));
+        Test.RefreshAdviceCanApply();
         Test.NotifyCanExecuteChanged();
+        RecordTeachOutputCommand.NotifyCanExecuteChanged();
+        SuggestOutputOffsetCommand.NotifyCanExecuteChanged();
     }
 
     void IRecipeWorkspace.CommitEdits() => this.Commit();
@@ -164,7 +176,20 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(UnsavedHint));
     }
 
+    void IRecipeWorkspace.RefreshEditorBindings()
+    {
+        OnPropertyChanged(nameof(Editor));
+        NotifyEditorMutated();
+    }
+
     void IRecipeWorkspace.OnTestStarting() => ShowTestImage = true;
+
+    void IRecipeWorkspace.ApplySuggestedFeatureRoi(Roi roi)
+    {
+        Editor.Template.Roi = roi;
+        Roi.NotifyFromEditor();
+        NotifyEditorMutated();
+    }
 
     public void RefreshCameras()
     {
@@ -191,12 +216,24 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    public string RotationCenterHint =>
+    public string RotationCenterHint
+    {
+        get
+        {
+            if (Editor.RotationCompensation != RotationCompensationMode.EccentricTool)
+                return "";
+            if (string.IsNullOrWhiteSpace(Editor.StationId) ||
+                !_calibration.RotationCenterProfiles.Any(p =>
+                    string.Equals(p.StationId, Editor.StationId, StringComparison.OrdinalIgnoreCase)))
+                return $"工位 {Editor.StationId ?? "（空）"} 未做旋转轴心标定：偏心补偿保存/触发将被拒绝，请先在标定向导完成轴心标定";
+            return "";
+        }
+    }
+
+    public string UndirectedEccentricHint =>
         Editor.RotationCompensation == RotationCompensationMode.EccentricTool &&
-        (string.IsNullOrWhiteSpace(Editor.StationId) ||
-         !_calibration.RotationCenterProfiles.Any(p =>
-             string.Equals(p.StationId, Editor.StationId, StringComparison.OrdinalIgnoreCase)))
-            ? $"工位 {Editor.StationId ?? "（空）"} 未做旋转轴心标定：偏心补偿保存/触发将被拒绝，请先在标定向导完成轴心标定"
+        RecipeLoader.HasUndirectedAngle(Editor)
+            ? "无向角（最小外接矩形或直线拟合）不能与偏心工具同时使用，保存将被拒绝。请改用分割+精修有向方法或关闭偏心补偿。"
             : "";
 
     public string MappingHint
@@ -232,11 +269,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     public string AngleModeHint => Editor.AngleMode switch
     {
-        AngleMode.MaskMinAreaRect => "最小外接矩形角度为 [0,180)，无头尾方向；偏心工具补偿可能差 180°",
+        AngleMode.MaskMinAreaRect => "最小外接矩形角度为 [0,180)，无头尾。与偏心工具同时保存会被拒绝。",
         AngleMode.DualCenterLine => "默认全局就近配对，多目标间距接近时可能配错；开「窗口配对」后 B 只在 A 外扩窗口内检测，多目标不配错",
-        AngleMode.MaskTemplate => Editor.Template.RefineMethod == SegmentRefineMethod.Template
-            ? "模板匹配失败会回退粗角度 [0,180)（无方向）；示教可单独框选特征（不必等于检测 ROI）；须与生产同一套照明"
-            : "分割给粗框，精修方法在下方选择。非模板方法免示教模板；精修失败回退粗角度 [0,180)",
+        AngleMode.MaskTemplate => "分割给粗框，精修过门才输出有向角。失败默认 1019。示教/试触发会赛马推荐并锁定极性；试触发走编辑器，保存后才上产线。",
         AngleMode.DualBlobCenterLine => "主BLOB质心定位、主→次质心定向（有方向）；次BLOB缺失该目标不输出；无需模型",
         _ => "",
     };
@@ -247,12 +282,12 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             : Editor.Template.RefineMethod switch
             {
                 SegmentRefineMethod.LineFit =>
-                    "直线拟合吃掩码长边，角度无方向 [0,180)，不需要示教模板。",
+                    "直线拟合吃掩码长边（会先剔凸起），角度无方向 [0,180)。拟合失败默认 1019。与偏心工具同时保存会被拒绝。",
                 SegmentRefineMethod.CentroidHoleLine =>
-                    "质心连到掩码内最大孔/槽，有头尾。分割须能画出孔或槽。免示教模板。",
+                    "质心连到掩码内最大孔/槽，有头尾。分割须能画出孔或槽。失败默认 1019。",
                 SegmentRefineMethod.CaliperTab =>
-                    "卡尺自动放在两条长边上（躲开端头与凸起），短轴中心取两线中线；黄线指向暗凸起一侧。配方测试画面会叠加青色探针、抓边点与品红拟合边；监控页默认不画。切到此方法后抓取原点与模板中心不同，需重新对示教。",
-                _ => "",
+                    "卡尺放在壳体长边上（短轴中心取两线中线）；黄线指向暗凸起一侧。配方测试会叠加探针。失败默认 1019。切到此方法后抓取原点与模板中心不同，需重新对示教。",
+                _ => "模板匹配定头尾；若卡尺成功则用卡尺 XY/无向角与模板融合。匹配失败默认 1019。",
             };
 
     public IEnumerable<RecipeListItem> VisibleRecipes =>
@@ -266,10 +301,13 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         _baseline is not null && !RecipeCompare.Same(Editor, _baseline);
 
     public string UnsavedHint => HasUnsavedChanges
-        ? "有未保存的修改：测试触发仍用磁盘旧配方，切换/刷新将丢弃"
+        ? "有未保存的修改：试触发已用当前编辑器，保存后才上产线；切换/刷新将丢弃"
         : "";
 
-    public bool CanTestTrigger => Selected is { IsValid: true };
+    public bool CanTestTrigger =>
+        !string.IsNullOrWhiteSpace(Editor.CameraId) &&
+        (Editor.AngleMode == AngleMode.DualBlobCenterLine ||
+         (Editor.Models.Count > 0 && !string.IsNullOrWhiteSpace(Editor.Models[0])));
 
     public IReadOnlyList<EnumItem<AngleMode>> AngleModeOptions =>
         _angleRegistry.Factories
@@ -323,6 +361,46 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     ];
 
     public bool IsTemplateMethod => Editor.Template.RefineMethod == SegmentRefineMethod.Template;
+
+    public string TeachGeometryHint =>
+        Editor.Template.TeachAreaPx > 1
+            ? $"示教几何：面积 {Editor.Template.TeachAreaPx:0} px²，轴比 {Editor.Template.TeachAspect:0.00}（面积 {Editor.Template.AreaRatioLo:0.00}~{Editor.Template.AreaRatioHi:0.00} 倍、轴比 {Editor.Template.AspectRatioLo:0.00}~{Editor.Template.AspectRatioHi:0.00} 倍过门）"
+            : "未记示教几何：示教模板或采用推荐后写入面积/轴比窗口；期望件数 0 表示不检查件数。";
+
+    public string OutputOffsetTeachHint =>
+        Editor.OutputOffset.HasTeachOutput
+            ? $"已记示教输出 X={Editor.OutputOffset.TeachX:0.###} Y={Editor.OutputOffset.TeachY:0.###} Rz={Editor.OutputOffset.TeachRzDeg:0.##}°"
+            : "尚未记下示教输出。请先成功试触发，再点「记下本次为示教输出」。";
+
+    [ObservableProperty]
+    private string _recipeHealthHint = "";
+
+    public string TeachPeakHint =>
+        Editor.Template.TeachPeakScore >= 0.3
+            ? $"示教峰 NCC {Editor.Template.TeachPeakScore:0.00} → 建议匹配阈值 {TemplateOptions.MatchThresholdFromTeachPeak(Editor.Template.TeachPeakScore):0.00}"
+            : "";
+
+    public string PolarityLockHint
+    {
+        get
+        {
+            var edge = Editor.Template.HousingEdgePolarity switch
+            {
+                HousingEdgePolarity.BrightToDark => "亮场",
+                HousingEdgePolarity.DarkToBright => "暗场",
+                _ => "",
+            };
+            var tab = Editor.Template.TabPolarity switch
+            {
+                TabPolarityLock.PlusShortAxis => "凸起在+短轴",
+                TabPolarityLock.MinusShortAxis => "凸起在−短轴",
+                _ => "",
+            };
+            if (edge.Length == 0 && tab.Length == 0)
+                return "";
+            return "已锁定：" + string.Join("，", new[] { edge, tab }.Where(s => s.Length > 0));
+        }
+    }
 
     public bool ShowDualCropExpand => IsDualMode && Editor.DualModel.CropWindowPairing;
 
@@ -419,7 +497,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
         OnPropertyChanged(nameof(CanTestTrigger));
+        Test.ClearAdvice();
         Test.NotifyCanExecuteChanged();
+        RecipeHealthHint = "";
         Message = "新建配方：填写名称与参数后保存";
     }
 
@@ -439,7 +519,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
         OnPropertyChanged(nameof(CanTestTrigger));
+        Test.ClearAdvice();
         Test.NotifyCanExecuteChanged();
+        RecipeHealthHint = "";
         Message = $"已复制 {source.Name}：改名后保存即新配方";
     }
 
@@ -495,6 +577,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             OnPropertyChanged(nameof(HasUnsavedChanges));
             OnPropertyChanged(nameof(UnsavedHint));
             Refresh(Editor.Name, reloadEditor: false, ignoreUnsaved: true);
+            RefreshRecipeHealth();
             Message = savedMessage;
         }
         catch (Exception ex)
@@ -537,6 +620,71 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     [RelayCommand]
     private void OpenFolder() => Explorer.OpenFolder(_loader.Folder);
+
+    private bool CanRecordTeachOutput =>
+        Test.LastPreview is { Ok: true, Poses.Count: > 0 };
+
+    [RelayCommand(CanExecute = nameof(CanRecordTeachOutput))]
+    private void RecordTeachOutput()
+    {
+        if (Test.LastPreview is not { Ok: true, Poses.Count: > 0 } preview)
+            return;
+        var p = preview.Poses[0];
+        Editor.OutputOffset.TeachX = p.X;
+        Editor.OutputOffset.TeachY = p.Y;
+        Editor.OutputOffset.TeachRzDeg = p.AngleDeg;
+        NotifyEditorMutated();
+        Message = $"已记下示教输出 X={p.X:0.###} Y={p.Y:0.###} Rz={p.AngleDeg:0.##}°（未保存）";
+    }
+
+    private bool CanSuggestOutputOffset =>
+        _sqlite is not null && Editor.OutputOffset.HasTeachOutput;
+
+    [RelayCommand(CanExecute = nameof(CanSuggestOutputOffset))]
+    private void SuggestOutputOffset()
+    {
+        if (_sqlite is null || !Editor.OutputOffset.HasTeachOutput)
+            return;
+        var name = RecipeLoader.IsValidRecipeName(_originalName) ? _originalName : Editor.Name;
+        if (!RecipeLoader.IsValidRecipeName(name))
+        {
+            Message = "请先保存配方，再按配方名取结果库合格均值";
+            return;
+        }
+
+        try
+        {
+            var ok = _sqlite.QueryOkRobotPoses(new ResultDbQuery { Recipe = name, Limit = 2000 });
+            var teach = new RobotPose(
+                Editor.OutputOffset.TeachX!.Value,
+                Editor.OutputOffset.TeachY!.Value,
+                Editor.OutputOffset.TeachRzDeg!.Value);
+            var delta = OutputOffsetOptions.SuggestDelta(teach, ok);
+            if (delta is null)
+            {
+                Message = $"合格样本不足 8 条（当前 {ok.Count}），无法建议补偿。生产 TRIGGER 写入结果库后重试。";
+                return;
+            }
+
+            var nextX = Editor.OutputOffset.X + delta.X;
+            var nextY = Editor.OutputOffset.Y + delta.Y;
+            if (Math.Abs(nextX) > 100 || Math.Abs(nextY) > 100 || Math.Abs(delta.RzDeg) > 180)
+            {
+                Message =
+                    $"建议补偿超限（ΔX={delta.X:0.###} ΔY={delta.Y:0.###} ΔRz={delta.RzDeg:0.##}°），请检查示教或重标定，不要用大补偿掩盖标定错误。";
+                return;
+            }
+
+            Editor.OutputOffset.ApplySuggestedDelta(delta, teach, ok);
+            NotifyEditorMutated();
+            Message =
+                $"已叠合格中位差 ΔX={delta.X:0.###} ΔY={delta.Y:0.###} ΔRz={delta.RzDeg:0.##}°。同一批数据再点一次不会叠两次；新数据进来请先重新记下示教。未保存。";
+        }
+        catch (Exception ex)
+        {
+            Message = $"读取结果库失败：{ex.Message}";
+        }
+    }
 
     [RelayCommand]
     private void PinAssets()
@@ -614,6 +762,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
         LoadIntoEditor(value.Name);
         _lastConfirmed = value;
+        Test.ClearAdvice();
     }
 
     private void OnRoiOrTestChanged(object? sender, PropertyChangedEventArgs e)
@@ -628,6 +777,12 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             OnPropertyChanged(nameof(HasAnyImage));
             OnPropertyChanged(nameof(ShowTestImageViewer));
             OnPropertyChanged(nameof(ShowRoiImageViewer));
+        }
+
+        if (e.PropertyName == nameof(RecipeTestSession.LastPreview))
+        {
+            RecordTeachOutputCommand.NotifyCanExecuteChanged();
+            SuggestOutputOffsetCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -674,6 +829,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             OnPropertyChanged(nameof(UnsavedHint));
             OnPropertyChanged(nameof(CanTestTrigger));
             Test.NotifyCanExecuteChanged();
+            RefreshRecipeHealth();
         }
     }
 
@@ -697,6 +853,40 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(RefineMethodHint));
         OnPropertyChanged(nameof(MappingHint));
         OnPropertyChanged(nameof(AssetPinStatus));
+        OnPropertyChanged(nameof(TeachPeakHint));
+        OnPropertyChanged(nameof(PolarityLockHint));
+        OnPropertyChanged(nameof(TeachGeometryHint));
+        OnPropertyChanged(nameof(UndirectedEccentricHint));
+        OnPropertyChanged(nameof(OutputOffsetTeachHint));
+        OnPropertyChanged(nameof(CanTestTrigger));
+    }
+
+    private void RefreshRecipeHealth()
+    {
+        RecipeHealthHint = "";
+        if (_sqlite is null)
+            return;
+        var name = RecipeLoader.IsValidRecipeName(_originalName) ? _originalName : Editor.Name;
+        if (!RecipeLoader.IsValidRecipeName(name))
+            return;
+        try
+        {
+            var q = new ResultDbQuery { Recipe = name };
+            var total = _sqlite.Count(q);
+            if (total == 0)
+                return;
+            var hints = RecipeHealthAdvisor.Analyze(
+                total,
+                _sqlite.CountByCode(q),
+                _sqlite.QueryAngles(q with { OkOnly = true }),
+                _sqlite.QuerySpread(q with { OkOnly = true }),
+                Editor.Template.TeachPeakScore);
+            RecipeHealthHint = string.Join(Environment.NewLine, hints.Select(h => h.Message));
+        }
+        catch (Exception)
+        {
+            // 结果库读失败不影响编辑
+        }
     }
 
     private RecipeListItem DescribeItem(string name)

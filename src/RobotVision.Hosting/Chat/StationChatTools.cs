@@ -407,6 +407,9 @@ public sealed class StationChatTools
                     var angles = _sqlite.QueryAngles(query);
                     var codes = _sqlite.CountByCode(query);
                     var rows = _sqlite.Query(query);
+                    var okQuery = query with { OkOnly = true, Code = null };
+                    var okAngles = _sqlite.QueryAngles(okQuery);
+                    var okSpread = _sqlite.QuerySpread(okQuery);
                     return Task.FromResult(Ok(new
                     {
                         ok = true,
@@ -416,6 +419,9 @@ public sealed class StationChatTools
                         yield = YieldPct(summary),
                         summary,
                         spread,
+                        hints = RecipeHealthAdvisor.Analyze(
+                            summary.Total, codes, okAngles, okSpread, TeachPeak(query.Recipe))
+                            .Select(h => new { h.Id, h.Severity, h.Message }),
                         histogram = ResultAnalysis.BuildHistogram(angles, bins),
                         codes = codes.Select(c => new
                         {
@@ -458,6 +464,20 @@ public sealed class StationChatTools
 
     private static double? YieldPct(ResultDbSummary summary) =>
         summary.Total == 0 ? null : Math.Round(100.0 * summary.Ok / summary.Total, 2);
+
+    private double TeachPeak(string? recipeName)
+    {
+        if (string.IsNullOrWhiteSpace(recipeName) || !RecipeLoader.IsValidRecipeName(recipeName))
+            return 0;
+        try
+        {
+            return _recipes.Get(recipeName).Template.TeachPeakScore;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
 
     private static object MapRecipeStat(ResultRecipeStat s) => new
     {

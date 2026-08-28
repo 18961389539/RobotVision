@@ -76,6 +76,7 @@
                     </Grid.RowDefinitions>
 
                     <ui:Card Grid.Row="0" Margin="0,8,0,8" Padding="16,10">
+                        <StackPanel>
                         <UniformGrid Columns="6">
                             <StackPanel>
                                 <TextBlock Text="总触发" FontSize="11"
@@ -114,6 +115,10 @@
                                 <TextBlock Text="{Binding AvgMsText}" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
                             </StackPanel>
                         </UniformGrid>
+                        <TextBlock Text="{Binding HealthHint}" FontSize="12" TextWrapping="Wrap" Margin="0,10,0,0"
+                                   Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                   Visibility="{Binding HasHealthHint, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        </StackPanel>
                     </ui:Card>
 
                     <Grid Grid.Row="1">

@@ -63,6 +63,26 @@ public class AngleGeometryTests
         Assert.Equal(-179.5, AngleGeometry.NormalizeSignedDeg(180.5), 1e-9);
     }
 
+    [Theory]
+    [InlineData(10, 10, 10)]
+    [InlineData(10, -170, -170)]
+    [InlineData(0, 180, 180)]
+    [InlineData(30, 29.5, 30)]
+    public void FuseDirected_GeometryPlusTemplateOrientation(double geo, double tpl, double expected)
+    {
+        var fused = AngleGeometry.FuseDirected(geo, tpl);
+        Assert.True(Math.Abs(AngleGeometry.NormalizeSignedDeg(fused - expected)) < 0.01,
+            $"geo={geo} tpl={tpl} → {fused}，期望 {expected}");
+    }
+
+    [Fact]
+    public void UndirectedDeltaDeg_CapsAt90()
+    {
+        Assert.Equal(0, AngleGeometry.UndirectedDeltaDeg(10, 10), 1e-9);
+        Assert.Equal(10, AngleGeometry.UndirectedDeltaDeg(0, 10), 1e-9);
+        Assert.Equal(20, AngleGeometry.UndirectedDeltaDeg(10, 170), 1e-9);
+    }
+
     private static Point2f[] RotatedRectPoints(double cx, double cy, double w, double h, double deg)
     {
         var rad = deg * Math.PI / 180.0;

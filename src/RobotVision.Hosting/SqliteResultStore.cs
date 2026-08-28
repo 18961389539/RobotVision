@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
+using RobotVision.Core.Models;
 
 namespace RobotVision.Hosting;
 
@@ -287,6 +288,29 @@ public sealed class SqliteResultStore : IDisposable
             while (reader.Read())
                 points.Add(new ResultXyPoint(reader.GetDouble(0), reader.GetDouble(1), reader.GetInt32(2)));
             return points;
+        }
+    }
+
+    /// <summary>合格行的机器人输出（已含 OutputOffset），供首件补偿建议。</summary>
+    public IReadOnlyList<RobotPose> QueryOkRobotPoses(ResultDbQuery? query = null)
+    {
+        query = (query ?? new ResultDbQuery()) with { OkOnly = true };
+        lock (_sync)
+        {
+            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
+                return [];
+            EnsureOpen();
+            using var cmd = _conn!.CreateCommand();
+            var where = new StringBuilder("WHERE 1=1");
+            ApplyFilters(cmd, query, where);
+            where.Append(" AND x IS NOT NULL AND y IS NOT NULL AND angle IS NOT NULL");
+            var limit = query.Limit is > 0 and <= 10_000 ? query.Limit : 2000;
+            cmd.CommandText = $"SELECT x, y, angle FROM results {where} LIMIT {limit};";
+            using var reader = cmd.ExecuteReader();
+            var poses = new List<RobotPose>();
+            while (reader.Read())
+                poses.Add(new RobotPose(reader.GetDouble(0), reader.GetDouble(1), reader.GetDouble(2)));
+            return poses;
         }
     }
 

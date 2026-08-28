@@ -1587,7 +1587,9 @@
         "dependencies": {
           "CommunityToolkit.Mvvm": "[8.3.2, )",
           "ImageViewerControl": "[1.0.0, )",
+          "Markdig": "[0.38.0, )",
           "Microsoft.Extensions.Hosting": "[8.0.1, )",
+          "Microsoft.Web.WebView2": "[1.0.2903.40, )",
           "OxyPlot.Wpf": "[2.2.0, )",
           "RobotVision.Hosting": "[1.0.0, )",
           "WPF-UI": "[3.1.1, )"
@@ -1641,6 +1643,12 @@
         "requested": "[1.0.0-rc.37, )",
         "resolved": "1.0.0-rc.37",
         "contentHash": "03Ui4e6Mq7K8XjAg+CjKllIR4GRyGr3RoGsaV/Pm+p1iheKhlneQOvPmrMLpNrbb/9xtVahDDloQT34JknVs6Q=="
+      },
+      "Markdig": {
+        "type": "CentralTransitive",
+        "requested": "[0.38.0, )",
+        "resolved": "0.38.0",
+        "contentHash": "zKy3JFjQvr1wbuMtbfcZVjNNCIqHxSCjGMq/CBcyNsY/MPsxqcS3o8M7CZ2kcMGGIw5LI2ZZd8rFUaFeV6SvrQ=="
       },
       "Microsoft.Data.Sqlite": {
         "type": "CentralTransitive",
@@ -1743,6 +1751,12 @@
           "Microsoft.Extensions.Logging.Configuration": "8.0.1",
           "Microsoft.Extensions.Options": "8.0.2"
         }
+      },
+      "Microsoft.Web.WebView2": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.2903.40, )",
+        "resolved": "1.0.2903.40",
+        "contentHash": "THrzYAnJgE3+cNH+9Epr44XjoZoRELdVpXlWGPs6K9C9G6TqyDfVCeVAR/Er8ljLitIUX5gaSkPsy9wRhD1sgQ=="
       },
       "OpenCvSharp4": {
         "type": "CentralTransitive",

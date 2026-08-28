@@ -10,6 +10,63 @@ public sealed record PixelPose(double Cx, double Cy, double AngleDeg, double Sco
     /// <summary>检测叠加数据（可选）：mask 轮廓/检测框/关键点，全图像素坐标。
     /// 仅供画面绘制（OverlayDrawer），不参与位姿计算与标定变换。</summary>
     public PoseOverlay? Overlay { get; init; }
+
+    /// <summary>分割实例置信度；非分割策略为 null。对外 <see cref="Score"/> 在精修模式下是精修质量。</summary>
+    public double? SegmentScore { get; init; }
+
+    /// <summary>
+    /// false = 分割到了但精修未过门，不得输出给机器人（画面仍可画，箭头仅供对照）。
+    /// 默认 true，其它角度模式行为不变。
+    /// </summary>
+    public bool Usable { get; init; } = true;
+}
+
+/// <summary>生产输出门：快照可含不可用位姿，机器人只收 Usable。</summary>
+public static class PixelPoseOutput
+{
+    /// <summary>无目标 → 1007；有分割但无一精修过门 → 1019；否则可输出。</summary>
+    public static VisionErrorCode? RejectReason(IReadOnlyList<PixelPose> poses)
+    {
+        if (poses.Count == 0)
+            return VisionErrorCode.NoTargetFound;
+        for (var i = 0; i < poses.Count; i++)
+        {
+            if (poses[i].Usable)
+                return null;
+        }
+
+        return VisionErrorCode.RefineFailed;
+    }
+
+    public static List<PixelPose> UsableOnly(IReadOnlyList<PixelPose> poses)
+    {
+        var list = new List<PixelPose>(poses.Count);
+        for (var i = 0; i < poses.Count; i++)
+        {
+            if (poses[i].Usable)
+                list.Add(poses[i]);
+        }
+
+        return list;
+    }
+
+    /// <summary>期望件数 &gt;0 且过门件数不符时，全部标不可用（TRIGGER 1019，画面仍能看到多检）。</summary>
+    public static void EnforceExpectedCount(IList<PixelPose> poses, int expectedCount)
+    {
+        if (expectedCount <= 0 || poses.Count == 0)
+            return;
+        var usable = 0;
+        for (var i = 0; i < poses.Count; i++)
+        {
+            if (poses[i].Usable)
+                usable++;
+        }
+
+        if (usable == expectedCount)
+            return;
+        for (var i = 0; i < poses.Count; i++)
+            poses[i] = poses[i] with { Usable = false };
+    }
 }
 
 /// <summary>全图像素坐标点。</summary>
@@ -50,6 +107,13 @@ public sealed record PoseOverlay
 
     /// <summary>类别标签（模型输出）；纯图像处理模式为 null。</summary>
     public string? Label { get; init; }
+
+    /// <summary>分割位掩码（bbox 尺寸、LSB-first）；试触发赛马孔槽用，可空。</summary>
+    public byte[]? BitPackedMask { get; init; }
+
+    public int MaskWidth { get; init; }
+
+    public int MaskHeight { get; init; }
 }
 
 /// <summary>叠加调试线段。</summary>

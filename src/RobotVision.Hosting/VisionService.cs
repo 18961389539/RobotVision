@@ -166,6 +166,24 @@ public sealed class VisionService(
             }, ct);
     }
 
+    /// <summary>
+    /// 配方页试触发：用内存中的编辑器副本跑完整链路，不读磁盘、不写产量/1018、不留成功图。
+    /// PLC TRIGGER 仍走 <see cref="RunAsync(string, TcpClientPose?, CancellationToken)"/>。
+    /// </summary>
+    public Task<VisionResult> RunPreviewAsync(
+        RecipeConfig recipe, TcpClientPose? pose, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(recipe);
+        var clone = recipe.Clone();
+        var name = RecipeLoader.IsValidRecipeName(clone.Name) ? clone.Name : "preview";
+        clone.Name = name;
+        EnsureHealthRestored();
+        return Scheduler.RunAsync(name,
+            (_, token) => ProcessCoreInnerAsync(name, pose, token, overlay: clone, preview: true),
+            _ => { },
+            ct);
+    }
+
     /// <summary>从配方解析相机/工位（供结果日志关联上下文；未知配方返回 null，不影响日志）。</summary>
     private (string CameraId, string StationId)? LookupContext(string recipeName)
     {
@@ -180,7 +198,9 @@ public sealed class VisionService(
         }
     }
 
-    private async Task<VisionResult> ProcessCoreInnerAsync(string recipeName, TcpClientPose? pose, CancellationToken ct)
+    private async Task<VisionResult> ProcessCoreInnerAsync(
+        string recipeName, TcpClientPose? pose, CancellationToken ct,
+        RecipeConfig? overlay = null, bool preview = false)
     {
         var stopwatch = Stopwatch.StartNew();
         using var processing = Scheduler.BeginExecution();
@@ -192,16 +212,24 @@ public sealed class VisionService(
         FailureContext? failureCtx = null;
         try
         {
-            var recipe = recipes.Get(recipeName);
-            failureCtx = BuildFailureContext(recipe);
+            RecipeConfig recipe;
+            if (overlay is not null)
+            {
+                RecipeLoader.Validate(overlay);
+                recipes.ValidateReferences(overlay);
+                recipe = overlay;
+            }
+            else
+                recipe = recipes.Get(recipeName);
+            failureCtx = BuildFailureContext(recipe, preview);
 
-            // 停用配方（Enabled=false）拒绝触发，文件保留
-            if (!recipe.Enabled)
+            // 停用配方（Enabled=false）拒绝触发，文件保留；试触发仍可跑编辑器以便调试停用配方
+            if (!preview && !recipe.Enabled)
                 throw new InvalidRecipeException(recipeName, "配方已停用（Enabled=false）",
                     VisionErrorCode.RecipeDisabled);
 
             EnsureHealthRestored();
-            if (health?.IsInhibited(_metrics, recipeName) == true)
+            if (!preview && health?.IsInhibited(_metrics, recipeName) == true)
                 return VisionResult.Fail(recipeName, VisionErrorCode.ProcessUnhealthy,
                     "PROCESS_UNHEALTHY", stopwatch.Elapsed.TotalMilliseconds);
 
@@ -307,19 +335,24 @@ public sealed class VisionService(
                 RefineMs = refineMs,
             });
 
-            if (pixelPoses.Count == 0)
+            var reject = PixelPoseOutput.RejectReason(pixelPoses);
+            if (reject is { } missCode)
             {
                 var missElapsed = stopwatch.Elapsed.TotalMilliseconds;
-                var miss = VisionResult.Fail(recipeName, VisionErrorCode.NoTargetFound,
-                    "未检出目标", missElapsed);
-                failureImages.Save(recipeName, undistorted, miss, failureCtx);
-                log.LogInformation("配方 {Recipe}: 未检出目标，总耗时 {Elapsed:0}ms（{Stages}）",
-                    recipeName, missElapsed,
-                    Stages(missElapsed));
+                var missMessage = missCode == VisionErrorCode.RefineFailed
+                    ? "分割已检出但精修未通过（头尾不可判或匹配失败）"
+                    : "未检出目标";
+                var miss = VisionResult.Fail(recipeName, missCode, missMessage, missElapsed);
+                if (!preview)
+                    failureImages.Save(recipeName, undistorted, miss, failureCtx);
+                log.LogInformation("配方 {Recipe}: {Message}，总耗时 {Elapsed:0}ms（{Stages}）",
+                    recipeName, missMessage, missElapsed, Stages(missElapsed));
                 return miss;
             }
 
-            var robotPoses = pixelPoses
+            var usablePoses = PixelPoseOutput.UsableOnly(pixelPoses);
+
+            var robotPoses = usablePoses
                 .Select(p => mappingMode switch
                 {
                     StationMappingMode.Polynomial =>
@@ -333,7 +366,7 @@ public sealed class VisionService(
                 .ToList();
 
             // 与 Poses 一一对应的置信度透传（UI/留存可用，TCP 应答格式不含）
-            var confidences = pixelPoses.Select(p => p.Score).ToList();
+            var confidences = usablePoses.Select(p => p.Score).ToList();
 
             var elapsed = stopwatch.Elapsed.TotalMilliseconds;
             log.LogInformation("配方 {Recipe}: 检出 {Count} 个目标，总耗时 {Elapsed:0}ms（{Stages}）",
@@ -345,7 +378,7 @@ public sealed class VisionService(
 
             // 成功产品现场图留存（开关 CaptureSuccess.Enabled，默认关）：
             // 克隆在调用线程完成，PNG 编码/写盘在后台线程池，不阻塞管线
-            if (captures is not null)
+            if (!preview && captures is not null)
                 captures.Save(recipeName, undistorted, robotPoses, success, failureCtx);
 
             return success;
@@ -370,7 +403,7 @@ public sealed class VisionService(
         {
             var fail = VisionResult.Fail(recipeName, vex.ErrorCode, vex.Message,
                 stopwatch.Elapsed.TotalMilliseconds);
-            if (undistorted is not null)
+            if (undistorted is not null && !preview)
                 failureImages.Save(recipeName, undistorted, fail, failureCtx);
             return fail;
         }
@@ -379,7 +412,7 @@ public sealed class VisionService(
             log.LogError(ex, "配方 {Recipe} 处理异常", recipeName);
             var fail = VisionResult.Fail(recipeName, VisionErrorCode.InternalError, ex.Message,
                 stopwatch.Elapsed.TotalMilliseconds);
-            if (undistorted is not null)
+            if (undistorted is not null && !preview)
                 failureImages.Save(recipeName, undistorted, fail, failureCtx);
             return fail;
         }
@@ -445,14 +478,14 @@ public sealed class VisionService(
     }
 
     /// <summary>失败留存诊断上下文（相机/工位/模型/阈值/触发源，写进 JSON 元数据）。</summary>
-    private static FailureContext BuildFailureContext(RecipeConfig recipe) => new(
+    private static FailureContext BuildFailureContext(RecipeConfig recipe, bool preview = false) => new(
         CameraId: recipe.CameraId,
         StationId: recipe.StationId,
         Models: recipe.Models.Count > 0 ? string.Join("|", recipe.Models) : null,
         AngleMode: recipe.AngleMode.ToString(),
         Confidence: recipe.Confidence,
         Iou: recipe.Iou,
-        Source: "pipeline");
+        Source: preview ? "recipe-preview" : "pipeline");
 
     private void PublishSnapshot(string recipeName, VisionImage undistorted, IReadOnlyList<PixelPose> poses)
     {

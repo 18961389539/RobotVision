@@ -130,7 +130,7 @@ public class MaskTemplateJitterTests(ITestOutputHelper output)
                     // coarseAngle = trueAngle + coarseErr（与分割粗角同语义）
                 {
                     var contour = BuildContour(trueAngle);
-                    var (ang, _) = MaskTemplateMatcher.RefineByLineFit(contour, trueAngle + coarseErr);
+                    var (ang, _, _) = MaskTemplateMatcher.RefineByLineFit(contour, trueAngle + coarseErr);
                     match = new MaskTemplateMatchResult(1.0, ang - (trueAngle + coarseErr), new OpenCvSharp.Point2d(0, 0));
                     break;
                 }

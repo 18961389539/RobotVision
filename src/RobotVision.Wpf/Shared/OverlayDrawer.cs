@@ -1,6 +1,7 @@
 ﻿using OpenCvSharp;
 using RobotVision.Core.Models;
 using RobotVision.Infrastructure;
+using WpfColor = System.Windows.Media.Color;
 
 namespace RobotVision.WpfHost.Shared;
 
@@ -49,14 +50,34 @@ public static class OverlayDrawer
             Cv2.ArrowedLine(image, center, tip, Scalar.OrangeRed, 2, LineTypes.AntiAlias, 0, 0.35);
             Cv2.DrawMarker(image, center, Scalar.Lime, MarkerTypes.Cross, 18, 2, LineTypes.AntiAlias);
 
-            var label = $"#{i} {pose.Score:F2}";
-            var origin = new Point(center.X + 10, center.Y - 10);
-            // 黑色描边 + 白色文字，保证任意底色可读
-            Cv2.PutText(image, label, new Point(origin.X + 1, origin.Y + 1),
-                HersheyFonts.HersheyPlain, 1.3, Scalar.Black, 3, LineTypes.AntiAlias);
-            Cv2.PutText(image, label, origin,
-                HersheyFonts.HersheyPlain, 1.3, Scalar.White, 1, LineTypes.AntiAlias);
+            var label = pose.Usable
+                ? $"#{i} {pose.Score:F2}"
+                : $"#{i} NG {pose.Score:F2}";
+            DrawLabel(image, new Point(center.X + 10, center.Y - 10), label, 1.3,
+                pose.Usable ? Scalar.White : Scalar.OrangeRed);
         }
+    }
+
+    /// <summary>相对比例 ROI（配方特征框）。橙色框 + 可选标签。</summary>
+    public static void DrawNormalizedRoi(VisionImage image, Roi roi, string? label = null)
+    {
+        using var mat = VisionImageCv.AsMat(image);
+        DrawNormalizedRoi(mat, roi, label);
+    }
+
+    public static void DrawNormalizedRoi(Mat image, Roi roi, string? label = null, Scalar? color = null)
+    {
+        var c = color ?? Scalar.Orange;
+        var x = (int)Math.Round(roi.X * image.Width);
+        var y = (int)Math.Round(roi.Y * image.Height);
+        var w = Math.Max(1, (int)Math.Round(roi.Width * image.Width));
+        var h = Math.Max(1, (int)Math.Round(roi.Height * image.Height));
+        Cv2.Rectangle(image, new Rect(x, y, w, h), c, 2, LineTypes.AntiAlias);
+        if (string.IsNullOrEmpty(label))
+            return;
+        const double fontScale = 1.1;
+        var origin = new Point(x + 2, Math.Max(18, y - 4));
+        DrawLabel(image, origin, label, fontScale);
     }
 
     /// <summary>检测叠加（位姿标记下层）：mask 半透明填充 + 轮廓线，检测框，关键点骨架。
@@ -150,6 +171,34 @@ public static class OverlayDrawer
             var color = dot.Kind == OverlayDotKind.Rejected ? RejectedDotColor : InlierDotColor;
             Cv2.Circle(image, ToPoint(dot.At), 3, color, -1, LineTypes.AntiAlias);
         }
+    }
+
+    /// <summary>深色底 + 白字黑描边；中文走 WPF 字体（Hershey 会变成问号）。</summary>
+    private static void DrawLabel(Mat image, Point origin, string text, double scale, Scalar? fill = null)
+    {
+        if (MatLabelDrawer.ContainsNonAscii(text))
+        {
+            var px = (float)(scale * 11.0);
+            var color = fill is { } c
+                ? WpfColor.FromRgb((byte)c.Val2, (byte)c.Val1, (byte)c.Val0)
+                : WpfColor.FromRgb(255, 255, 255);
+            MatLabelDrawer.DrawBaseline(image, origin, text, px, color);
+            return;
+        }
+
+        const int thickness = 1;
+        const int pad = 3;
+        var font = HersheyFonts.HersheyPlain;
+        var size = Cv2.GetTextSize(text, font, scale, thickness, out var baseline);
+        var x1 = origin.X - pad;
+        var y1 = origin.Y - size.Height - pad;
+        var x2 = origin.X + size.Width + pad;
+        var y2 = origin.Y + baseline + pad;
+        Cv2.Rectangle(image, new Point(x1, y1), new Point(x2, y2), new Scalar(24, 24, 24), -1, LineTypes.AntiAlias);
+        var textColor = fill ?? Scalar.White;
+        Cv2.PutText(image, text, new Point(origin.X + 1, origin.Y + 1), font, scale, Scalar.Black, thickness + 2,
+            LineTypes.AntiAlias);
+        Cv2.PutText(image, text, origin, font, scale, textColor, thickness, LineTypes.AntiAlias);
     }
 
     private static Point ToPoint(PixelPoint point) =>

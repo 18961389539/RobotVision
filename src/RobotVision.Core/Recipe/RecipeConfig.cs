@@ -103,6 +103,32 @@ public sealed class SegmentationOptions
     };
 }
 
+/// <summary>壳体边缘在剖面里的极性（卡尺从外侧向中心抓第一条边）。</summary>
+public enum HousingEdgePolarity
+{
+    /// <summary>未锁定：先按亮场亮→暗试，失败再试暗场。</summary>
+    Auto = 0,
+
+    /// <summary>亮场：背景亮、壳体暗，从外侧走进壳体为亮→暗（旧配方默认行为）。</summary>
+    BrightToDark = 1,
+
+    /// <summary>暗场：背景暗、壳体亮，从外侧走进壳体为暗→亮。</summary>
+    DarkToBright = 2,
+}
+
+/// <summary>凸起相对壳体短轴的侧别（示教锁定后运行只做同号检验）。</summary>
+public enum TabPolarityLock
+{
+    /// <summary>每帧测量（旧配方）。</summary>
+    Auto = 0,
+
+    /// <summary>凸起在 +短轴（θ≈0° 时朝下）。</summary>
+    PlusShortAxis = 1,
+
+    /// <summary>凸起在 −短轴（θ≈0° 时朝上）。</summary>
+    MinusShortAxis = 2,
+}
+
 /// <summary>分割精修（MaskTemplate 模式）的精修方法。
 /// Template = 原图模板匹配（吃纹理，可判头尾）；LineFit = 掩码长边鲁棒直线拟合
 /// （吃轮廓几何，弱纹理矩形适用，无 180° 方向语义）；CaliperTab = 原图卡尺长边 + 凸起极性。</summary>
@@ -154,6 +180,51 @@ public sealed class TemplateOptions
     /// 灰度直匹配在中等纹理上角度抖动较大；纯边缘匹配会丢头尾（Canny 抹掉不对称特征）。</summary>
     public bool UseEdgeMatch { get; set; }
 
+    /// <summary>
+    /// true = 精修失败时仍输出无向粗角 [0,180)（旧行为，偏心工具可能差 180°）。
+    /// false（默认）= 分割到了但精修不过门时该目标不可用，全部不可用则 TRIGGER 返回 1019。
+    /// </summary>
+    public bool AllowCoarseFallback { get; set; }
+
+    /// <summary>示教时记下的模板峰值 NCC；0 = 未示教峰。采用推荐/示教会把 MatchThreshold 写成约 0.85×该值。</summary>
+    public double TeachPeakScore { get; set; }
+
+    /// <summary>壳体边缘极性；旧配方缺省 Auto（先亮场）。</summary>
+    public HousingEdgePolarity HousingEdgePolarity { get; set; }
+
+    /// <summary>凸起侧锁定；旧配方缺省 Auto（每帧估）。</summary>
+    public TabPolarityLock TabPolarity { get; set; }
+
+    /// <summary>期望件数；0 = 不检查（旧配方）。过门件数不符则全部不可用 → 1019。</summary>
+    public int ExpectedCount { get; set; }
+
+    /// <summary>示教轮廓面积（px²）；0 = 不查面积门。</summary>
+    public double TeachAreaPx { get; set; }
+
+    /// <summary>示教壳体长/短轴比；0 = 不查轴比门。</summary>
+    public double TeachAspect { get; set; }
+
+    /// <summary>面积相对示教下限比。</summary>
+    public double AreaRatioLo { get; set; } = InstanceGeometry.DefaultAreaRatioLo;
+
+    /// <summary>面积相对示教上限比。</summary>
+    public double AreaRatioHi { get; set; } = InstanceGeometry.DefaultAreaRatioHi;
+
+    /// <summary>轴比相对示教下限比。</summary>
+    public double AspectRatioLo { get; set; } = InstanceGeometry.DefaultAspectRatioLo;
+
+    /// <summary>轴比相对示教上限比。</summary>
+    public double AspectRatioHi { get; set; } = InstanceGeometry.DefaultAspectRatioHi;
+
+    /// <summary>由示教峰得到建议匹配阈值（写入 MatchThreshold，运行时仍只读 MatchThreshold）。
+    /// peakSharpness：同头尾支上次峰相对主峰的缺口 (best−second)/best；钝峰则把门抬高，避免次峰过门。</summary>
+    public static double MatchThresholdFromTeachPeak(double teachPeak, double peakSharpness = 1)
+    {
+        var sharp = double.IsFinite(peakSharpness) ? Math.Clamp(peakSharpness, 0, 1) : 1;
+        var factor = sharp < 0.04 ? 0.93 : sharp < 0.08 ? 0.89 : 0.85;
+        return Math.Clamp(teachPeak * factor, 0.40, 0.92);
+    }
+
     public TemplateOptions Clone() => new()
     {
         RefineMethod = RefineMethod,
@@ -162,6 +233,17 @@ public sealed class TemplateOptions
         MatchThreshold = MatchThreshold,
         RefineRangeDeg = RefineRangeDeg,
         UseEdgeMatch = UseEdgeMatch,
+        AllowCoarseFallback = AllowCoarseFallback,
+        TeachPeakScore = TeachPeakScore,
+        HousingEdgePolarity = HousingEdgePolarity,
+        TabPolarity = TabPolarity,
+        ExpectedCount = ExpectedCount,
+        TeachAreaPx = TeachAreaPx,
+        TeachAspect = TeachAspect,
+        AreaRatioLo = AreaRatioLo,
+        AreaRatioHi = AreaRatioHi,
+        AspectRatioLo = AspectRatioLo,
+        AspectRatioHi = AspectRatioHi,
     };
 }
 

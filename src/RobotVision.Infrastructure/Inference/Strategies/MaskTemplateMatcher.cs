@@ -36,10 +36,14 @@ public static class MaskTemplateMatcher
         Mat src, IReadOnlyList<Point2f> contour, double marginRatio, double extraWarpDeg = 0)
     {
         var rect = Cv2.MinAreaRect(contour);
+        var housing = contour.Count >= 8 ? MaskHousing.Fit(contour) : default(HousingFrame?);
         // 与 WarpAffine 使用同一未归一化角：NormalizeDeg 会把 180° 折成 0°，逆变换会差 180°
-        var warpAngleDeg = (rect.Size.Width >= rect.Size.Height ? rect.Angle : rect.Angle + 90.0)
+        // 壳体中心/角用于转正（凸起不拖偏）；裁剪窗尺寸仍按整段轮廓，以免裁掉凸起纹理
+        var warpAngleDeg = (housing is { } h
+                               ? h.WarpAngleDeg
+                               : (rect.Size.Width >= rect.Size.Height ? rect.Angle : rect.Angle + 90.0))
                            + extraWarpDeg;
-        var center = rect.Center;
+        var center = housing is { } hh ? hh.Center : rect.Center;
 
         var marginX = rect.Size.Width * marginRatio;
         var marginY = rect.Size.Height * marginRatio;
@@ -253,6 +257,7 @@ public static class MaskTemplateMatcher
         var best0 = BestInBand(rotations, zeroBand: true);
         var best180 = BestInBand(rotations, zeroBand: false);
         var best = PickOrientation(upright, template, best0, best180, useMatchedPolarity);
+        LastDebug = LastDebug with { PeakSharpness = MeasurePeakSharpness(rotations, best) };
         if (best.Score < minScore)
             return null;
 
@@ -266,7 +271,8 @@ public static class MaskTemplateMatcher
     }
 
     internal readonly record struct MatchOrientationDebug(
-        double Score0, double Score180, int? TemplateSign, int? SceneSign, double PeakDistPx);
+        double Score0, double Score180, int? TemplateSign, int? SceneSign, double PeakDistPx,
+        double PeakSharpness = 0);
 
     [ThreadStatic]
     internal static MatchOrientationDebug LastDebug;
@@ -339,10 +345,45 @@ public static class MaskTemplateMatcher
         using var blurred = new Mat();
         Cv2.GaussianBlur(gray, blurred, new Size(3, 3), 0);
         using var edges = new Mat();
-        Cv2.Canny(blurred, edges, 60, 160);
+        var (low, high) = AdaptiveCannyThresholds(blurred);
+        Cv2.Canny(blurred, edges, low, high);
+        TightenOrLoosenEdges(blurred, edges, low, high);
         var bgr = new Mat();
         Cv2.CvtColor(edges, bgr, ColorConversionCodes.GRAY2BGR);
         return bgr;
+    }
+
+    /// <summary>按灰度均值/σ 与 Otsu 估 Canny 双阈值；弱对比度降低门槛，避免固定 60/160 出空边图。</summary>
+    public static (double Low, double High) AdaptiveCannyThresholds(Mat gray8)
+    {
+        if (gray8.Empty())
+            return (60, 160);
+        Cv2.MeanStdDev(gray8, out var meanS, out var stdS);
+        using var tmp = new Mat();
+        var otsu = Cv2.Threshold(gray8, tmp, 0, 255, ThresholdTypes.Binary | ThresholdTypes.Otsu);
+        var sigma = stdS.Val0;
+        var t = otsu;
+        if (sigma < 15)
+            t = Math.Max(8, Math.Min(otsu, meanS.Val0) * 0.65);
+        var low = Math.Clamp(0.5 * t, 8, 100);
+        var high = Math.Clamp(Math.Max(t, low + 20), 24, 220);
+        return (low, high);
+    }
+
+    private static void TightenOrLoosenEdges(Mat blurred, Mat edges, double low, double high)
+    {
+        var n = blurred.Rows * blurred.Cols;
+        if (n <= 0)
+            return;
+        var density = Cv2.CountNonZero(edges) / (double)n;
+        if (density < 0.003)
+        {
+            Cv2.Canny(blurred, edges, 2, Math.Max(16, high * 0.25));
+            return;
+        }
+
+        if (density > 0.22)
+            Cv2.Canny(blurred, edges, Math.Min(120, low * 1.35), Math.Min(240, high * 1.35));
     }
 
     /// <summary>
@@ -438,6 +479,33 @@ public static class MaskTemplateMatcher
                 best = s;
         }
         return best;
+    }
+
+    /// <summary>同头尾支上，距主峰 ≥2.5° 的次高峰缺口 (best−second)/best。钝峰趋近 0。</summary>
+    private static double MeasurePeakSharpness(List<AngleSample> samples, AngleSample best)
+    {
+        if (best.Score <= 1e-9)
+            return 0;
+        var bestZero = Math.Abs(NormalizeSigned(best.Deg)) < 90;
+        var second = 0.0;
+        var found = false;
+        foreach (var s in samples)
+        {
+            var sZero = Math.Abs(NormalizeSigned(s.Deg)) < 90;
+            if (sZero != bestZero)
+                continue;
+            if (Math.Abs(NormalizeSigned(s.Deg - best.Deg)) < 2.5)
+                continue;
+            if (!found || s.Score > second)
+            {
+                second = s.Score;
+                found = true;
+            }
+        }
+
+        if (!found)
+            return 1;
+        return Math.Clamp((best.Score - second) / best.Score, 0, 1);
     }
 
     /// <summary>
@@ -640,27 +708,24 @@ public static class MaskTemplateMatcher
     }
 
     /// <summary>
-    /// 直线拟合精修（弱纹理矩形适用）：掩码轮廓两条长边各做鲁棒直线拟合（Huber），
-    /// 取两线角均值修正粗角度——抗离群点显著优于 minAreaRect（单噪声点即可拉动矩形）。
-    /// 中心 = 轮廓点均值（亚像素）。角度无方向语义，归一到 [0,180)。
-    /// 带宽不足（非矩形/点太少）返回粗角度兜底。
+    /// 直线拟合精修（弱纹理矩形适用）：先剔凸起再对两条长边 Huber 拟合。
+    /// Fitted=false 时 Angle/Center 仍是粗结果，供画面对照；策略默认不得输出给机器人。
     /// </summary>
-    public static (double AngleDeg, Point2d Center) RefineByLineFit(
+    public static (double AngleDeg, Point2d Center, bool Fitted) RefineByLineFit(
         IReadOnlyList<Point2f> contour, double coarseAngleDeg)
     {
-        // 轮廓均值中心（边界密集采样时近似质心）
-        var cx = contour.Average(p => p.X);
-        var cy = contour.Average(p => p.Y);
+        var ptsSrc = MaskHousing.StripProtrusion(contour);
+        var cx = ptsSrc.Average(p => p.X);
+        var cy = ptsSrc.Average(p => p.Y);
 
-        // 转正坐标系（绕中心旋转 -coarseAngle）：长边变为近似水平，便于按 y 分带
         var rad = -coarseAngleDeg * Math.PI / 180.0;
         var cos = Math.Cos(rad);
         var sin = Math.Sin(rad);
-        var pts = new Point2f[contour.Count];
-        for (var i = 0; i < contour.Count; i++)
+        var pts = new Point2f[ptsSrc.Length];
+        for (var i = 0; i < ptsSrc.Length; i++)
         {
-            var dx = contour[i].X - cx;
-            var dy = contour[i].Y - cy;
+            var dx = ptsSrc[i].X - cx;
+            var dy = ptsSrc[i].Y - cy;
             pts[i] = new Point2f(
                 (float)(cx + dx * cos - dy * sin),
                 (float)(cy + dx * sin + dy * cos));
@@ -677,25 +742,23 @@ public static class MaskTemplateMatcher
         var h = yMax - yMin;
         var w = xMax - xMin;
         if (h <= 0 || w <= 0)
-            return (coarseAngleDeg, new(cx, cy));
+            return (coarseAngleDeg, new(cx, cy), false);
 
-        // 两条长边带：上/下 35% 高度带；x 取内侧 70%（排除圆角/毛刺端点）
         var yCut = yMin + 0.35 * h;
         var xLo = xMin + 0.15 * w;
         var xHi = xMax - 0.15 * w;
         var top = pts.Where(p => p.Y <= yCut && p.X >= xLo && p.X <= xHi).ToArray();
         var bottom = pts.Where(p => p.Y >= yMax - 0.35 * h && p.X >= xLo && p.X <= xHi).ToArray();
         if (top.Length < 8 || bottom.Length < 8)
-            return (coarseAngleDeg, new(cx, cy)); // 非矩形轮廓：兜底粗角度
+            return (coarseAngleDeg, new(cx, cy), false);
 
         var aTop = FitLineAngleDeg(top);
         var aBottom = FitLineAngleDeg(bottom);
         if (double.IsNaN(aTop) || double.IsNaN(aBottom))
-            return (coarseAngleDeg, new(cx, cy));
+            return (coarseAngleDeg, new(cx, cy), false);
 
-        // 转正系中两线角应 ≈0；偏差均值即粗角度修正量
         var delta = (aTop + aBottom) / 2.0;
-        return (AngleGeometry.NormalizeDeg(coarseAngleDeg + delta), new Point2d(cx, cy));
+        return (AngleGeometry.NormalizeDeg(coarseAngleDeg + delta), new Point2d(cx, cy), true);
     }
 
     /// <summary>Huber 鲁棒直线拟合，返回直线角（归一到 (-90,90]，与方向无关）；点太少返回 NaN。</summary>
@@ -711,7 +774,7 @@ public static class MaskTemplateMatcher
     }
 
     /// <summary>质心-内孔连线结果：连线角（指向孔，(-180,180]）、掩码质心（输出位置）。</summary>
-    public sealed record CentroidHoleResult(double AngleDeg, Point2d Centroid);
+    public sealed record CentroidHoleResult(double AngleDeg, Point2d Centroid, double Quality = 0.85);
 
     /// <summary>内孔判定的最小面积（px²）：更小的孔对掩码噪声敏感，不参与连线。</summary>
     private const double MinHoleAreaPx = 30;
@@ -802,7 +865,12 @@ public static class MaskTemplateMatcher
             var (_, ang) = AngleGeometry.FromTwoPoints(centroid.X, centroid.Y, holeCenter.X, holeCenter.Y);
             angleDeg = ang;
         }
-        return new CentroidHoleResult(angleDeg, centroid);
+
+        var offset = Math.Sqrt(dx * dx + dy * dy);
+        var quality = Math.Clamp(
+            0.45 + 0.30 * Math.Clamp(bestArea / 200.0, 0, 1) + 0.25 * Math.Clamp(offset / 16.0, 0, 1),
+            0.45, 0.98);
+        return new CentroidHoleResult(angleDeg, centroid, quality);
     }
 
     /// <summary>绕模板中心旋转（边缘色填充外扩角），小幅旋转用线性插值。

@@ -80,4 +80,64 @@ public class OutputOffsetTests
         var clone = recipe.Clone();
         Assert.True(clone.OutputOffset.IsZero);
     }
+
+    [Fact]
+    public void SuggestDelta_MedianMinusTeach()
+    {
+        var teach = new RobotPose(10, 20, 0);
+        var ok = new[]
+        {
+            new RobotPose(10.2, 20.1, 1),
+            new RobotPose(10.4, 20.3, 3),
+            new RobotPose(10.6, 20.5, 5),
+            new RobotPose(10.1, 20.0, 0.5),
+            new RobotPose(10.3, 20.2, 2),
+            new RobotPose(10.5, 20.4, 4),
+            new RobotPose(10.7, 20.6, 6),
+            new RobotPose(10.8, 20.8, 7),
+        };
+        var delta = OutputOffsetOptions.SuggestDelta(teach, ok);
+        Assert.NotNull(delta);
+        Assert.InRange(delta!.X, 0.3, 0.5);
+        Assert.InRange(delta.Y, 0.2, 0.5);
+    }
+
+    [Fact]
+    public void SuggestDelta_TooFew_ReturnsNull()
+    {
+        Assert.Null(OutputOffsetOptions.SuggestDelta(new RobotPose(0, 0, 0), [new RobotPose(1, 1, 0)]));
+    }
+
+    [Fact]
+    public void ApplySuggestedDelta_SecondPassNearZero()
+    {
+        var offset = new OutputOffsetOptions { X = 0.1, TeachX = 10, TeachY = 20, TeachRzDeg = 0 };
+        var teach = new RobotPose(10, 20, 0);
+        var ok = Enumerable.Range(0, 8).Select(i => new RobotPose(10.4, 20.2, 1)).ToList();
+        var delta = OutputOffsetOptions.SuggestDelta(teach, ok)!;
+        offset.ApplySuggestedDelta(delta, teach, ok);
+        var again = OutputOffsetOptions.SuggestDelta(
+            new RobotPose(offset.TeachX!.Value, offset.TeachY!.Value, offset.TeachRzDeg!.Value), ok);
+        Assert.NotNull(again);
+        Assert.Equal(0, again!.X, 6);
+        Assert.Equal(0, again.Y, 6);
+        Assert.Equal(0, again.RzDeg, 6);
+    }
+
+    [Fact]
+    public void Clone_CopiesTeachOutput()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "A01",
+            CameraId = "cam",
+            AngleMode = AngleMode.KeyPointLine,
+            Models = ["m.onnx"],
+            OutputOffset = { X = 0.1, TeachX = 12, TeachY = 34, TeachRzDeg = 5 },
+        };
+        RecipeLoader.Validate(recipe);
+        var clone = recipe.Clone();
+        clone.OutputOffset.TeachX = 0;
+        Assert.Equal(12, recipe.OutputOffset.TeachX);
+    }
 }

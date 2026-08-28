@@ -6,6 +6,7 @@ using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using OxyPlot;
+using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 
 namespace RobotVision.WpfHost.Features.Analysis;
@@ -47,6 +48,7 @@ public partial class AnalysisViewModel : ObservableObject
 
     private readonly SqliteResultStore _db;
     private readonly ResultLogStore? _results;
+    private readonly RecipeLoader? _recipes;
     private readonly DispatcherTimer _timer;
     private CancellationTokenSource? _refreshCts;
     private bool _ready;
@@ -181,6 +183,12 @@ public partial class AnalysisViewModel : ObservableObject
     private string _elapsedSummary = "暂无耗时样本";
 
     [ObservableProperty]
+    private string _healthHint = "";
+
+    [ObservableProperty]
+    private bool _hasHealthHint;
+
+    [ObservableProperty]
     private bool _hasXyPlot;
 
     [ObservableProperty]
@@ -200,10 +208,11 @@ public partial class AnalysisViewModel : ObservableObject
         ElapsedPlot.InvalidatePlot(true);
     }
 
-    public AnalysisViewModel(SqliteResultStore db, ResultLogStore? results = null)
+    public AnalysisViewModel(SqliteResultStore db, ResultLogStore? results = null, RecipeLoader? recipes = null)
     {
         _db = db;
         _results = results;
+        _recipes = recipes;
         RecipeOptions.Add(AllRecipes);
         StationOptions.Add(AllStations);
         CameraOptions.Add(AllCameras);
@@ -381,6 +390,7 @@ public partial class AnalysisViewModel : ObservableObject
 
     private Snapshot LoadSnapshot(ResultDbQuery query, string grain)
     {
+        var okQuery = query with { OkOnly = true, Code = null };
         return new Snapshot(
             _db.Summarize(query),
             _db.QuerySpread(query),
@@ -394,6 +404,8 @@ public partial class AnalysisViewModel : ObservableObject
             _db.SummarizeByRecipe(query),
             _db.QueryXy(query),
             _db.QueryElapsedMs(query),
+            _db.QueryAngles(okQuery),
+            _db.QuerySpread(okQuery),
             File.Exists(_db.DatabasePath));
     }
 
@@ -519,6 +531,27 @@ public partial class AnalysisViewModel : ObservableObject
             " ms");
         InvalidatePlots();
 
+        var teachPeak = 0.0;
+        if (_recipes is not null &&
+            !string.IsNullOrWhiteSpace(RecipeFilter) &&
+            RecipeFilter != AllRecipes &&
+            RecipeLoader.IsValidRecipeName(RecipeFilter))
+        {
+            try
+            {
+                teachPeak = _recipes.Get(RecipeFilter).Template.TeachPeakScore;
+            }
+            catch (Exception)
+            {
+                teachPeak = 0;
+            }
+        }
+
+        var hints = RecipeHealthAdvisor.Analyze(
+            summary.Total, snapshot.Codes, snapshot.OkAngles, snapshot.OkSpread, teachPeak);
+        HealthHint = string.Join(Environment.NewLine, hints.Select(h => h.Message));
+        HasHealthHint = hints.Count > 0;
+
         if (!snapshot.DatabaseExists)
         {
             Message = _results is { SqliteEnabled: false }
@@ -610,5 +643,7 @@ public partial class AnalysisViewModel : ObservableObject
         IReadOnlyList<ResultRecipeStat> ByRecipe,
         IReadOnlyList<ResultXyPoint> Xy,
         IReadOnlyList<double> Elapsed,
+        IReadOnlyList<double> OkAngles,
+        ResultPoseSpread OkSpread,
         bool DatabaseExists);
 }

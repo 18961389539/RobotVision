@@ -165,6 +165,7 @@ public class RecipeViewModelTests : IDisposable
 
             vm.HasUnsavedChanges.Should().BeTrue();
             vm.Editor.Roi.Should().NotBeNull();
+            vm.UnsavedHint.Should().Contain("试触发已用当前编辑器");
         }
         finally { vm.Dispose(); }
     }
@@ -206,6 +207,28 @@ public class RecipeViewModelTests : IDisposable
             vm.Editor.AngleMode = RobotVision.Core.Recipe.AngleMode.MaskMinAreaRect;
             vm.NotifyEditorMutated();
             vm.IsSegmentationMode.Should().BeTrue();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void RefreshEditorBindings_RaisesEditorSoComboBoxCanSwitch()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var editorPings = 0;
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(RecipeViewModel.Editor))
+                    editorPings++;
+            };
+
+            vm.NotifyEditorMutated();
+            editorPings.Should().Be(0, "脏轮询不能 Ping Editor，否则会打断正在改的输入框");
+
+            ((IRecipeWorkspace)vm).RefreshEditorBindings();
+            editorPings.Should().Be(1);
         }
         finally { vm.Dispose(); }
     }

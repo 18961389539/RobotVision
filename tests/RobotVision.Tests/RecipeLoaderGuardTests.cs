@@ -184,5 +184,130 @@ public sealed class RecipeLoaderGuardTests : IDisposable
         };
         Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
     }
+
+    [Fact]
+    public void Validate_MaskTemplate_TeachPeakScoreOutOfRange_Throws()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.LineFit, TeachPeakScore = 1.2 },
+        };
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+    }
+
+    [Fact]
+    public void TemplateOptions_Clone_CopiesPolarityAndTeachPeak()
+    {
+        var src = new TemplateOptions
+        {
+            RefineMethod = SegmentRefineMethod.CaliperTab,
+            TeachPeakScore = 0.91,
+            MatchThreshold = 0.77,
+            HousingEdgePolarity = HousingEdgePolarity.DarkToBright,
+            TabPolarity = TabPolarityLock.MinusShortAxis,
+            ExpectedCount = 2,
+            TeachAreaPx = 1200,
+            TeachAspect = 2.4,
+        };
+        var clone = src.Clone();
+        Assert.Equal(0.91, clone.TeachPeakScore);
+        Assert.Equal(0.77, clone.MatchThreshold);
+        Assert.Equal(HousingEdgePolarity.DarkToBright, clone.HousingEdgePolarity);
+        Assert.Equal(TabPolarityLock.MinusShortAxis, clone.TabPolarity);
+        Assert.Equal(2, clone.ExpectedCount);
+        Assert.Equal(1200, clone.TeachAreaPx);
+        Assert.Equal(2.4, clone.TeachAspect);
+    }
+
+    [Fact]
+    public void MatchThresholdFromTeachPeak_Is85PercentClamped()
+    {
+        Assert.Equal(0.40, TemplateOptions.MatchThresholdFromTeachPeak(0.2), 2);
+        Assert.InRange(TemplateOptions.MatchThresholdFromTeachPeak(0.80), 0.67, 0.69);
+        Assert.Equal(0.85, TemplateOptions.MatchThresholdFromTeachPeak(1.0), 2);
+        Assert.InRange(TemplateOptions.MatchThresholdFromTeachPeak(0.80, peakSharpness: 0.02), 0.73, 0.76);
+    }
+
+    [Fact]
+    public void Validate_EccentricTool_WithMinAreaRect_Throws()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            StationId = "st1",
+            AngleMode = AngleMode.MaskMinAreaRect,
+            Models = ["a.onnx"],
+            RotationCompensation = RotationCompensationMode.EccentricTool,
+        };
+        var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+        Assert.Contains("偏心", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_EccentricTool_WithLineFit_Throws()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            StationId = "st1",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            RotationCompensation = RotationCompensationMode.EccentricTool,
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.LineFit },
+        };
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+    }
+
+    [Fact]
+    public void Validate_EccentricTool_WithCaliperTab_Ok()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            StationId = "st1",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            RotationCompensation = RotationCompensationMode.EccentricTool,
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.CaliperTab },
+        };
+        RecipeLoader.Validate(recipe);
+    }
+
+    [Fact]
+    public void Validate_MaskTemplate_ExpectedCountOutOfRange_Throws()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.CaliperTab, ExpectedCount = 21 },
+        };
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+    }
+
+    [Fact]
+    public void HasUndirectedAngle_MinAreaRectAndLineFit()
+    {
+        Assert.True(RecipeLoader.HasUndirectedAngle(new RecipeConfig { AngleMode = AngleMode.MaskMinAreaRect }));
+        Assert.True(RecipeLoader.HasUndirectedAngle(new RecipeConfig
+        {
+            AngleMode = AngleMode.MaskTemplate,
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.LineFit },
+        }));
+        Assert.False(RecipeLoader.HasUndirectedAngle(new RecipeConfig
+        {
+            AngleMode = AngleMode.MaskTemplate,
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.CaliperTab },
+        }));
+    }
 }
 

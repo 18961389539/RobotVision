@@ -271,7 +271,8 @@ namespace ImageViewer.Rendering
             // 修复：复用 TextBlock 池 + 冻结画刷，降低每帧高频分配。
             TextBlock textBlock = TakeInfoTextBlock();
             textBlock.Text = text;
-            textBlock.Foreground = brush;
+            // 框线可着色，标注文字固定浅色，避免黄/绿框上同色字在亮底看不清。
+            textBlock.Foreground = Brushes.White;
             textBlock.FontSize = fontSize;
             textBlock.FontWeight = FontWeights.Bold;
             textBlock.Background = InfoTextBackgroundBrush;
@@ -421,7 +422,7 @@ namespace ImageViewer.Rendering
 
         private static Brush CreateFrozenInfoTextBackground()
         {
-            var brush = new SolidColorBrush(Color.FromArgb(128, 0, 0, 0));
+            var brush = new SolidColorBrush(Color.FromArgb(220, 20, 20, 20));
             brush.Freeze();
             return brush;
         }

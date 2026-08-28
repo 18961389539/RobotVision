@@ -28,6 +28,8 @@ public sealed class MaskTemplateMatchTests : IDisposable
         Assert.NotNull(match);
         Assert.InRange(Signed(match.RotationDeg), -1.0, 1.0);
         Assert.True(match.Score >= 0.4);
+        Assert.True(MaskTemplateMatcher.LastDebug.PeakSharpness >= 0.02,
+            $"对齐模板主峰应有锐度，实际 {MaskTemplateMatcher.LastDebug.PeakSharpness:0.000}");
     }
 
     [Theory]
@@ -291,6 +293,17 @@ public sealed class MaskTemplateMatchTests : IDisposable
         Cv2.Rectangle(mat, new Point(10, 14), new Point(190, 28), new Scalar(200, 200, 200), -1);
         Cv2.Rectangle(mat, new Point(88, 28), new Point(112, 44), new Scalar(25, 25, 25), -1);
         return mat;
+    }
+
+    [Fact]
+    public void RefineByLineFit_TooFewPoints_NotFitted()
+    {
+        Point2f[] contour =
+        [
+            new(10, 10), new(80, 12), new(78, 40), new(12, 38),
+        ];
+        var (_, _, fitted) = MaskTemplateMatcher.RefineByLineFit(contour, 0);
+        Assert.False(fitted);
     }
 
     [Fact]

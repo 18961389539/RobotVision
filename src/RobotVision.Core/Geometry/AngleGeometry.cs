@@ -44,4 +44,23 @@ public static class AngleGeometry
         var d = ((deg + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
         return d == -180.0 ? 180.0 : d;
     }
+
+    /// <summary>
+    /// 几何无向角 [0,180) 与纹理/极性有向角融合：短轴中心/长边来自几何，头尾来自 signedDeg。
+    /// 若 signed 与无向角相差 ≥90°，视为翻面，输出 geo+180。
+    /// </summary>
+    public static double FuseDirected(double undirectedDeg, double signedDeg)
+    {
+        var geo = NormalizeDeg(undirectedDeg);
+        var tpl = NormalizeSignedDeg(signedDeg);
+        var delta = Math.Abs(NormalizeSignedDeg(tpl - geo));
+        return delta >= 90.0 ? NormalizeSignedDeg(geo + 180.0) : NormalizeSignedDeg(geo);
+    }
+
+    /// <summary>两无向角的最小夹角，落在 [0,90]。</summary>
+    public static double UndirectedDeltaDeg(double a, double b)
+    {
+        var d = Math.Abs(NormalizeDeg(a) - NormalizeDeg(b));
+        return d > 90.0 ? 180.0 - d : d;
+    }
 }

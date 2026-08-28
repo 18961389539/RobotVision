@@ -119,6 +119,10 @@ public class SqliteResultStoreTests : IDisposable
         Assert.Equal(1, db.Count(new ResultDbQuery { Recipe = "A01", Code = 0 }));
         Assert.Equal(1, db.Count(new ResultDbQuery { Code = 1007 }));
         Assert.Equal("A02", Assert.Single(db.Query(new ResultDbQuery { Recipe = "A02" })).Recipe);
+
+        var okPoses = db.QueryOkRobotPoses(new ResultDbQuery { Recipe = "A01", Limit = 50 });
+        Assert.Single(okPoses);
+        Assert.Equal(10, okPoses[0].X, 3);
     }
 
     [Fact]
