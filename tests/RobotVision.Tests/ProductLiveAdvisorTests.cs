@@ -3,6 +3,7 @@ using OpenCvSharp;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
+using RobotVision.Hosting;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Inference;
@@ -33,7 +34,7 @@ public sealed class ProductLiveAdvisorTests(ITestOutputHelper output)
             return;
 
         var wpfBin = Path.Combine(RepoRoot, "src", "RobotVision.Wpf", "bin", "Debug", "net8.0-windows");
-        var recipeDir = Path.Combine(wpfBin, "recipes");
+        var recipeDir = LiveRecipesDir(wpfBin);
         var modelsDir = Path.Combine(wpfBin, "models");
         Assert.True(File.Exists(Path.Combine(recipeDir, "Product.json")), $"缺少 {recipeDir}\\Product.json");
         Assert.True(File.Exists(Path.Combine(modelsDir, "OSFP-SEG.onnx")), "缺少 OSFP-SEG.onnx");
@@ -94,6 +95,7 @@ public sealed class ProductLiveAdvisorTests(ITestOutputHelper output)
                 output.WriteLine(advice.Summary);
                 foreach (var c in advice.Candidates)
                     output.WriteLine($"  {c.Method,-18} ok={c.Ok} dir={c.Directed} score={c.Score:0.00}  {c.Note}");
+                DumpCaliperPolarity(output, models, recipe, frame.Image);
             }
 
             var poses = strategy.Compute(frame.Image, recipe);
@@ -162,6 +164,53 @@ public sealed class ProductLiveAdvisorTests(ITestOutputHelper output)
             $"本帧赛马给出无向方法 {rec}，与已示教极性冲突，请检查画面是否仍是同一只零件");
     }
 
+    private static void DumpCaliperPolarity(
+        ITestOutputHelper output, ModelManager models, RecipeConfig recipe, VisionImage image)
+    {
+        using var roiImage = RoiHelper.CropToVisionImage(image, recipe.Roi, out _, out _);
+        var input = roiImage ?? image;
+        using var roiMat = VisionImageCv.AsMat(input);
+        var session = models.Open(recipe.Models[0], InferenceTask.Segmentation);
+        var segs = session.Run(y => y.RunSegmentation(
+            input, recipe.Confidence, recipe.Segmentation.PixelConfidence, recipe.Iou));
+        var seg = segs.Where(s => (double)s.Box.Width * s.Box.Height >= 400 && s.ContourLocal.Count >= 4)
+            .OrderByDescending(s => s.Confidence)
+            .FirstOrDefault();
+        if (seg is null)
+        {
+            output.WriteLine("极性对照：分割未检出");
+            return;
+        }
+
+        var box = seg.Box;
+        var points = new Point2f[seg.ContourLocal.Count];
+        for (var i = 0; i < seg.ContourLocal.Count; i++)
+            points[i] = new Point2f((float)(seg.ContourLocal[i].X + box.X), (float)(seg.ContourLocal[i].Y + box.Y));
+        var housing = MaskHousing.Fit(points);
+        output.WriteLine(
+            $"壳体 warp={housing.WarpAngleDeg:0.00} long={housing.LongLen:0.0} short={housing.ShortLen:0.0} " +
+            $"aspect={housing.LongLen / Math.Max(1, housing.ShortLen):0.00} area={Cv2.ContourArea(points):0}");
+
+        void One(string tag, CaliperRefineOptions opt)
+        {
+            var attempt = MaskCaliperTab.TryRefine(roiMat, points, opt);
+            var d = MaskCaliperTab.LastDebug;
+            if (attempt.Pose is { } p)
+                output.WriteLine(
+                    $"  {tag,-18} OK  {p.Center.X:0.0},{p.Center.Y:0.0}  {p.AngleDeg:0.000}°  tab={p.TabSign}  " +
+                    $"probes={d.ValidProbes} par={d.ParallelDeg:0.00}° w={d.WidthPx:0.0} diff={d.TabGrayDiff:0.0}");
+            else
+                output.WriteLine(
+                    $"  {tag,-18} FAIL probes={d.ValidProbes}/{d.ProbeCount} par={d.ParallelDeg:0.00}° " +
+                    $"w={d.WidthPx:0.0} tab={d.TabSign} diff={d.TabGrayDiff:0.0}");
+        }
+
+        One("配方锁", CaliperRefineOptions.From(recipe.Template));
+        One("极性全自动", new CaliperRefineOptions());
+        One("只锁暗场", new CaliperRefineOptions(HousingEdgePolarity.DarkToBright));
+        One("只锁亮场", new CaliperRefineOptions(HousingEdgePolarity.BrightToDark));
+    }
+
     private static SegmentRefineAdvice Advise(
         ModelManager models, RecipeConfig recipe, VisionImage image, Mat? template)
     {
@@ -206,6 +255,30 @@ public sealed class ProductLiveAdvisorTests(ITestOutputHelper output)
         }
 
         return ("", null, null);
+    }
+
+    private static string LiveRecipesDir(string wpfBin)
+    {
+        var settings = Path.Combine(wpfBin, "appsettings.json");
+        if (File.Exists(settings))
+        {
+            try
+            {
+                var cfg = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(settings),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (cfg is { DataRoot.Length: > 0 })
+                {
+                    DataRootBinder.Apply(cfg);
+                    if (Directory.Exists(cfg.RecipesFolder))
+                        return cfg.RecipesFolder;
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return Path.Combine(wpfBin, "recipes");
     }
 
     private static double Wrap180(double deg)

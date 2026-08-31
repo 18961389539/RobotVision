@@ -194,11 +194,12 @@ namespace ImageViewer.Controls
             }
         }
 
-        private async void OnFeatureMenuCommandClick(object sender, RoutedEventArgs e)
+        private void OnFeatureMenuCommandClick(object sender, RoutedEventArgs e)
         {
+            // 异步执行改为丢弃的 Task（RunUiOperationAsync 内部已全捕获），不用 async void
             if (TryGetTaggedCommand(sender, out ImageViewerFeatureMenuCommand command))
             {
-                await RunUiOperationAsync($"功能命令 {command}", () => _featureMenuCommandController.ExecuteAsync(command));
+                _ = RunUiOperationAsync($"功能命令 {command}", () => _featureMenuCommandController.ExecuteAsync(command));
             }
         }
 

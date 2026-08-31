@@ -333,6 +333,27 @@ public sealed class MaskTemplateMatchTests : IDisposable
         Assert.Null(cache.GetOrCreate(caliper));
     }
 
+    [Fact]
+    public void RotationCache_SkipWhenUprightCropOff()
+    {
+        using var cache = new MaskTemplateRotationCache();
+        var recipe = new RecipeConfig
+        {
+            Name = "NoUpright",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["m.onnx"],
+            Template = new TemplateOptions
+            {
+                RefineMethod = SegmentRefineMethod.Template,
+                TemplateImageBase64 = MaskTemplateMatcher.EncodeTemplatePng(_template),
+                UseUprightCrop = false,
+            },
+        };
+        cache.Warm(recipe);
+        Assert.Null(cache.GetOrCreate(recipe));
+    }
+
     private static Mat MakeUpright(Mat template, double objectDeg) =>
         MakeUpright(template, objectDeg, new Scalar(55, 55, 55));
 

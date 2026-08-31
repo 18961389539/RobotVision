@@ -2,6 +2,7 @@ using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
+using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Cameras;
 using Xunit;
 
@@ -36,6 +37,48 @@ public class FileCameraTests : IDisposable
         Assert.True(frame.CapturedAtUtc <= DateTime.UtcNow);
         Assert.Equal(CameraKind.File, camera.Kind);
         Assert.Equal("cam", camera.Id);
+    }
+
+    [Fact]
+    public void RepeatLast_DoesNotAdvancePlayback()
+    {
+        using var camera = new FileCamera("cam", _dir);
+        using var first = camera.Grab();
+        using var again = camera.RepeatLast();
+        using var a = VisionImageCv.AsMat(first.Image);
+        using var b = VisionImageCv.AsMat(again.Image);
+        Assert.Equal(a.At<Vec3b>(0, 0)[0], b.At<Vec3b>(0, 0)[0]);
+
+        using var next = camera.Grab();
+        using var c = VisionImageCv.AsMat(next.Image);
+        Assert.Equal(60, c.At<Vec3b>(0, 0)[0]);
+    }
+
+    [Fact]
+    public void RepeatLast_BeforeAnyGrab_EqualsFirstGrab()
+    {
+        using var camera = new FileCamera("cam", _dir);
+        using var frame = camera.RepeatLast();
+        using var mat = VisionImageCv.AsMat(frame.Image);
+        Assert.Equal(0, mat.At<Vec3b>(0, 0)[0]);
+    }
+
+    [Fact]
+    public void PlaybackFiles_ListsAllImagesInNameOrder_WithoutAdvancingGrab()
+    {
+        using var camera = new FileCamera("cam", _dir);
+        Assert.Equal(3, camera.PlaybackFiles.Count);
+        Assert.Equal("f0.png", Path.GetFileName(camera.PlaybackFiles[0]));
+        Assert.Equal("f1.png", Path.GetFileName(camera.PlaybackFiles[1]));
+        Assert.Equal("f2.png", Path.GetFileName(camera.PlaybackFiles[2]));
+
+        using var decoded = FileCamera.DecodeFile(camera.PlaybackFiles[1]);
+        Assert.False(decoded.Empty());
+        Assert.Equal(60, decoded.At<Vec3b>(0, 0)[0]);
+
+        using var frame = camera.Grab();
+        using var grabMat = VisionImageCv.AsMat(frame.Image);
+        Assert.Equal(0, grabMat.At<Vec3b>(0, 0)[0]);
     }
 
     [Fact]

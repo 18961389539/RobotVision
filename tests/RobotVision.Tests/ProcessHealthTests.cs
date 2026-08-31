@@ -121,7 +121,7 @@ public class ProcessHealthTests : IDisposable
             AngleMode = AngleMode.KeyPointLine,
             Models = ["m.onnx"],
         }, null, CancellationToken.None);
-        Assert.NotEqual(VisionErrorCode.ProcessUnhealthy, preview.ErrorCode);
+        Assert.NotEqual(VisionErrorCode.ProcessUnhealthy, preview.Result.ErrorCode);
 
         var tasks = Enumerable.Range(0, 8)
             .Select(_ => vision.RunAsync("A01", CancellationToken.None))

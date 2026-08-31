@@ -8,7 +8,8 @@ public sealed record ChatApiMessage(
     string? Content,
     string? ToolCallId = null,
     string? Name = null,
-    IReadOnlyList<ChatToolCall>? ToolCalls = null);
+    IReadOnlyList<ChatToolCall>? ToolCalls = null,
+    IReadOnlyList<string>? ImagePaths = null);
 
 public sealed record ChatToolCall(string Id, string Name, string Arguments);
 

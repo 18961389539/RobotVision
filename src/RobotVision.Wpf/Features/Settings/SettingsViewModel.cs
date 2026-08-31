@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Settings;
 
@@ -23,13 +24,35 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     private const int DefaultMaxConnections = 0;
     private const bool DefaultFailureEnabled = true;
     private const int DefaultFailureRetainedCount = 200;
+    private const int DefaultFailureRetainedDays = 0;
+    private const bool DefaultCaptureSuccessEnabled = false;
+    private const int DefaultCaptureSuccessRetainedDays = 30;
+    private const int DefaultCaptureSuccessMaxWidth = 0;
+    private const bool DefaultResultLogEnabled = true;
+    private const bool DefaultResultLogJsonl = true;
+    private const bool DefaultResultLogSqlite = true;
+    private const int DefaultResultLogRetainedDays = 30;
+    private const string DefaultInferenceProvider = "OpenVinoGpu";
+    private const int DefaultInferenceMaxSessions = 8;
+    private const bool DefaultFileLoggingEnabled = true;
+    private const int DefaultFileLoggingRetainedDays = 30;
+    private const int DefaultProcessHealthRetainedDays = 90;
     private const string DefaultIpAddress = "0.0.0.0";
     private const int DefaultTcpPort = 9999;
+    private const string DefaultUiTheme = UiThemes.Dark;
+
+    public IReadOnlyList<UiThemeChoice> UiThemeChoices { get; } =
+    [
+        new(UiThemes.Dark, "深色"),
+        new(UiThemes.Light, "浅色"),
+    ];
 
     private readonly AppConfig _cfg;
     private readonly TcpServerManager _tcp;
     private readonly VisionService _vision;
     private readonly FailureImageStore _failures;
+    private readonly ResultLogStore _results;
+    private readonly SuccessCaptureStore _captures;
     private readonly AppSettingsStore _store;
     private readonly IInferenceEngineFactory? _inference;
     private readonly DispatcherTimer _timer;
@@ -38,6 +61,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     private ServiceSettingsValues? _baseline;
 
     public Action? FlushPendingEdits { get; set; }
+
+    [ObservableProperty]
+    private double _requestTimeoutMs = AppConfig.DefaultRequestTimeoutMs;
 
     /// <summary>0 = 永久保持连接；2592000000 = 30 天。</summary>
     [ObservableProperty]
@@ -79,17 +105,68 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     [NotifyPropertyChangedFor(nameof(ShowFailureRetention))]
     private bool _failureEnabled;
 
-    /// <summary>位姿校验关闭时隐藏容差字段（仅调试场景关校验）。</summary>
-    public bool ShowPoseToleranceFields => PoseCheckEnabled;
-
-    /// <summary>过程能力关闭时隐藏联锁次数。</summary>
-    public bool ShowProcessHealthFields => ProcessHealthEnabled;
-
-    /// <summary>失败留存关闭时隐藏保留数量。</summary>
-    public bool ShowFailureRetention => FailureEnabled;
-
     [ObservableProperty]
     private int _failureRetainedCount;
+
+    [ObservableProperty]
+    private int _failureRetainedDays;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowCaptureSuccessFields))]
+    private bool _captureSuccessEnabled;
+
+    [ObservableProperty]
+    private int _captureSuccessRetainedDays = DefaultCaptureSuccessRetainedDays;
+
+    [ObservableProperty]
+    private int _captureSuccessMaxWidth;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowResultLogFields))]
+    private bool _resultLogEnabled = true;
+
+    [ObservableProperty]
+    private bool _resultLogJsonl = true;
+
+    [ObservableProperty]
+    private bool _resultLogSqlite = true;
+
+    [ObservableProperty]
+    private int _resultLogRetainedDays = DefaultResultLogRetainedDays;
+
+    public IReadOnlyList<string> InferenceProviderOptions { get; } = ["OpenVinoGpu", "OpenVinoCpu"];
+
+    [ObservableProperty]
+    private string _inferenceProvider = DefaultInferenceProvider;
+
+    [ObservableProperty]
+    private int _inferenceMaxSessions = DefaultInferenceMaxSessions;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowFileLoggingFields))]
+    private bool _fileLoggingEnabled = DefaultFileLoggingEnabled;
+
+    [ObservableProperty]
+    private int _fileLoggingRetainedDays = DefaultFileLoggingRetainedDays;
+
+    [ObservableProperty]
+    private int _processHealthRetainedDays = DefaultProcessHealthRetainedDays;
+
+    public bool ShowPoseToleranceFields => PoseCheckEnabled;
+    public bool ShowProcessHealthFields => ProcessHealthEnabled;
+    public bool ShowFailureRetention => FailureEnabled;
+    public bool ShowCaptureSuccessFields => CaptureSuccessEnabled;
+    public bool ShowResultLogFields => ResultLogEnabled;
+    public bool ShowFileLoggingFields => FileLoggingEnabled;
+
+    public string FailureFolderPath => _cfg.ResolveDataPath(_cfg.FailureImage.Folder);
+    public string CaptureSuccessFolderPath => _cfg.ResolveDataPath(_cfg.CaptureSuccess.Folder);
+    public string ResultLogFolderPath => _cfg.ResolveDataPath(_cfg.ResultLog.Folder);
+    public string FileLoggingFolderPath => _cfg.ResolveDataPath(_cfg.FileLogging.Folder);
+    public string ProcessHealthFolderPath => _cfg.ResolveDataPath(_cfg.ProcessHealth.Folder);
+    public string DataRootPath =>
+        string.IsNullOrWhiteSpace(_cfg.DataRoot) ? "未设置（配方等写在程序目录）" : _cfg.ResolveDataRoot();
+    public bool HasDataRoot => !string.IsNullOrWhiteSpace(_cfg.DataRoot);
 
     [ObservableProperty]
     private string _ipAddress = "";
@@ -97,7 +174,6 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     [ObservableProperty]
     private int _tcpPort;
 
-    /// <summary>白名单多行文本（每行一条，空 = 允许所有，支持 192.168.* 通配）。</summary>
     [ObservableProperty]
     private string _whitelistText = "";
 
@@ -110,11 +186,18 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     [ObservableProperty]
     private string _inferenceStatus = "";
 
+    [ObservableProperty]
+    private string _uiTheme = DefaultUiTheme;
+
+    partial void OnUiThemeChanged(string value) => AppThemeManager.Apply(value);
+
     public SettingsViewModel(
         AppConfig cfg,
         TcpServerManager tcp,
         VisionService vision,
         FailureImageStore failures,
+        ResultLogStore results,
+        SuccessCaptureStore captures,
         AppSettingsStore store,
         IInferenceEngineFactory? inference = null)
     {
@@ -122,6 +205,8 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         _tcp = tcp;
         _vision = vision;
         _failures = failures;
+        _results = results;
+        _captures = captures;
         _store = store;
         _inference = inference;
 
@@ -129,17 +214,14 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) => RefreshStatus();
-        // 定时器由页面 Loaded/Unloaded 启停（与 System/Communication 页一致），
-        // 不在构造启动：单例 VM 常驻，页面从未打开时不应空转。
     }
 
-    /// <summary>编辑内容相对最近一次载入/保存是否有差异（未保存修改提示用）。</summary>
     public bool HasUnsavedChanges =>
         _baseline is not null && !Same(_baseline, CurrentValues());
 
-    /// <summary>从运行中的管理器读取当前值（再次进入页面时同步外部改动）。</summary>
     public void LoadFromRuntime()
     {
+        RequestTimeoutMs = _cfg.TimeoutMs;
         IdleTimeoutMs = _tcp.IdleTimeoutMs;
         PoseCheckEnabled = _cfg.PoseCheck.Enabled;
         PoseXyToleranceMm = _cfg.PoseCheck.XyToleranceMm;
@@ -153,11 +235,34 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         MaxConnections = _tcp.MaxConnections;
         FailureEnabled = _failures.Enabled;
         FailureRetainedCount = _failures.RetainedCount;
+        FailureRetainedDays = _failures.RetainedDays;
+        CaptureSuccessEnabled = _captures.Enabled;
+        CaptureSuccessRetainedDays = _captures.RetainedDays;
+        CaptureSuccessMaxWidth = _captures.MaxWidth;
+        ResultLogEnabled = _results.Enabled;
+        ResultLogJsonl = _results.JsonlEnabled;
+        ResultLogSqlite = _results.SqliteEnabled;
+        ResultLogRetainedDays = _results.RetainedDays;
+        InferenceProvider = string.IsNullOrWhiteSpace(_cfg.Inference.Provider)
+            ? DefaultInferenceProvider
+            : _cfg.Inference.Provider;
+        InferenceMaxSessions = _cfg.Inference.MaxSessions;
+        FileLoggingEnabled = _cfg.FileLogging.Enabled;
+        FileLoggingRetainedDays = _cfg.FileLogging.RetainedDays;
+        ProcessHealthRetainedDays = _cfg.ProcessHealth.RetainedDays;
         IpAddress = _cfg.IpAddress;
         TcpPort = _cfg.TcpPort;
+        UiTheme = UiThemes.Normalize(_cfg.UiTheme);
         WhitelistText = string.Join(Environment.NewLine, _cfg.IpWhitelist);
         _baseline = CurrentValues();
         RefreshStatus();
+        OnPropertyChanged(nameof(FailureFolderPath));
+        OnPropertyChanged(nameof(CaptureSuccessFolderPath));
+        OnPropertyChanged(nameof(ResultLogFolderPath));
+        OnPropertyChanged(nameof(FileLoggingFolderPath));
+        OnPropertyChanged(nameof(ProcessHealthFolderPath));
+        OnPropertyChanged(nameof(DataRootPath));
+        OnPropertyChanged(nameof(HasDataRoot));
     }
 
     public void StartTimer() => _timer.Start();
@@ -188,15 +293,12 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
             this.Commit();
             var values = CurrentValues();
 
-            // 校验集中在 Store（值域 + 相机取图超时联动），非法值抛 InvalidDataException
-            // 落盘会同步内存 AppConfig（含 IP/端口），端点比较必须用保存前的基线
             var endpointChanged = _baseline is null
                 || !string.Equals(_baseline.IpAddress, values.IpAddress, StringComparison.OrdinalIgnoreCase)
                 || _baseline.TcpPort != values.TcpPort;
 
             _store.Save(values);
 
-            // RuntimeSync 已热应用超时/空闲/队列等；此处再写一遍与基线对齐，失败已在 Save 抛出
             _tcp.TimeoutMs = values.TimeoutMs;
             _tcp.IdleTimeoutMs = values.IdleTimeoutMs;
             _vision.MaxQueueDepth = values.MaxQueueDepth;
@@ -204,22 +306,23 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
             _tcp.IpWhitelist = values.IpWhitelist;
             _failures.Enabled = values.FailureEnabled;
             _failures.RetainedCount = values.FailureRetainedCount;
-            // 并发槽位/backlog 首次固化或监听启动时读取，运行中修改需重启程序生效
+            _failures.RetainedDays = values.FailureRetainedDays;
+            _captures.ApplyConfig(_cfg.CaptureSuccess);
+            _results.ApplyConfig(_cfg.ResultLog);
             var restartNeeded = values.MaxConcurrent != _baseline?.MaxConcurrent ||
                                 values.TcpBacklog != _baseline?.TcpBacklog;
+            var restartForConfig = NeedsProgramRestart(_baseline, values);
             var endpointText = $"{values.IpAddress}:{values.TcpPort}";
             if (endpointChanged)
             {
                 var ok = _tcp.Restart(values.IpAddress, values.TcpPort);
                 Message = ok
-                    ? $"已保存并应用；监听已热重启到 {endpointText}（客户端将短暂断开）" + RestartSuffix(restartNeeded)
+                    ? $"已保存并应用；监听已热重启到 {endpointText}（客户端将短暂断开）" + RestartSuffix(restartNeeded, restartForConfig)
                     : $"已保存；监听 {endpointText} 启动失败，已回滚到 {_tcp.ListenEndPoint}（请检查端口占用）";
             }
             else
             {
-                Message = "已保存并应用" + (restartNeeded
-                    ? RestartSuffix(true)
-                    : "（可热生效的参数已立即生效；推理 Provider 需改 appsettings 后重启）");
+                Message = "已保存并应用" + RestartSuffix(restartNeeded, restartForConfig);
             }
 
             _baseline = CurrentValues();
@@ -234,6 +337,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     [RelayCommand]
     private void RestoreDefaults()
     {
+        RequestTimeoutMs = AppConfig.DefaultRequestTimeoutMs;
         IdleTimeoutMs = DefaultIdleTimeoutMs;
         PoseCheckEnabled = true;
         PoseXyToleranceMm = 0.5;
@@ -247,8 +351,22 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         MaxConnections = DefaultMaxConnections;
         FailureEnabled = DefaultFailureEnabled;
         FailureRetainedCount = DefaultFailureRetainedCount;
+        FailureRetainedDays = DefaultFailureRetainedDays;
+        CaptureSuccessEnabled = DefaultCaptureSuccessEnabled;
+        CaptureSuccessRetainedDays = DefaultCaptureSuccessRetainedDays;
+        CaptureSuccessMaxWidth = DefaultCaptureSuccessMaxWidth;
+        ResultLogEnabled = DefaultResultLogEnabled;
+        ResultLogJsonl = DefaultResultLogJsonl;
+        ResultLogSqlite = DefaultResultLogSqlite;
+        ResultLogRetainedDays = DefaultResultLogRetainedDays;
+        InferenceProvider = DefaultInferenceProvider;
+        InferenceMaxSessions = DefaultInferenceMaxSessions;
+        FileLoggingEnabled = DefaultFileLoggingEnabled;
+        FileLoggingRetainedDays = DefaultFileLoggingRetainedDays;
+        ProcessHealthRetainedDays = DefaultProcessHealthRetainedDays;
         IpAddress = DefaultIpAddress;
         TcpPort = DefaultTcpPort;
+        UiTheme = DefaultUiTheme;
         WhitelistText = "";
         Message = "已填入出厂默认值，点击「保存并应用」生效";
     }
@@ -263,11 +381,48 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     private void SetIdleThirtyDays() => IdleTimeoutMs = TcpServerManager.IdleTimeoutThirtyDaysMs;
 
     [RelayCommand]
+    private void OpenDataRoot() =>
+        Explorer.OpenFolder(HasDataRoot ? _cfg.ResolveDataRoot() : AppContext.BaseDirectory);
+
+    [RelayCommand]
     private void OpenSettingsFolder() =>
         Explorer.OpenFolder(System.IO.Path.GetDirectoryName(_store.SettingsPath)!);
 
-    private static string RestartSuffix(bool restartNeeded) =>
-        restartNeeded ? "（并发槽位/TCP backlog 修改需重启程序生效）" : "";
+    [RelayCommand]
+    private void OpenFailureFolder() => Explorer.OpenFolder(FailureFolderPath);
+
+    [RelayCommand]
+    private void OpenCaptureSuccessFolder() => Explorer.OpenFolder(CaptureSuccessFolderPath);
+
+    [RelayCommand]
+    private void OpenResultLogFolder() => Explorer.OpenFolder(ResultLogFolderPath);
+
+    [RelayCommand]
+    private void OpenFileLoggingFolder() => Explorer.OpenFolder(FileLoggingFolderPath);
+
+    [RelayCommand]
+    private void OpenProcessHealthFolder() => Explorer.OpenFolder(ProcessHealthFolderPath);
+
+    private static bool NeedsProgramRestart(ServiceSettingsValues? baseline, ServiceSettingsValues values)
+    {
+        if (baseline is null)
+            return false;
+        return !string.Equals(baseline.InferenceProvider, values.InferenceProvider, StringComparison.OrdinalIgnoreCase)
+               || baseline.InferenceMaxSessions != values.InferenceMaxSessions
+               || baseline.FileLoggingEnabled != values.FileLoggingEnabled
+               || baseline.FileLoggingRetainedDays != values.FileLoggingRetainedDays;
+    }
+
+    private static string RestartSuffix(bool restartNeeded, bool restartForConfig)
+    {
+        if (restartNeeded && restartForConfig)
+            return "（并发槽位/TCP backlog、推理 Provider/会话上限、文件日志改动需重启程序生效）";
+        if (restartNeeded)
+            return "（并发槽位/TCP backlog 修改需重启程序生效）";
+        if (restartForConfig)
+            return "（推理 Provider/会话上限、文件日志改动需重启程序生效）";
+        return "";
+    }
 
     private ServiceSettingsValues CurrentValues()
     {
@@ -276,19 +431,42 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
             .Where(l => l.Length > 0)
             .ToList();
         return new ServiceSettingsValues(
-            _cfg.TimeoutMs, MaxQueueDepth, MaxConcurrent, TcpBacklog, MaxConnections,
+            (int)Math.Round(RequestTimeoutMs),
+            MaxQueueDepth, MaxConcurrent, TcpBacklog, MaxConnections,
             FailureEnabled, FailureRetainedCount,
             IpAddress.Trim(), TcpPort, whitelist,
             (long)Math.Round(IdleTimeoutMs),
             PoseCheckEnabled, PoseXyToleranceMm, PoseRzToleranceDeg,
-            ProcessHealthEnabled, ConsecutiveFailLimit, InhibitOnLimit);
+            ProcessHealthEnabled, ConsecutiveFailLimit, InhibitOnLimit,
+            FailureRetainedDays,
+            CaptureSuccessEnabled, CaptureSuccessRetainedDays, CaptureSuccessMaxWidth,
+            ResultLogEnabled, ResultLogJsonl, ResultLogSqlite, ResultLogRetainedDays,
+            InferenceProvider, InferenceMaxSessions,
+            FileLoggingEnabled, FileLoggingRetainedDays,
+            ProcessHealthRetainedDays,
+            UiTheme);
     }
 
     private static bool Same(ServiceSettingsValues a, ServiceSettingsValues b) =>
+        a.TimeoutMs == b.TimeoutMs &&
         a.MaxQueueDepth == b.MaxQueueDepth &&
         a.MaxConcurrent == b.MaxConcurrent && a.TcpBacklog == b.TcpBacklog &&
         a.MaxConnections == b.MaxConnections && a.FailureEnabled == b.FailureEnabled &&
         a.FailureRetainedCount == b.FailureRetainedCount &&
+        a.FailureRetainedDays == b.FailureRetainedDays &&
+        a.CaptureSuccessEnabled == b.CaptureSuccessEnabled &&
+        a.CaptureSuccessRetainedDays == b.CaptureSuccessRetainedDays &&
+        a.CaptureSuccessMaxWidth == b.CaptureSuccessMaxWidth &&
+        a.ResultLogEnabled == b.ResultLogEnabled &&
+        a.ResultLogJsonl == b.ResultLogJsonl &&
+        a.ResultLogSqlite == b.ResultLogSqlite &&
+        a.ResultLogRetainedDays == b.ResultLogRetainedDays &&
+        string.Equals(a.InferenceProvider, b.InferenceProvider, StringComparison.OrdinalIgnoreCase) &&
+        a.InferenceMaxSessions == b.InferenceMaxSessions &&
+        a.FileLoggingEnabled == b.FileLoggingEnabled &&
+        a.FileLoggingRetainedDays == b.FileLoggingRetainedDays &&
+        a.ProcessHealthRetainedDays == b.ProcessHealthRetainedDays &&
+        string.Equals(UiThemes.Normalize(a.UiTheme), UiThemes.Normalize(b.UiTheme), StringComparison.OrdinalIgnoreCase) &&
         string.Equals(a.IpAddress, b.IpAddress, StringComparison.OrdinalIgnoreCase) &&
         a.TcpPort == b.TcpPort &&
         a.IdleTimeoutMs == b.IdleTimeoutMs &&
@@ -300,3 +478,5 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         a.InhibitOnLimit == b.InhibitOnLimit &&
         a.IpWhitelist.SequenceEqual(b.IpWhitelist, StringComparer.OrdinalIgnoreCase);
 }
+
+public sealed record UiThemeChoice(string Key, string Label);

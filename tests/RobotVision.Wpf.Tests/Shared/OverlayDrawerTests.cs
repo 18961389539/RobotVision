@@ -24,6 +24,35 @@ public sealed class OverlayDrawerTests
         Assert.False(HasCyanNear(mat, 25, 20), "监控默认不应画卡尺调试");
     }
 
+    [Fact]
+    public void DrawPoses_MatchWindow_PaintsGoldBox()
+    {
+        using var mat = new Mat(80, 80, MatType.CV_8UC3, Scalar.All(0));
+        var window = PoseOverlay.TemplateMatchWindow(40, 40, 0, 30, 20);
+        OverlayDrawer.DrawPoses(mat, [new PixelPose(40, 40, 0, 0.9)
+        {
+            Overlay = new PoseOverlay { MatchWindow = window },
+        }]);
+        Assert.True(HasGoldNear(mat, 25, 30), "匹配窗应为金色框");
+    }
+
+    private static bool HasGoldNear(Mat mat, int x, int y)
+    {
+        for (var dy = -3; dy <= 3; dy++)
+        for (var dx = -3; dx <= 3; dx++)
+        {
+            var xx = x + dx;
+            var yy = y + dy;
+            if ((uint)xx >= (uint)mat.Width || (uint)yy >= (uint)mat.Height)
+                continue;
+            var p = mat.At<Vec3b>(yy, xx);
+            if (p.Item2 > 180 && p.Item1 > 140 && p.Item0 < 80)
+                return true;
+        }
+
+        return false;
+    }
+
     private static PixelPose PoseWithCaliper() =>
         new(50, 50, 0, 1)
         {
@@ -41,7 +70,30 @@ public sealed class OverlayDrawerTests
     {
         using var mat = new Mat(80, 80, MatType.CV_8UC3, Scalar.All(0));
         OverlayDrawer.DrawPoses(mat, [new PixelPose(40, 40, 0, 0.12) { Usable = false }]);
-        Assert.True(HasOrangeRedNear(mat, 50, 30), "不可用位姿应标 NG（橙红字）");
+        Assert.True(HasOrangeRedNear(mat, 58, 14), "不可用位姿应标 NG（橙红字）");
+    }
+
+    [Fact]
+    public void DrawPoses_ScoreLabel_DoesNotCoverPeak()
+    {
+        using var mat = new Mat(120, 120, MatType.CV_8UC3, Scalar.All(200));
+        OverlayDrawer.DrawPoses(mat, [new PixelPose(60, 60, 0, 1.0)]);
+        Assert.False(IsMostlyDark(mat, 60, 60), "分数标签不应盖住匹配峰十字");
+    }
+
+    [Fact]
+    public void DrawPoses_SegmentScore_PaintsOnBoundingBox()
+    {
+        using var mat = new Mat(120, 120, MatType.CV_8UC3, Scalar.All(200));
+        OverlayDrawer.DrawPoses(mat, [new PixelPose(50, 60, 0, 0.91)
+        {
+            SegmentScore = 0.77,
+            Overlay = new PoseOverlay
+            {
+                Boxes = [new PixelRect(10, 30, 80, 50)],
+            },
+        }]);
+        Assert.True(HasDarkNear(mat, 14, 16), "分割分应写在外接矩形上方");
     }
 
     [Fact]
@@ -90,6 +142,26 @@ public sealed class OverlayDrawerTests
         }
 
         return false;
+    }
+
+    private static bool IsMostlyDark(Mat mat, int x, int y)
+    {
+        var dark = 0;
+        var n = 0;
+        for (var dy = -3; dy <= 3; dy++)
+        for (var dx = -3; dx <= 3; dx++)
+        {
+            var xx = x + dx;
+            var yy = y + dy;
+            if ((uint)xx >= (uint)mat.Width || (uint)yy >= (uint)mat.Height)
+                continue;
+            n++;
+            var p = mat.At<Vec3b>(yy, xx);
+            if (p.Item0 < 50 && p.Item1 < 50 && p.Item2 < 50)
+                dark++;
+        }
+
+        return n > 0 && dark >= n / 2;
     }
 
     private static bool HasOrangeRedNear(Mat mat, int x, int y)

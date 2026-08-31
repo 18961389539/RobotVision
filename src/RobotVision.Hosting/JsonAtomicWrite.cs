@@ -1,25 +1,23 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using RobotVision.Core.IO;
 
 namespace RobotVision.Hosting;
 
 /// <summary>
 /// appsettings.json 的原子读-改-写：整个"读取 → 变更 → 临时文件替换落盘"
-/// 都在同一把进程内静态锁（<see cref="Gate"/>）下执行。
+/// 都在同一把进程内锁（<see cref="AtomicFile"/> 内部 Gate）下执行。
 /// 解决两个问题：1) 并发 Save 的读-改-写互相覆盖（AppSettingsStore / CameraConfigStore /
 /// LightingConfigStore 都会写同一文件，读取与写入同锁才能保证原子）；2) 写一半崩溃
 /// 不会留下损坏的半写文件。
+/// <para>落盘实现已统一到 <see cref="AtomicFile"/>，本类只保留 appsettings 的
+/// JSON 读-改-写编排（JSONC 注释/尾逗号兼容）。</para>
 /// </summary>
 internal static class JsonAtomicWrite
 {
-    private static readonly object Gate = new();
-
     /// <summary>整段字符串原子写（临时文件 + 替换）。仅落盘加锁，读取在调用方。</summary>
-    public static void WriteAllText(string path, string content)
-    {
-        lock (Gate)
-            WriteAllTextCore(path, content);
-    }
+    public static void WriteAllText(string path, string content) =>
+        AtomicFile.WriteAllText(path, content);
 
     /// <summary>
     /// 原子读-改-写：读取与落盘在同一把锁下，杜绝"只锁写、不锁读"时并发 Save 的后写覆盖前写。
@@ -27,7 +25,7 @@ internal static class JsonAtomicWrite
     /// </summary>
     public static void Update(string path, JsonSerializerOptions options, Action<JsonObject> mutate)
     {
-        lock (Gate)
+        AtomicFile.InWriteLock(() =>
         {
             JsonNode? root = null;
             if (File.Exists(path))
@@ -46,28 +44,7 @@ internal static class JsonAtomicWrite
             var obj = (JsonObject)root;
             mutate(obj);
 
-            WriteAllTextCore(path, obj.ToJsonString(options));
-        }
-    }
-
-    private static void WriteAllTextCore(string path, string content)
-    {
-        var full = Path.GetFullPath(path);
-        var dir = Path.GetDirectoryName(full)!;
-        Directory.CreateDirectory(dir);
-        var tmp = Path.Combine(dir, $".{Path.GetFileName(full)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            File.WriteAllText(tmp, content);
-            if (File.Exists(full))
-                File.Replace(tmp, full, null);
-            else
-                File.Move(tmp, full);
-        }
-        finally
-        {
-            try { File.Delete(tmp); }
-            catch (IOException) { }
-        }
+            WriteAllText(path, obj.ToJsonString(options));
+        });
     }
 }

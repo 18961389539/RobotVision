@@ -30,6 +30,7 @@ using System.Text.Json;
 using OpenCvSharp;
 using RobotVision.CalibTool;
 using RobotVision.Core;
+using RobotVision.Core.IO;
 using RobotVision.Core.Models;
 using RobotVision.Infrastructure.Calibration;
 
@@ -111,7 +112,7 @@ static void RunIntrinsic(Dictionary<string, string> options)
 
     Directory.CreateDirectory(outDir);
     var path = Path.Combine(outDir, $"{cameraId}.intrinsic.json");
-    CalibrationManager.AtomicWriteAllText(path,
+    AtomicFile.WriteAllText(path,
         JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
 
     var k = profile.CameraMatrix;
@@ -171,7 +172,7 @@ static void RunExtrinsic(Dictionary<string, string> options)
 
     Directory.CreateDirectory(outDir);
     var path = Path.Combine(outDir, $"{stationId}.extrinsic.json");
-    CalibrationManager.AtomicWriteAllText(path,
+    AtomicFile.WriteAllText(path,
         JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
 
     Console.WriteLine($"RMS 残差: {profile.Rms:0.0000}，最大残差: {profile.MaxResidual:0.0000}（机器人单位）");
@@ -255,7 +256,7 @@ static void RunRotation(Dictionary<string, string> options)
 
     Directory.CreateDirectory(outDir);
     var path = Path.Combine(outDir, $"{stationId}.rotation.json");
-    CalibrationManager.AtomicWriteAllText(path,
+    AtomicFile.WriteAllText(path,
         JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
 
     Console.WriteLine($"轴心像素坐标: ({profile.Cx:0.00}, {profile.Cy:0.00})，半径 {profile.RadiusPx:0.00} px");
@@ -360,7 +361,7 @@ static void RunPolynomial(Dictionary<string, string> options)
 
     Directory.CreateDirectory(outDir);
     var polyPath = Path.Combine(outDir, $"{stationId}.polynomial.json");
-    CalibrationManager.AtomicWriteAllText(polyPath,
+    AtomicFile.WriteAllText(polyPath,
         JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
     Console.WriteLine($"已保存: {polyPath}（该工位走单图模式：推理直接用原图，无需内参/外参档案）");
     if (imageSpace)

@@ -12,14 +12,27 @@ using RobotVision.Infrastructure.Lighting;
 namespace RobotVision.Hosting;
 
 /// <summary>
-/// 一次推理完成后推送给订阅者的画面快照（去畸变图 + 像素位姿）。
-/// 供 UI 叠加显示检测结果；TCP 链路不产生快照开销（无订阅者时跳过克隆）。
+/// 产线推理完成后推送给订阅者的画面快照（去畸变图 + 像素位姿）。
+/// 配方试触发不走此通道，见 <see cref="PreviewRunResult"/>。
 /// </summary>
 /// <param name="UndistortedImage">去畸变图像，所有权移交订阅者，用完必须 Dispose。</param>
 public sealed record VisionFrameSnapshot(
     string RecipeName,
     VisionImage UndistortedImage,
-    IReadOnlyList<PixelPose> Poses);
+    IReadOnlyList<PixelPose> Poses,
+    RecipeDisplayHints DisplayHints);
+
+/// <summary>配方试触发专用画面（去畸变图 + 像素位姿 + 叠加策略）。调用方负责 <see cref="IDisposable.Dispose"/>。</summary>
+public sealed record PreviewRunOutcome(
+    VisionImage UndistortedImage,
+    IReadOnlyList<PixelPose> PixelPoses,
+    RecipeDisplayHints DisplayHints) : IDisposable
+{
+    public void Dispose() => UndistortedImage.Dispose();
+}
+
+/// <summary>配方页试触发完整应答：PLC 口径的 <see cref="VisionResult"/> + 可选调试画面。</summary>
+public sealed record PreviewRunResult(VisionResult Result, PreviewRunOutcome? Frame);
 
 /// <summary>
 /// 流程编排：加载配方 → 取图 → 内参去畸变 → 角度策略推理 → 外参变换 → 组装结果。
@@ -151,7 +164,7 @@ public sealed class VisionService(
                 "PROCESS_UNHEALTHY", 0));
 
         return Scheduler.RunAsync(recipeName,
-            (name, token) => ProcessCoreInnerAsync(name, pose, token),
+            async (name, token) => (await ProcessCoreInnerAsync(name, pose, token)).Result,
             result =>
             {
                 // 结果日志：每次触发的原始留档（含联锁拒绝，分析时按 Code 过滤）。
@@ -170,7 +183,7 @@ public sealed class VisionService(
     /// 配方页试触发：用内存中的编辑器副本跑完整链路，不读磁盘、不写产量/1018、不留成功图。
     /// PLC TRIGGER 仍走 <see cref="RunAsync(string, TcpClientPose?, CancellationToken)"/>。
     /// </summary>
-    public Task<VisionResult> RunPreviewAsync(
+    public async Task<PreviewRunResult> RunPreviewAsync(
         RecipeConfig recipe, TcpClientPose? pose, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(recipe);
@@ -178,10 +191,18 @@ public sealed class VisionService(
         var name = RecipeLoader.IsValidRecipeName(clone.Name) ? clone.Name : "preview";
         clone.Name = name;
         EnsureHealthRestored();
-        return Scheduler.RunAsync(name,
-            (_, token) => ProcessCoreInnerAsync(name, pose, token, overlay: clone, preview: true),
+        PreviewRunResult? captured = null;
+        await Scheduler.RunAsync(name,
+            async (_, token) =>
+            {
+                var core = await ProcessCoreInnerAsync(name, pose, token, overlay: clone, preview: true);
+                captured = new PreviewRunResult(core.Result, core.PreviewFrame);
+                return core.Result;
+            },
             _ => { },
-            ct);
+            ct).ConfigureAwait(false);
+        return captured ?? new PreviewRunResult(
+            VisionResult.Fail(name, VisionErrorCode.InternalError, "试触发未返回画面", 0), null);
     }
 
     /// <summary>从配方解析相机/工位（供结果日志关联上下文；未知配方返回 null，不影响日志）。</summary>
@@ -198,7 +219,22 @@ public sealed class VisionService(
         }
     }
 
-    private async Task<VisionResult> ProcessCoreInnerAsync(
+    private sealed record ProcessCoreOutcome(VisionResult Result, PreviewRunOutcome? PreviewFrame);
+
+    private static ProcessCoreOutcome Core(VisionResult result, PreviewRunOutcome? preview = null) =>
+        new(result, preview);
+
+    private static PreviewRunOutcome? TryHandoffPreview(
+        bool preview, RecipeConfig recipe, ref VisionImage? undistorted, IReadOnlyList<PixelPose> poses)
+    {
+        if (!preview || undistorted is null)
+            return null;
+        var image = undistorted;
+        undistorted = null;
+        return new PreviewRunOutcome(image, poses, RecipeDisplayHints.ForRecipeTest(recipe));
+    }
+
+    private async Task<ProcessCoreOutcome> ProcessCoreInnerAsync(
         string recipeName, TcpClientPose? pose, CancellationToken ct,
         RecipeConfig? overlay = null, bool preview = false)
     {
@@ -230,13 +266,13 @@ public sealed class VisionService(
 
             EnsureHealthRestored();
             if (!preview && health?.IsInhibited(_metrics, recipeName) == true)
-                return VisionResult.Fail(recipeName, VisionErrorCode.ProcessUnhealthy,
-                    "PROCESS_UNHEALTHY", stopwatch.Elapsed.TotalMilliseconds);
+                return Core(VisionResult.Fail(recipeName, VisionErrorCode.ProcessUnhealthy,
+                    "PROCESS_UNHEALTHY", stopwatch.Elapsed.TotalMilliseconds));
 
             var assetError = assets?.Check(recipe);
             if (assetError is not null)
-                return VisionResult.Fail(recipeName, VisionErrorCode.AssetMismatch,
-                    assetError, stopwatch.Elapsed.TotalMilliseconds);
+                return Core(VisionResult.Fail(recipeName, VisionErrorCode.AssetMismatch,
+                    assetError, stopwatch.Elapsed.TotalMilliseconds));
 
             // OnArm 位姿：缺位姿直接 1014；有位姿再做 1012 一致性（多项式 Translate 仅校 RZ）。
             calibration.RequireClientPose(recipe.StationId, pose);
@@ -316,7 +352,8 @@ public sealed class VisionService(
             refineMs = infer.RefineMs;
             inferenceMs = stopwatch.Elapsed.TotalMilliseconds;
 
-            PublishSnapshot(recipeName, undistorted, pixelPoses);
+            if (!preview)
+                PublishSnapshot(recipe, undistorted, pixelPoses);
 
             string Stages(double total) => FormatStageMs(new PipelineStageMs
             {
@@ -347,7 +384,7 @@ public sealed class VisionService(
                     failureImages.Save(recipeName, undistorted, miss, failureCtx);
                 log.LogInformation("配方 {Recipe}: {Message}，总耗时 {Elapsed:0}ms（{Stages}）",
                     recipeName, missMessage, missElapsed, Stages(missElapsed));
-                return miss;
+                return Core(miss, TryHandoffPreview(preview, recipe, ref undistorted, pixelPoses));
             }
 
             var usablePoses = PixelPoseOutput.UsableOnly(pixelPoses);
@@ -381,23 +418,23 @@ public sealed class VisionService(
             if (!preview && captures is not null)
                 captures.Save(recipeName, undistorted, robotPoses, success, failureCtx);
 
-            return success;
+            return Core(success, TryHandoffPreview(preview, recipe, ref undistorted, pixelPoses));
         }
         catch (RecipeNotFoundException)
         {
-            return VisionResult.Fail(recipeName, VisionErrorCode.UnknownRecipe,
-                $"配方不存在: {recipeName}", stopwatch.Elapsed.TotalMilliseconds);
+            return Core(VisionResult.Fail(recipeName, VisionErrorCode.UnknownRecipe,
+                $"配方不存在: {recipeName}", stopwatch.Elapsed.TotalMilliseconds));
         }
         catch (InvalidRecipeException ex)
         {
-            return VisionResult.Fail(recipeName, ex.ErrorCode, ex.Message, stopwatch.Elapsed.TotalMilliseconds);
+            return Core(VisionResult.Fail(recipeName, ex.ErrorCode, ex.Message, stopwatch.Elapsed.TotalMilliseconds));
         }
         catch (OperationCanceledException)
         {
             // 取图/光源延时阶段被取消（调用方超时）：按处理超时返回；
             // 晚到的结果由 RunAsync 的 TrySetResult 落空丢弃，不产生僵尸应答
-            return VisionResult.Fail(recipeName, VisionErrorCode.Timeout,
-                "处理超时", stopwatch.Elapsed.TotalMilliseconds);
+            return Core(VisionResult.Fail(recipeName, VisionErrorCode.Timeout,
+                "处理超时", stopwatch.Elapsed.TotalMilliseconds));
         }
         catch (VisionException vex)
         {
@@ -405,7 +442,7 @@ public sealed class VisionService(
                 stopwatch.Elapsed.TotalMilliseconds);
             if (undistorted is not null && !preview)
                 failureImages.Save(recipeName, undistorted, fail, failureCtx);
-            return fail;
+            return Core(fail);
         }
         catch (Exception ex)
         {
@@ -414,7 +451,7 @@ public sealed class VisionService(
                 stopwatch.Elapsed.TotalMilliseconds);
             if (undistorted is not null && !preview)
                 failureImages.Save(recipeName, undistorted, fail, failureCtx);
-            return fail;
+            return Core(fail);
         }
         finally
         {
@@ -487,11 +524,13 @@ public sealed class VisionService(
         Iou: recipe.Iou,
         Source: preview ? "recipe-preview" : "pipeline");
 
-    private void PublishSnapshot(string recipeName, VisionImage undistorted, IReadOnlyList<PixelPose> poses)
+    private void PublishSnapshot(RecipeConfig recipe, VisionImage undistorted, IReadOnlyList<PixelPose> poses)
     {
         var handler = FrameProcessed;
         if (handler is null)
             return;
+
+        var displayHints = RecipeDisplayHints.ForRecipeTest(recipe);
 
         foreach (var subscriber in handler.GetInvocationList())
         {
@@ -506,7 +545,7 @@ public sealed class VisionService(
                 continue;
             }
 
-            var snapshot = new VisionFrameSnapshot(recipeName, clone, poses);
+            var snapshot = new VisionFrameSnapshot(recipe.Name, clone, poses, displayHints);
             _ = Task.Run(() =>
             {
                 try

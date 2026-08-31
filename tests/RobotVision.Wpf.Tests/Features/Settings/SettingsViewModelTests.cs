@@ -17,6 +17,8 @@ public class SettingsViewModelTests : IDisposable
     private readonly TcpServerManager _tcp;
     private readonly VisionService _vision;
     private readonly FailureImageStore _failures;
+    private readonly ResultLogStore _results;
+    private readonly SuccessCaptureStore _captures;
     private readonly AppSettingsStore _store;
     private readonly string _settingsPath;
 
@@ -28,6 +30,12 @@ public class SettingsViewModelTests : IDisposable
         _failures = new FailureImageStore(
             new FailureImageConfig { Folder = _cfg.FailureImage.Folder, RetainedCount = 200 },
             NullLogger<FailureImageStore>.Instance);
+        _results = new ResultLogStore(
+            new ResultLogConfig { Folder = Path.Combine(_dir.Path, "results") },
+            NullLogger<ResultLogStore>.Instance);
+        _captures = new SuccessCaptureStore(
+            new CaptureSuccessConfig { Folder = Path.Combine(_dir.Path, "captures") },
+            NullLogger<SuccessCaptureStore>.Instance);
         _settingsPath = System.IO.Path.Combine(_dir.Path, "appsettings.json");
         _store = new AppSettingsStore(_cfg, _settingsPath);
     }
@@ -39,7 +47,7 @@ public class SettingsViewModelTests : IDisposable
     }
 
     private SettingsViewModel CreateVm() =>
-        new(_cfg, _tcp, _vision, _failures, _store);
+        new(_cfg, _tcp, _vision, _failures, _results, _captures, _store);
 
     [Fact]
     public void Ctor_LoadsRuntimeValues()
@@ -168,6 +176,18 @@ public class SettingsViewModelTests : IDisposable
 
         vm.MaxQueueDepth.Should().Be(_vision.MaxQueueDepth);
         vm.HasUnsavedChanges.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Save_InferenceProviderChange_FlagsRestartNeeded()
+    {
+        var vm = CreateVm();
+        vm.InferenceProvider = "OpenVinoCpu";
+        SetValidPort(vm);
+
+        vm.SaveCommand.Execute(null);
+
+        vm.Message.Should().Contain("需重启程序生效");
     }
 
     /// <summary>获取一个当前空闲的 TCP 端口（绑定 0 后立即释放）。</summary>

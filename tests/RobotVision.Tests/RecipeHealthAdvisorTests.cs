@@ -1,3 +1,4 @@
+using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using Xunit;
 
@@ -38,11 +39,13 @@ public sealed class RecipeHealthAdvisorTests
     }
 
     [Fact]
-    public void ScoreLow_WithoutPeak()
+    public void ToPlaybookPrior_RefineFailDownranksCurrent()
     {
-        var spread = new ResultPoseSpread(
-            null, null, null, null, null, null, null, null, null, null, null, null, 0.4);
-        var hints = RecipeHealthAdvisor.Analyze(20, [new ResultCodeCount(0, 20)], [], spread);
-        Assert.Contains(hints, h => h.Id == "score_low");
+        var hints = RecipeHealthAdvisor.Analyze(
+            25, [new ResultCodeCount(1019, 4), new ResultCodeCount(0, 21)], [], null);
+        var prior = RecipeHealthAdvisor.ToPlaybookPrior(hints, SegmentRefineMethod.Template);
+        Assert.NotNull(prior);
+        Assert.Equal(SegmentRefineMethod.Template, prior!.Downrank);
+        Assert.Contains("1019", prior.Reason);
     }
 }

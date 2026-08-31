@@ -121,6 +121,42 @@ public class CamerasViewModelTests : IDisposable
     }
 
     [Fact]
+    public void Save_HardwareGrabTimeout_PersistsAndValidatesAgainstTotalTimeout()
+    {
+        TestInfra.RunSta(() =>
+        {
+            _cfg.TimeoutMs = 90_000;
+            _cfg.Cameras = [new CameraConfig { Id = "cam_basler", Type = "Basler", DeviceId = "" }];
+            var vm = CreateVm();
+            vm.Selected = vm.Items.Single(i => i.Id == "cam_basler");
+            vm.EditGrabTimeoutMs = 45_000;
+
+            vm.SaveCommand.Execute(null);
+
+            vm.Message.Should().StartWith("已保存 cam_basler");
+            _cfg.Cameras.Single(c => c.Id == "cam_basler").GrabTimeoutMs.Should().Be(45_000);
+        });
+    }
+
+    [Fact]
+    public void Save_HardwareGrabTimeoutNotLessThanTotal_ShowsError()
+    {
+        TestInfra.RunSta(() =>
+        {
+            _cfg.TimeoutMs = 30_000;
+            _cfg.Cameras = [new CameraConfig { Id = "cam_basler", Type = "Basler", DeviceId = "" }];
+            var vm = CreateVm();
+            vm.Selected = vm.Items.Single(i => i.Id == "cam_basler");
+            vm.EditGrabTimeoutMs = 30_000;
+
+            vm.SaveCommand.Execute(null);
+
+            vm.Message.Should().Contain("保存失败");
+            vm.Message.Should().Contain("1008");
+        });
+    }
+
+    [Fact]
     public void Save_HardwareDeviceId_KeepsSavedMessage_WithoutLiveParamError()
     {
         TestInfra.RunSta(() =>
@@ -139,6 +175,69 @@ public class CamerasViewModelTests : IDisposable
             vm.Message.Should().NotContain("读取相机参数失败");
             _cfg.Cameras.Single(c => c.Id == "cam_basler").DeviceId.Should().Be("23616873");
             vm.EditDeviceId.Should().Be("23616873");
+        });
+    }
+
+    [Fact]
+    public void Basler_LeftoverFileFields_AreNotUnsavedChanges()
+    {
+        TestInfra.RunSta(() =>
+        {
+            _cfg.TimeoutMs = 90_000;
+            _cfg.Cameras =
+            [
+                new CameraConfig
+                {
+                    Id = "cam_basler",
+                    Name = "产品相机",
+                    Type = "Basler",
+                    DeviceId = "24654744",
+                    Folder = @"E:\RobotVisionData\replay",
+                    Width = 0,
+                    Pattern = "Bars",
+                },
+            ];
+            var vm = CreateVm();
+            vm.HasUnsavedChanges.Should().BeFalse();
+            vm.UnsavedHint.Should().BeEmpty();
+        });
+    }
+
+    [Fact]
+    public void Save_ClearsUnsavedHint_AndNotifiesUi()
+    {
+        TestInfra.RunSta(() =>
+        {
+            _cfg.TimeoutMs = 90_000;
+            _cfg.Cameras =
+            [
+                new CameraConfig
+                {
+                    Id = "cam_basler",
+                    Name = "产品相机",
+                    Type = "Basler",
+                    DeviceId = "24654744",
+                    Folder = @"E:\RobotVisionData\replay",
+                },
+            ];
+            var vm = CreateVm();
+            vm.EditName = "产品相机-改";
+            vm.HasUnsavedChanges.Should().BeTrue();
+
+            var dirtyNotified = false;
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is nameof(CamerasViewModel.HasUnsavedChanges)
+                    or nameof(CamerasViewModel.UnsavedHint))
+                    dirtyNotified = true;
+            };
+
+            vm.SaveCommand.Execute(null);
+
+            vm.Message.Should().StartWith("已保存 cam_basler");
+            vm.HasUnsavedChanges.Should().BeFalse();
+            vm.UnsavedHint.Should().BeEmpty();
+            dirtyNotified.Should().BeTrue();
         });
     }
 }

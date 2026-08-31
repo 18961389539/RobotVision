@@ -1,5 +1,6 @@
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
+using RobotVision.Infrastructure.Inference.Strategies;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
@@ -21,6 +22,8 @@ internal interface IRecipeWorkspace
     /// 精修方法下拉框等才会跟着切。脏轮询不要走这条，以免打断正在编辑的输入框。
     /// </summary>
     void RefreshEditorBindings();
+    /// <summary>结果库健康信号转成的推荐先验；无数据则为 null。不进 TRIGGER。</summary>
+    RecipePrior? PlaybookPrior { get; }
     /// <summary>测试触发开始：切到结果图视图（有旧图则冻住直到新快照）。</summary>
     void OnTestStarting();
     /// <summary>把建议特征框写入编辑器并刷新 ROI 绑定。</summary>

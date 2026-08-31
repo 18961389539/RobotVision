@@ -18,4 +18,4 @@ public interface ILocalChatClient
         CancellationToken cancellationToken = default);
 }
 
-public readonly record struct ChatTurn(string Role, string Content);
+public readonly record struct ChatTurn(string Role, string Content, IReadOnlyList<string>? ImagePaths = null);

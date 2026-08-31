@@ -42,7 +42,7 @@ public sealed class MaskTemplateStrategyFactory : IAngleStrategyFactory
 {
     public AngleMode Mode => AngleMode.MaskTemplate;
 
-    public string Label => "分割+精修（模板/直线/孔槽/卡尺）";
+    public string Label => "分割+精修（模板/SIFT/形状匹配/直线/孔槽/卡尺）";
 
     public IAngleStrategy Create(ModelManager models, ILogger? logger = null) =>
         new MaskTemplateStrategy(models);

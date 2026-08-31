@@ -20,6 +20,7 @@ public sealed class FileCamera : ICamera
     private readonly int _intervalMs;
     private readonly object _lock = new();
     private int _index;
+    private string? _lastFile;
 
     public string Id { get; }
 
@@ -46,6 +47,15 @@ public sealed class FileCamera : ICamera
         _intervalMs = intervalMs;
     }
 
+    /// <summary>
+    /// 目录内全部回放文件（文件名序）。配方页赛马打分走磁盘解码，不要用本列表去 <see cref="Grab"/>，
+    /// 以免推进产线回放下标。
+    /// </summary>
+    public IReadOnlyList<string> PlaybackFiles => Array.AsReadOnly(_files);
+
+    /// <summary>按字节流解码图片（中文路径安全）。不改变回放下标。</summary>
+    public static Mat DecodeFile(string path) => ReadImage(path);
+
     public CameraFrame Grab(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -67,8 +77,21 @@ public sealed class FileCamera : ICamera
                 _index = 0;
             }
             file = _files[_index++];
+            _lastFile = file;
         }
 
+        return new CameraFrame(VisionImageCv.FromMat(ReadImage(file), ownsMat: true), DateTime.UtcNow);
+    }
+
+    /// <summary>再读上次 <see cref="Grab"/> 的文件，不推进下标。示教/框选要沿用当前画面。</summary>
+    public CameraFrame RepeatLast(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        string? file;
+        lock (_lock)
+            file = _lastFile;
+        if (string.IsNullOrEmpty(file))
+            return Grab(ct);
         return new CameraFrame(VisionImageCv.FromMat(ReadImage(file), ownsMat: true), DateTime.UtcNow);
     }
 

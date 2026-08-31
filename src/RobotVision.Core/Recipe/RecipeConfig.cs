@@ -116,22 +116,27 @@ public enum HousingEdgePolarity
     DarkToBright = 2,
 }
 
-/// <summary>凸起相对壳体短轴的侧别（示教锁定后运行只做同号检验）。</summary>
+/// <summary>
+/// 凸起相对壳体短轴的侧别（示教记录）。运行时每帧实测，不按此字段拒识或回退：
+/// 无向长边在 [0,180) 换手时 ±短轴会对调，同号门会把转过后的正确结果判失败。
+/// </summary>
 public enum TabPolarityLock
 {
-    /// <summary>每帧测量（旧配方）。</summary>
+    /// <summary>每帧测量；抓不到凸起则精修失败。</summary>
     Auto = 0,
 
-    /// <summary>凸起在 +短轴（θ≈0° 时朝下）。</summary>
+    /// <summary>示教时凸起在 +短轴（θ≈0° 时朝下）。运行时仍每帧实测。</summary>
     PlusShortAxis = 1,
 
-    /// <summary>凸起在 −短轴（θ≈0° 时朝上）。</summary>
+    /// <summary>示教时凸起在 −短轴（θ≈0° 时朝上）。运行时仍每帧实测。</summary>
     MinusShortAxis = 2,
 }
 
 /// <summary>分割精修（MaskTemplate 模式）的精修方法。
 /// Template = 原图模板匹配（吃纹理，可判头尾）；LineFit = 掩码长边鲁棒直线拟合
-/// （吃轮廓几何，弱纹理矩形适用，无 180° 方向语义）；CaliperTab = 原图卡尺长边 + 凸起极性。</summary>
+/// （吃轮廓几何，弱纹理矩形适用，无 180° 方向语义）；CaliperTab = 原图卡尺长边 + 凸起极性；
+/// Sift = 示教图 SIFT 特征匹配（相似变换，可判头尾）；
+/// ShapeMatch = 示教 Canny Chamfer（分割窗内几何匹配，可判头尾）。</summary>
 public enum SegmentRefineMethod
 {
     /// <summary>模板匹配：亚度精度，180° 头尾可判（需示教模板）。</summary>
@@ -148,6 +153,14 @@ public enum SegmentRefineMethod
     /// <summary>卡尺长边 + 凸起极性：原图 1D 剖面抓两条长边（亚像素），短轴中心取两线中线；
     /// 头尾看壳体边缘外侧哪一侧更暗。免示教模板；分割只需粗框套住壳体。</summary>
     CaliperTab = 3,
+
+    /// <summary>SIFT 特征匹配：示教模板与当前分割框内原图做特征点匹配，RANSAC 相似变换出 XY/有向角。
+    /// 需示教模板；壳体弱纹理时可能匹配不够，失败默认 1019。</summary>
+    Sift = 4,
+
+    /// <summary>形状匹配：示教图 Canny 轮廓与分割框内转正图做 Chamfer（距离场）匹配，几何定位 XY/有向角。
+    /// 需示教模板；只在分割目标窗内搜索，不整图搜。</summary>
+    ShapeMatch = 5,
 }
 
 /// <summary>
@@ -163,6 +176,14 @@ public sealed class TemplateOptions
     /// <summary>模板图 PNG 的 base64（转正目标裁剪）；空 = 未示教（LineFit / CaliperTab / CentroidHoleLine 不使用）。</summary>
     public string TemplateImageBase64 { get; set; } = "";
 
+    /// <summary>模板匹配、SIFT 与形状匹配都要示教图；直线/卡尺/孔槽不用。</summary>
+    public static bool NeedsTaughtImage(SegmentRefineMethod method) =>
+        method is SegmentRefineMethod.Template or SegmentRefineMethod.Sift or SegmentRefineMethod.ShapeMatch;
+
+    /// <summary>示教时可框选局部训练区域：灰度 NCC 与形状匹配。SIFT 必须整颗，不要裁特征框。</summary>
+    public static bool UsesFeatureTeachRoi(SegmentRefineMethod method) =>
+        method is SegmentRefineMethod.Template or SegmentRefineMethod.ShapeMatch;
+
     /// <summary>
     /// 示教特征框（相对全图 0~1，与检测 ROI 同口径）；null = 示教时裁整个分割目标。
     /// 仅「示教模板」使用：TRIGGER 仍用配方检测 ROI 找目标，匹配在目标转正窗口内滑窗。
@@ -175,6 +196,12 @@ public sealed class TemplateOptions
 
     /// <summary>粗角度基础上的精修搜索范围（度，(0,45]）：默认 ±5°。</summary>
     public double RefineRangeDeg { get; set; } = 5;
+
+    /// <summary>
+    /// true（默认）= 分割件先转正再在外扩窗内匹配；false = 不转正，在轴对齐包围盒内旋转模板搜索。
+    /// 模板匹配的输出 XY 始终是匹配峰（映回原图），不是壳体中心。
+    /// </summary>
+    public bool UseUprightCrop { get; set; } = true;
 
     /// <summary>混合判决：边缘图定角度（更准，中纹理目标抖动 σ 1.6°→0.3°）+ 灰度图定头尾。
     /// 灰度直匹配在中等纹理上角度抖动较大；纯边缘匹配会丢头尾（Canny 抹掉不对称特征）。</summary>
@@ -197,6 +224,11 @@ public sealed class TemplateOptions
 
     /// <summary>期望件数；0 = 不检查（旧配方）。过门件数不符则全部不可用 → 1019。</summary>
     public int ExpectedCount { get; set; }
+
+    /// <summary>
+    /// 赛马政策序（空 = 默认孔槽&gt;卡尺&gt;模板&gt;形状&gt;SIFT&gt;直线）。只影响向导/示教推荐，不进 TRIGGER。
+    /// </summary>
+    public List<SegmentRefineMethod>? RefinePolicyOrder { get; set; }
 
     /// <summary>示教轮廓面积（px²）；0 = 不查面积门。</summary>
     public double TeachAreaPx { get; set; }
@@ -232,12 +264,14 @@ public sealed class TemplateOptions
         Roi = Roi,
         MatchThreshold = MatchThreshold,
         RefineRangeDeg = RefineRangeDeg,
+        UseUprightCrop = UseUprightCrop,
         UseEdgeMatch = UseEdgeMatch,
         AllowCoarseFallback = AllowCoarseFallback,
         TeachPeakScore = TeachPeakScore,
         HousingEdgePolarity = HousingEdgePolarity,
         TabPolarity = TabPolarity,
         ExpectedCount = ExpectedCount,
+        RefinePolicyOrder = RefinePolicyOrder is { Count: > 0 } ? [..RefinePolicyOrder] : null,
         TeachAreaPx = TeachAreaPx,
         TeachAspect = TeachAspect,
         AreaRatioLo = AreaRatioLo,

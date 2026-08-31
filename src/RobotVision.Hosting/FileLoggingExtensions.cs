@@ -16,7 +16,7 @@ public static class FileLoggingExtensions
         if (!cfg.FileLogging.Enabled)
             return builder;
 
-        var folder = AppConfigExtensions.ResolveFolder(cfg.FileLogging.Folder);
+        var folder = cfg.ResolveDataPath(cfg.FileLogging.Folder);
         return builder.AddRobotVisionFileLogging(folder, cfg.FileLogging.RetainedDays);
     }
 

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using RobotVision.Core.Assets;
+using RobotVision.Core.IO;
 using RobotVision.Core.Models;
 
 namespace RobotVision.Core.Recipe;
@@ -159,7 +160,7 @@ public sealed class RecipeLoader(string folder)
         if (recipe.RotationCompensation == RotationCompensationMode.EccentricTool &&
             HasUndirectedAngle(recipe))
             throw new InvalidRecipeException(name,
-                "无头尾，偏心会差 180°；改用分割+精修有向方法（模板/卡尺/孔槽）或关闭偏心补偿");
+                "无头尾，偏心会差 180°；改用分割+精修有向方法（模板/SIFT/形状匹配/卡尺/孔槽）或关闭偏心补偿");
 
         // 双BLOB模式纯图像处理、不使用模型：跳过一切模型数量校验（多配的模型静默忽略）
         var isBlobMode = recipe.AngleMode == AngleMode.DualBlobCenterLine;
@@ -175,9 +176,9 @@ public sealed class RecipeLoader(string folder)
                 $"单模型模式（{recipe.AngleMode}）需要恰好 1 个模型（当前 {recipe.Models.Count}）");
 
         if (recipe.AngleMode == AngleMode.MaskTemplate &&
-            recipe.Template.RefineMethod == SegmentRefineMethod.Template &&
+            TemplateOptions.NeedsTaughtImage(recipe.Template.RefineMethod) &&
             string.IsNullOrEmpty(recipe.Template.TemplateImageBase64))
-            throw new InvalidRecipeException(name, "分割+精修（模板匹配方法）未示教模板（配方页「示教模板」自动生成，或改用直线拟合方法）");
+            throw new InvalidRecipeException(name, "分割+精修（模板匹配 / SIFT / 形状匹配）未示教模板（配方页「示教模板」自动生成，或改用直线拟合 / 卡尺+凸起）");
 
         if (recipe.AngleMode == AngleMode.MaskTemplate)
         {
@@ -479,7 +480,7 @@ public sealed class RecipeLoader(string folder)
 
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, recipe.Name + ".json");
-        AtomicWriteAllText(path, JsonSerializer.Serialize(recipe, WriteOptions));
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(recipe, WriteOptions));
 
         var info = new FileInfo(path);
         _cache[recipe.Name] = new CachedRecipe(recipe.Clone(), info.LastWriteTimeUtc, info.Length);
@@ -524,29 +525,6 @@ public sealed class RecipeLoader(string folder)
             if (loaded.SerialNumber == recipe.SerialNumber)
                 throw new InvalidRecipeException(recipe.Name,
                     $"serialNumber {recipe.SerialNumber} 已被配方 {other} 占用");
-        }
-    }
-
-    /// <summary>原子写（临时文件 + 替换）：配方是产线关键资产，与标定档案同策略。
-    /// Core 层不依赖 Infrastructure 的实现，此处独立实现同语义。</summary>
-    private static void AtomicWriteAllText(string path, string content)
-    {
-        var full = Path.GetFullPath(path);
-        var dir = Path.GetDirectoryName(full)!;
-        Directory.CreateDirectory(dir);
-        var tmp = Path.Combine(dir, $".{Path.GetFileName(full)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            File.WriteAllText(tmp, content);
-            if (File.Exists(full))
-                File.Replace(tmp, full, null);
-            else
-                File.Move(tmp, full);
-        }
-        finally
-        {
-            try { File.Delete(tmp); }
-            catch (IOException) { }
         }
     }
 

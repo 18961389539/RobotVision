@@ -20,16 +20,23 @@
 - 配方输出偏移(OutputOffsetOptions)
 - 成功结果留档(ResultLog):每次触发成功/失败追加 `data/results/*.jsonl`(坐标/角度/置信度/耗时),供追溯与合格率/分布/趋势统计
 - OK 产品存图开关(CaptureSuccess.Enabled,默认关):成功检测可存现场图
+- 工艺助手(对话页):内置本地大模型问答,llama-server 本机 CPU 推理,图像/坐标/配方不出机器;可查配方、错误码、结果趋势与日志摘要;写操作需确认并留审计 `data/chat-audit/`
+- 结果分析页:合格率/分布/趋势图表,结果日志改为 SQLite(页面查询)+ JSONL(留档)双写
+- 标定向导支持直接新建比例标定档案
+- 推理策略 Advisor 体系:检出阈值/特征 ROI/分割精修等参数的自动建议
 
 ### 修复
+- 发布时 Configuration.Binder 源生成器报错(全局启用 C# 拦截器命名空间)
+- 分析页 OxyPlot API 兼容性与编译警告
 
 ### 变更
 - 全仓依赖锁定(packages.lock.json)
 - 推理后端改为 OpenVINO 核显（`Inference:Provider` 默认 `OpenVinoGpu`，单会话；GPU 不可用时回退 OpenVINO CPU 并打警告；YoloDotNet 每进程只能一种 EP，已替换 CPU 包）
+- WPF 界面重构为 Features/Shared 分层
 
 ### 破坏性变更
 
-## [1.0.0] - 2026-08-26
+## [1.0.0] - 2026-08-27
 
 首版交付。
 

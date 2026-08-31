@@ -133,6 +133,7 @@ public sealed class MaskTemplateRotationCache : IDisposable
     private static bool ShouldCache(RecipeConfig recipe) =>
         recipe.AngleMode == AngleMode.MaskTemplate
         && recipe.Template.RefineMethod == SegmentRefineMethod.Template
+        && recipe.Template.UseUprightCrop
         && !string.IsNullOrEmpty(recipe.Template.TemplateImageBase64);
 
     private static string Fingerprint(TemplateOptions template)

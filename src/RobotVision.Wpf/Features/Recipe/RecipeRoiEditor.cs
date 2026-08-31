@@ -1,4 +1,5 @@
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RobotVision.Core.Models;
@@ -163,7 +164,7 @@ public sealed partial class RecipeRoiEditor : ObservableObject
             if (value)
             {
                 Editor.Template ??= new();
-                Editor.Template.Roi ??= Editor.Roi ?? new Roi(0.25, 0.25, 0.5, 0.5);
+                Editor.Template.Roi ??= new Roi(0.35, 0.35, 0.3, 0.3);
             }
             else if (Editor.Template is not null)
                 Editor.Template.Roi = null;
@@ -237,6 +238,37 @@ public sealed partial class RecipeRoiEditor : ObservableObject
             return;
         Editor.Template ??= new();
         Editor.Template.Roi = RoiFromCenterPx(centerXPx, centerYPx, widthPx, heightPx, RoiRefWidth, RoiRefHeight);
+        NotifyTemplateRoiChanged();
+    }
+
+    /// <summary>
+    /// 用当前结果图当框选底板，不再 Grab。文件夹相机会进下一张，看起来像换图。
+    /// </summary>
+    public bool TryAdoptDisplayedImage(ImageSource? source, string? cameraId, string reason)
+    {
+        if (source is not BitmapSource bmp || bmp.PixelWidth < 8 || bmp.PixelHeight < 8)
+            return false;
+
+        _roiFrameCameraId = string.IsNullOrWhiteSpace(cameraId) ? Editor.CameraId : cameraId;
+        RoiRefWidth = bmp.PixelWidth;
+        RoiRefHeight = bmp.PixelHeight;
+        if (!ReferenceEquals(PreviewImage, bmp))
+            PreviewImage = bmp;
+        EnsureFeatureRoiDrawable();
+        _host.Message = $"{reason} {RoiRefWidth}×{RoiRefHeight}px，可直接框选（未重新取图）";
+        return true;
+    }
+
+    /// <summary>1×1 这类退化框无法拖，换成画面中部占位，等用户拖出真正的特征。</summary>
+    public void EnsureFeatureRoiDrawable()
+    {
+        if (Editor.Template?.Roi is not { } r || RoiRefWidth < 8 || RoiRefHeight < 8)
+            return;
+        var w = r.Width * RoiRefWidth;
+        var h = r.Height * RoiRefHeight;
+        if (w >= 8 && h >= 8)
+            return;
+        Editor.Template.Roi = new Roi(0.35, 0.35, 0.3, 0.3);
         NotifyTemplateRoiChanged();
     }
 

@@ -63,6 +63,7 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             obj["IpAddress"] = values.IpAddress;
             obj["TcpPort"] = values.TcpPort;
             obj["IpWhitelist"] = JsonSerializer.SerializeToNode(values.IpWhitelist, Indented);
+            obj["UiTheme"] = UiThemes.Normalize(values.UiTheme);
 
             var poseCheck = obj["PoseCheck"] as JsonObject ?? [];
             poseCheck["Enabled"] = values.PoseCheckEnabled;
@@ -74,12 +75,37 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             health["Enabled"] = values.ProcessHealthEnabled;
             health["ConsecutiveFailLimit"] = values.ConsecutiveFailLimit;
             health["InhibitOnLimit"] = values.InhibitOnLimit;
+            health["RetainedDays"] = values.ProcessHealthRetainedDays;
             obj["ProcessHealth"] = health;
+
+            var inference = obj["Inference"] as JsonObject ?? [];
+            inference["Provider"] = values.InferenceProvider;
+            inference["MaxSessions"] = values.InferenceMaxSessions;
+            obj["Inference"] = inference;
+
+            var fileLogging = obj["FileLogging"] as JsonObject ?? [];
+            fileLogging["Enabled"] = values.FileLoggingEnabled;
+            fileLogging["RetainedDays"] = values.FileLoggingRetainedDays;
+            obj["FileLogging"] = fileLogging;
 
             var failure = obj["FailureImage"] as JsonObject ?? [];
             failure["Enabled"] = values.FailureEnabled;
             failure["RetainedCount"] = values.FailureRetainedCount;
+            failure["RetainedDays"] = values.FailureRetainedDays;
             obj["FailureImage"] = failure;
+
+            var capture = obj["CaptureSuccess"] as JsonObject ?? [];
+            capture["Enabled"] = values.CaptureSuccessEnabled;
+            capture["RetainedDays"] = values.CaptureSuccessRetainedDays;
+            capture["MaxWidth"] = values.CaptureSuccessMaxWidth;
+            obj["CaptureSuccess"] = capture;
+
+            var resultLog = obj["ResultLog"] as JsonObject ?? [];
+            resultLog["Enabled"] = values.ResultLogEnabled;
+            resultLog["Jsonl"] = values.ResultLogJsonl;
+            resultLog["Sqlite"] = values.ResultLogSqlite;
+            resultLog["RetainedDays"] = values.ResultLogRetainedDays;
+            obj["ResultLog"] = resultLog;
         });
 
         cfg.TimeoutMs = values.TimeoutMs;
@@ -93,12 +119,26 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         cfg.IpWhitelist = [.. values.IpWhitelist];
         cfg.FailureImage.Enabled = values.FailureEnabled;
         cfg.FailureImage.RetainedCount = values.FailureRetainedCount;
+        cfg.FailureImage.RetainedDays = values.FailureRetainedDays;
+        cfg.CaptureSuccess.Enabled = values.CaptureSuccessEnabled;
+        cfg.CaptureSuccess.RetainedDays = values.CaptureSuccessRetainedDays;
+        cfg.CaptureSuccess.MaxWidth = values.CaptureSuccessMaxWidth;
+        cfg.ResultLog.Enabled = values.ResultLogEnabled;
+        cfg.ResultLog.Jsonl = values.ResultLogJsonl;
+        cfg.ResultLog.Sqlite = values.ResultLogSqlite;
+        cfg.ResultLog.RetainedDays = values.ResultLogRetainedDays;
         cfg.PoseCheck.Enabled = values.PoseCheckEnabled;
         cfg.PoseCheck.XyToleranceMm = values.PoseXyToleranceMm;
         cfg.PoseCheck.RzToleranceDeg = values.PoseRzToleranceDeg;
         cfg.ProcessHealth.Enabled = values.ProcessHealthEnabled;
         cfg.ProcessHealth.ConsecutiveFailLimit = values.ConsecutiveFailLimit;
         cfg.ProcessHealth.InhibitOnLimit = values.InhibitOnLimit;
+        cfg.ProcessHealth.RetainedDays = values.ProcessHealthRetainedDays;
+        cfg.Inference.Provider = values.InferenceProvider;
+        cfg.Inference.MaxSessions = values.InferenceMaxSessions;
+        cfg.FileLogging.Enabled = values.FileLoggingEnabled;
+        cfg.FileLogging.RetainedDays = values.FileLoggingRetainedDays;
+        cfg.UiTheme = UiThemes.Normalize(values.UiTheme);
 
         // 落盘 + 内存同步完成后，把可热应用的参数同步到运行中的管理器（见 RuntimeSync 注释）
         RuntimeSync?.Invoke(cfg);
@@ -133,6 +173,24 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             throw new InvalidDataException("连接上限不能为负（0 = 不限）");
         if (values.FailureRetainedCount < 0)
             throw new InvalidDataException("失败留存数量不能为负（0 = 不自动清理）");
+        if (values.FailureRetainedDays < 0)
+            throw new InvalidDataException("失败留存天数不能为负（0 = 不按天清理）");
+        if (values.CaptureSuccessRetainedDays < 0)
+            throw new InvalidDataException("成功留存天数不能为负（0 = 不按天清理）");
+        if (values.CaptureSuccessMaxWidth < 0)
+            throw new InvalidDataException("成功留存缩图宽度不能为负（0 = 原图）");
+        if (values.ResultLogRetainedDays < 0)
+            throw new InvalidDataException("结果留档天数不能为负（0 = 不清理）");
+        if (values.ResultLogEnabled && !values.ResultLogJsonl && !values.ResultLogSqlite)
+            throw new InvalidDataException("结果留档已开启时，须至少勾选 JSONL 或 SQLite 之一");
+        if (!IsKnownInferenceProvider(values.InferenceProvider))
+            throw new InvalidDataException("推理 Provider 须为 OpenVinoGpu 或 OpenVinoCpu");
+        if (values.InferenceMaxSessions < 0)
+            throw new InvalidDataException("推理会话上限不能为负（0 = 不限制）");
+        if (values.FileLoggingRetainedDays < 0)
+            throw new InvalidDataException("文件日志保留天数不能为负（0 = 不清理）");
+        if (values.ProcessHealthRetainedDays < 0)
+            throw new InvalidDataException("过程能力指标保留天数不能为负（0 = 不按天清理）");
         if (values.TcpPort is < 1 or > 65535)
             throw new InvalidDataException("端口必须在 1~65535");
         if (!IPAddress.TryParse(values.IpAddress, out _))
@@ -163,6 +221,15 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             throw new InvalidDataException("appsettings.json 的 ProcessHealth.ConsecutiveFailLimit 不能为负（0 = 不联锁）");
         if (cfg.ResultLog.RetainedDays < 0)
             throw new InvalidDataException("appsettings.json 的 ResultLog.RetainedDays 不能为负（0 = 不清理）");
+        if (!IsKnownInferenceProvider(cfg.Inference.Provider))
+            throw new InvalidDataException(
+                $"appsettings.json 的 Inference.Provider={cfg.Inference.Provider} 无效（须为 OpenVinoGpu 或 OpenVinoCpu）");
+        if (cfg.Inference.MaxSessions < 0)
+            throw new InvalidDataException("appsettings.json 的 Inference.MaxSessions 不能为负（0 = 不限制）");
+        if (cfg.FileLogging.RetainedDays < 0)
+            throw new InvalidDataException("appsettings.json 的 FileLogging.RetainedDays 不能为负（0 = 不清理）");
+        if (cfg.ProcessHealth.RetainedDays < 0)
+            throw new InvalidDataException("appsettings.json 的 ProcessHealth.RetainedDays 不能为负（0 = 不按天清理）");
         if (cfg.MaxQueueDepth < 1)
             throw new InvalidDataException($"appsettings.json 的 MaxQueueDepth={cfg.MaxQueueDepth} 至少为 1");
         if (cfg.MaxConcurrent < 1 || cfg.MaxConcurrent > cfg.MaxQueueDepth)
@@ -188,6 +255,15 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
                     "取图超时将表现为 1008 而非 1003，请先调大总超时或调小 GrabTimeoutMs");
         }
     }
+
+    private static bool IsKnownInferenceProvider(string provider)
+    {
+        var key = provider.Trim().ToUpperInvariant()
+            .Replace("-", "", StringComparison.Ordinal)
+            .Replace("_", "", StringComparison.Ordinal)
+            .Replace(" ", "", StringComparison.Ordinal);
+        return key is "OPENVINOGPU" or "GPU" or "OPENVINO" or "OPENVINOCPU" or "CPU";
+    }
 }
 
 /// <summary>一次保存携带的完整参数集合（与 AppConfig 字段一一对应）。</summary>
@@ -208,4 +284,18 @@ public sealed record ServiceSettingsValues(
     double PoseRzToleranceDeg = 0.5,
     bool ProcessHealthEnabled = true,
     int ConsecutiveFailLimit = 5,
-    bool InhibitOnLimit = true);
+    bool InhibitOnLimit = true,
+    int FailureRetainedDays = 0,
+    bool CaptureSuccessEnabled = false,
+    int CaptureSuccessRetainedDays = 30,
+    int CaptureSuccessMaxWidth = 0,
+    bool ResultLogEnabled = true,
+    bool ResultLogJsonl = true,
+    bool ResultLogSqlite = true,
+    int ResultLogRetainedDays = 30,
+    string InferenceProvider = "OpenVinoGpu",
+    int InferenceMaxSessions = 8,
+    bool FileLoggingEnabled = true,
+    int FileLoggingRetainedDays = 30,
+    int ProcessHealthRetainedDays = 90,
+    string UiTheme = UiThemes.Dark);

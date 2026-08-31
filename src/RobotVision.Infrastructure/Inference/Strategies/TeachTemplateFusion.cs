@@ -2,7 +2,7 @@ using OpenCvSharp;
 
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
-/// <summary>配方页示教：多帧模板中位融合（不进 TRIGGER，禁止对生产模板做静默 EMA）。</summary>
+/// <summary>多帧模板中位融合辅助（不进 TRIGGER）。配方页「示教模板」现为单帧，本类仅保留给测试/工具。</summary>
 public static class TeachTemplateFusion
 {
     public const int DefaultFrameCount = 3;

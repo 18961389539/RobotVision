@@ -227,7 +227,13 @@ public class AppSettingsStoreTests : IDisposable
             TimeoutMs: 3000, MaxQueueDepth: 8, MaxConcurrent: 2, TcpBacklog: 16, MaxConnections: 4,
             FailureEnabled: false, FailureRetainedCount: 50,
             IpAddress: "192.168.1.50", TcpPort: 8888,
-            IpWhitelist: ["192.168.1.10", "192.168.2.*"]));
+            IpWhitelist: ["192.168.1.10", "192.168.2.*"],
+            FailureRetainedDays: 14,
+            CaptureSuccessEnabled: true, CaptureSuccessRetainedDays: 7, CaptureSuccessMaxWidth: 1280,
+            ResultLogEnabled: false, ResultLogJsonl: true, ResultLogSqlite: false, ResultLogRetainedDays: 60,
+            InferenceProvider: "OpenVinoCpu", InferenceMaxSessions: 4,
+            FileLoggingEnabled: false, FileLoggingRetainedDays: 14,
+            ProcessHealthRetainedDays: 45));
 
         using var doc = JsonDocument.Parse(File.ReadAllText(_file));
         var root = doc.RootElement;
@@ -242,6 +248,17 @@ public class AppSettingsStoreTests : IDisposable
         Assert.Equal("192.168.2.*", root.GetProperty("IpWhitelist")[1].GetString());
         Assert.False(root.GetProperty("FailureImage").GetProperty("Enabled").GetBoolean());
         Assert.Equal(50, root.GetProperty("FailureImage").GetProperty("RetainedCount").GetInt32());
+        Assert.Equal(14, root.GetProperty("FailureImage").GetProperty("RetainedDays").GetInt32());
+        Assert.True(root.GetProperty("CaptureSuccess").GetProperty("Enabled").GetBoolean());
+        Assert.Equal(7, root.GetProperty("CaptureSuccess").GetProperty("RetainedDays").GetInt32());
+        Assert.Equal(1280, root.GetProperty("CaptureSuccess").GetProperty("MaxWidth").GetInt32());
+        Assert.False(root.GetProperty("ResultLog").GetProperty("Enabled").GetBoolean());
+        Assert.Equal(60, root.GetProperty("ResultLog").GetProperty("RetainedDays").GetInt32());
+        Assert.Equal("OpenVinoCpu", root.GetProperty("Inference").GetProperty("Provider").GetString());
+        Assert.Equal(4, root.GetProperty("Inference").GetProperty("MaxSessions").GetInt32());
+        Assert.False(root.GetProperty("FileLogging").GetProperty("Enabled").GetBoolean());
+        Assert.Equal(14, root.GetProperty("FileLogging").GetProperty("RetainedDays").GetInt32());
+        Assert.Equal(45, root.GetProperty("ProcessHealth").GetProperty("RetainedDays").GetInt32());
         Assert.Equal(0, root.GetProperty("IdleTimeoutMs").GetInt64());
         Assert.True(root.GetProperty("PoseCheck").GetProperty("Enabled").GetBoolean());
         // 其他节点保留
@@ -254,7 +271,31 @@ public class AppSettingsStoreTests : IDisposable
         Assert.Equal(8888, cfg.TcpPort);
         Assert.False(cfg.FailureImage.Enabled);
         Assert.Equal(50, cfg.FailureImage.RetainedCount);
+        Assert.Equal(14, cfg.FailureImage.RetainedDays);
+        Assert.True(cfg.CaptureSuccess.Enabled);
+        Assert.Equal(7, cfg.CaptureSuccess.RetainedDays);
+        Assert.Equal(1280, cfg.CaptureSuccess.MaxWidth);
+        Assert.False(cfg.ResultLog.Enabled);
+        Assert.True(cfg.ResultLog.Jsonl);
+        Assert.False(cfg.ResultLog.Sqlite);
+        Assert.Equal(60, cfg.ResultLog.RetainedDays);
+        Assert.Equal("OpenVinoCpu", cfg.Inference.Provider);
+        Assert.Equal(4, cfg.Inference.MaxSessions);
+        Assert.False(cfg.FileLogging.Enabled);
+        Assert.Equal(14, cfg.FileLogging.RetainedDays);
+        Assert.Equal(45, cfg.ProcessHealth.RetainedDays);
         Assert.Equal(2, cfg.IpWhitelist.Count);
+    }
+
+    [Fact]
+    public void Save_ResultLogEnabledWithoutSink_Throws()
+    {
+        var cfg = WriteBase("""{ "IpAddress": "0.0.0.0", "TcpPort": 9999, "TimeoutMs": 5000 }""");
+        var store = new AppSettingsStore(cfg, _file);
+        var values = new ServiceSettingsValues(
+            5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999, [],
+            ResultLogEnabled: true, ResultLogJsonl: false, ResultLogSqlite: false);
+        Assert.Throws<InvalidDataException>(() => store.Save(values));
     }
 
     [Fact]
@@ -371,6 +412,17 @@ public class AppSettingsStoreTests : IDisposable
         Assert.Equal(TcpServerManager.IdleTimeoutThirtyDaysMs,
             doc.RootElement.GetProperty("IdleTimeoutMs").GetInt64());
         Assert.Equal(TcpServerManager.IdleTimeoutThirtyDaysMs, cfg.IdleTimeoutMs);
+    }
+
+    [Fact]
+    public void Save_InvalidInferenceProvider_Throws()
+    {
+        var cfg = WriteBase("""{ "IpAddress": "0.0.0.0", "TcpPort": 9999, "TimeoutMs": 5000 }""");
+        var store = new AppSettingsStore(cfg, _file);
+        var values = new ServiceSettingsValues(
+            5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999, [],
+            InferenceProvider: "OnnxRuntime");
+        Assert.Throws<InvalidDataException>(() => store.Save(values));
     }
 
     [Fact]

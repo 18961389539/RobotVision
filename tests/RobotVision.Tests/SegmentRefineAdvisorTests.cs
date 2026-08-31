@@ -42,4 +42,45 @@ public sealed class SegmentRefineAdvisorTests
             $"弱纹理矩形不应推荐模板，实际 {advice.Recommended}");
         Assert.False(advice.RecommendEdgeMatch);
     }
+
+    [Fact]
+    public void OverlayBatch_UsesPlaybackWinnerAndKeepsSeedPolarity()
+    {
+        var seed = new SegmentRefineAdvice(
+            SegmentRefineMethod.LineFit, false, false, 1.2, 0, 0, 0, 0, "seed")
+        {
+            TabPolarity = TabPolarityLock.MinusShortAxis,
+        };
+        IReadOnlyList<SegmentRefineCandidate> agg =
+        [
+            new(SegmentRefineMethod.CaliperTab, true, true, 0.80, "38/39 过门，均分 0.80"),
+            new(SegmentRefineMethod.Template, true, true, 0.40, "10/39 过门"),
+        ];
+        var advice = SegmentRefineAdvisor.OverlayBatch(seed, agg, 35, 39);
+        Assert.Equal(SegmentRefineMethod.CaliperTab, advice.Recommended);
+        Assert.Equal(TabPolarityLock.MinusShortAxis, advice.TabPolarity);
+        Assert.Contains("回放 35/39 检出", advice.Summary);
+        Assert.Contains("采用回放胜出", advice.Summary);
+        Assert.Equal(agg, advice.Candidates);
+    }
+
+    [Fact]
+    public void OverlayBatch_UntaughtKeepsPrintedTextureHeuristic()
+    {
+        var scene = new SceneDescriptor(SceneKind.PrintedTexture, LightingClass.BrightField,
+            1.8, 0.3, 5.2, 0.15, false, 0, 900, "纹理");
+        var seed = new SegmentRefineAdvice(
+            SegmentRefineMethod.Template, true, true, 1.8, 5.2, 0.15, 0, 0, "seed")
+        {
+            Scene = scene,
+        };
+        IReadOnlyList<SegmentRefineCandidate> agg =
+        [
+            new(SegmentRefineMethod.CaliperTab, true, true, 0.80, "38/39 过门，均分 0.80"),
+            new(SegmentRefineMethod.Template, false, true, 0, "未示教", Skipped: true),
+        ];
+        var advice = SegmentRefineAdvisor.OverlayBatch(seed, agg, 35, 39);
+        Assert.Equal(SegmentRefineMethod.Template, advice.Recommended);
+        Assert.Contains("尚未示教", advice.Summary);
+    }
 }

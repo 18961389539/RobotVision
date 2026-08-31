@@ -12,6 +12,7 @@ using RobotVision.Hosting;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Communication;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Monitor;
 
@@ -467,7 +468,10 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         {
             using (snapshot.UndistortedImage)
             {
-                OverlayDrawer.DrawPoses(snapshot.UndistortedImage, snapshot.Poses);
+                var hints = _cfg.MonitorOverlayMode == MonitorOverlayMode.MatchRecipeTest
+                    ? snapshot.DisplayHints
+                    : RecipeDisplayHints.Production;
+                FrameOverlayComposer.Compose(snapshot.UndistortedImage, snapshot.Poses, hints);
                 source = ImageConverter.ToBitmapSource(snapshot.UndistortedImage);
             }
 

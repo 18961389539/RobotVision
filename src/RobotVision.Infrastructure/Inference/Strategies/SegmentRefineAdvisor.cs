@@ -25,6 +25,7 @@ public sealed record SegmentRefineAdvice(
     public double SuggestedConfidence { get; init; }
     public double SuggestedPixelConfidence { get; init; }
     public IReadOnlyList<SegmentRefineCandidate> Candidates { get; init; } = [];
+    public SceneDescriptor? Scene { get; init; }
 }
 
 /// <summary>
@@ -48,32 +49,19 @@ public static class SegmentRefineAdvisor
         double originY = 0,
         double instanceConfidence = 0,
         double boxConfidence = DetectionThresholdAdvisor.DefaultBoxConfidence,
-        double pixelConfidence = DetectionThresholdAdvisor.DefaultPixelConfidence)
+        double pixelConfidence = DetectionThresholdAdvisor.DefaultPixelConfidence,
+        TaskConstraints? task = null,
+        SegmentRefineBakeOff.TeachCache? teachCache = null,
+        RecipePrior? prior = null)
     {
-        var housing = MaskHousing.Fit(contour);
-        var aspect = housing.LongLen / Math.Max(1.0, housing.ShortLen);
-        var full = Cv2.MinAreaRect(contour);
-        var fullShort = Math.Min(full.Size.Width, full.Size.Height);
-        var protrusion = Math.Max(0, fullShort - housing.ShortLen);
-
-        var holeArea = 0.0;
-        var holeOk = false;
-        if (bitPackedMask is { Length: > 0 } && maskWidth > 0 && maskHeight > 0)
-        {
-            var hole = MaskTemplateMatcher.RefineByCentroidHoleLine(bitPackedMask, maskWidth, maskHeight);
-            if (hole is not null)
-            {
-                holeOk = true;
-                holeArea = 1;
-            }
-        }
-
-        var teachAreaPx = 0.0;
-        if (contour.Count >= 3)
-        {
-            var arr = contour as Point2f[] ?? contour.ToArray();
-            teachAreaPx = Cv2.ContourArea(arr);
-        }
+        var scene = ScenePlaybook.Describe(bgr, contour, bitPackedMask, maskWidth, maskHeight);
+        var aspect = scene.Aspect;
+        var protrusion = scene.ProtrusionPx;
+        var holeOk = scene.HoleOk;
+        var holeArea = holeOk ? 1.0 : 0.0;
+        var teachAreaPx = scene.TeachAreaPx;
+        task ??= new TaskConstraints();
+        prior = ScenePlaybook.Merge(ScenePlaybook.FromTemplate(template), prior);
 
         Mat? ownedUpright = null;
         var view = upright;
@@ -94,21 +82,19 @@ public static class SegmentRefineAdvisor
 
         try
         {
-            var entropy = view is null ? 0 : GrayEntropy(view);
-            var separability = view is null ? 0 : SelfFlipGap(view);
-            var canOrient = separability >= 0.08 || holeOk || protrusion > 0.08 * Math.Max(8, housing.ShortLen);
+            var entropy = scene.TextureEntropy;
+            var separability = scene.Separability;
+            var canOrient = scene.Separability >= 0.08 || holeOk || protrusion > 0.08 * Math.Max(8, 1);
 
-            var heuristic = PickHeuristic(holeOk, protrusion, housing.ShortLen, separability, aspect, entropy);
             var candidates = SegmentRefineBakeOff.Run(
-                bgr, contour, bitPackedMask, maskWidth, maskHeight, templateImage, template);
-            var raced = SegmentRefineBakeOff.PickWinner(candidates);
+                bgr, contour, bitPackedMask, maskWidth, maskHeight, templateImage, template, teachCache);
+            var playbook = ScenePlaybook.Recommend(task, scene, candidates, prior);
+            var method = ScenePlaybook.RefineMethodOf(playbook.Primary)
+                         ?? PickHeuristic(holeOk, protrusion, Math.Max(8, 1), separability, aspect, entropy).Method;
+            var edge = playbook.Primary.EdgeMatch && method == SegmentRefineMethod.Template;
+            var raced = ScenePlaybook.PickWinnerForTask(candidates, task, scene, prior);
 
-            var method = raced?.Method ?? heuristic.Method;
-            var edge = method == SegmentRefineMethod.Template && entropy is >= 4.0 and <= 6.5;
-            if (raced is null && heuristic.Edge)
-                edge = true;
-
-            var (edgePolarity, tabPolarity) = InferPolarity(bgr, contour);
+            var (edgePolarity, tabPolarity) = ScenePlaybook.InferPolarity(bgr, contour);
             var (teachPeak, peakSharp) = MeasureTeachPeak(view, templateImage, template);
             var suggestedTh = teachPeak >= 0.3
                 ? TemplateOptions.MatchThresholdFromTeachPeak(teachPeak, peakSharp)
@@ -120,7 +106,7 @@ public static class SegmentRefineAdvisor
             if (crop is not null && fullImageWidth > 0 && fullImageHeight > 0)
             {
                 featureRoi = FeatureRoiAdvisor.Suggest(
-                    crop, fullImageWidth, fullImageHeight, originX, originY);
+                    crop, fullImageWidth, fullImageHeight, contour, originX, originY);
             }
             else if (view is not null && fullImageWidth > 0 && ownedUpright is null)
             {
@@ -130,7 +116,7 @@ public static class SegmentRefineAdvisor
                     using (tmp.Upright)
                     {
                         featureRoi = FeatureRoiAdvisor.Suggest(
-                            tmp, fullImageWidth, fullImageHeight, originX, originY);
+                            tmp, fullImageWidth, fullImageHeight, contour, originX, originY);
                     }
                 }
                 catch (InvalidOperationException)
@@ -138,9 +124,9 @@ public static class SegmentRefineAdvisor
                 }
             }
 
-            var why = raced is not null
-                ? $"{FormatRace(candidates)}。采用实测胜出：{MethodLabel(method)}。{raced.Note}"
-                : $"{heuristic.Why}{FormatRace(candidates)}";
+            var why = $"{playbook.Summary}{FormatRace(candidates)}";
+            if (raced is not null && playbook.Primary.Refine == raced.Method)
+                why += $" 采用实测胜出：{MethodLabel(method)}。{raced.Note}";
 
             if (method == SegmentRefineMethod.Template && !canOrient)
                 why += featureRoi is not null
@@ -165,8 +151,8 @@ public static class SegmentRefineAdvisor
                     : " 已锁定亮场边缘。";
             if (tabPolarity != TabPolarityLock.Auto)
                 why += tabPolarity == TabPolarityLock.PlusShortAxis
-                    ? " 凸起锁定在 +短轴。"
-                    : " 凸起锁定在 −短轴。";
+                    ? " 示教凸起在 +短轴（运行每帧实测）。"
+                    : " 示教凸起在 −短轴（运行每帧实测）。";
 
             return new SegmentRefineAdvice(
                 method, edge, canOrient, aspect, entropy, separability, holeArea, protrusion, why)
@@ -180,6 +166,7 @@ public static class SegmentRefineAdvisor
                 SuggestedConfidence = Math.Abs(sugBox - boxConfidence) > 0.02 ? sugBox : 0,
                 SuggestedPixelConfidence = Math.Abs(sugPix - pixelConfidence) > 0.02 ? sugPix : 0,
                 Candidates = candidates,
+                Scene = scene,
             };
         }
         finally
@@ -188,11 +175,45 @@ public static class SegmentRefineAdvisor
         }
     }
 
+    /// <summary>
+    /// 用多帧汇总赛马覆盖单帧推荐。极性、阈值、特征框仍来自 <paramref name="seed"/>（示教帧或最高置信帧）。
+    /// </summary>
+    public static SegmentRefineAdvice OverlayBatch(
+        SegmentRefineAdvice seed,
+        IReadOnlyList<SegmentRefineCandidate> aggregated,
+        int detected,
+        int total,
+        TaskConstraints? task = null,
+        RecipePrior? prior = null)
+    {
+        task ??= new TaskConstraints();
+        var playbook = ScenePlaybook.Recommend(task, seed.Scene, aggregated, prior);
+        var raced = ScenePlaybook.PickWinnerForTask(aggregated, task, seed.Scene, prior);
+        var method = ScenePlaybook.RefineMethodOf(playbook.Primary) ?? seed.Recommended;
+        var edge = method == SegmentRefineMethod.Template && playbook.Primary.EdgeMatch;
+
+        var why = $"回放 {detected}/{total} 检出。{FormatRace(aggregated)}";
+        if (raced is not null && playbook.Primary.Refine == raced.Method)
+            why += $" 采用回放胜出：{MethodLabel(method)}。{raced.Note}";
+        else
+            why += $" {playbook.Summary}";
+
+        return seed with
+        {
+            Recommended = method,
+            RecommendEdgeMatch = edge,
+            Summary = why,
+            Candidates = aggregated,
+        };
+    }
+
     public static string MethodLabel(SegmentRefineMethod method) => method switch
     {
         SegmentRefineMethod.LineFit => "直线拟合",
         SegmentRefineMethod.CentroidHoleLine => "质心-内标连线",
         SegmentRefineMethod.CaliperTab => "卡尺长边+凸起极性",
+        SegmentRefineMethod.Sift => "SIFT特征匹配",
+        SegmentRefineMethod.ShapeMatch => "形状匹配",
         _ => "模板匹配",
     };
 
@@ -233,35 +254,6 @@ public static class SegmentRefineAdvisor
         return " 赛马：" + string.Join(" · ", parts);
     }
 
-    private static (HousingEdgePolarity Edge, TabPolarityLock Tab) InferPolarity(
-        Mat bgr, IReadOnlyList<Point2f> contour)
-    {
-        var bright = MaskCaliperTab.TryRefine(
-            bgr, contour, new CaliperRefineOptions(HousingEdgePolarity.BrightToDark));
-        var qBright = bright.Pose is null ? 0 : MaskCaliperTab.QualityScore(MaskCaliperTab.LastDebug);
-        var dark = MaskCaliperTab.TryRefine(
-            bgr, contour, new CaliperRefineOptions(HousingEdgePolarity.DarkToBright));
-        var qDark = dark.Pose is null ? 0 : MaskCaliperTab.QualityScore(MaskCaliperTab.LastDebug);
-
-        MaskCaliperTab.CaliperAttempt? best = null;
-        var edge = HousingEdgePolarity.Auto;
-        if (bright.Pose is not null && qBright >= qDark)
-        {
-            best = bright;
-            edge = HousingEdgePolarity.BrightToDark;
-        }
-        else if (dark.Pose is not null)
-        {
-            best = dark;
-            edge = HousingEdgePolarity.DarkToBright;
-        }
-
-        if (best?.Pose?.TabSign is not { } sign)
-            return (HousingEdgePolarity.Auto, TabPolarityLock.Auto);
-        var tab = sign > 0 ? TabPolarityLock.PlusShortAxis : TabPolarityLock.MinusShortAxis;
-        return (edge, tab);
-    }
-
     private static (double Score, double Sharpness) MeasureTeachPeak(
         Mat? upright, Mat? templateImage, TemplateOptions? options)
     {
@@ -282,55 +274,5 @@ public static class SegmentRefineAdvisor
         {
             return (0, 1);
         }
-    }
-
-    private static double GrayEntropy(Mat bgr)
-    {
-        using var gray = new Mat();
-        if (bgr.Channels() == 1)
-            bgr.CopyTo(gray);
-        else
-            Cv2.CvtColor(bgr, gray, bgr.Channels() == 4
-                ? ColorConversionCodes.BGRA2GRAY
-                : ColorConversionCodes.BGR2GRAY);
-
-        const int bins = 64;
-        var hist = new int[bins];
-        var n = gray.Rows * gray.Cols;
-        if (n <= 0)
-            return 0;
-
-        var indexer = gray.GetGenericIndexer<byte>();
-        for (var y = 0; y < gray.Rows; y++)
-        {
-            for (var x = 0; x < gray.Cols; x++)
-                hist[indexer[y, x] >> 2]++;
-        }
-
-        var entropy = 0.0;
-        var inv = 1.0 / n;
-        foreach (var c in hist)
-        {
-            if (c == 0)
-                continue;
-            var p = c * inv;
-            entropy -= p * Math.Log(p, 2);
-        }
-
-        return entropy;
-    }
-
-    /// <summary>1 − NCC(图, 自转180°)。越大越容易判头尾；近 0 表示近对称。</summary>
-    private static double SelfFlipGap(Mat upright)
-    {
-        if (upright.Width < 8 || upright.Height < 8)
-            return 0;
-        using var flipped = new Mat();
-        Cv2.Rotate(upright, flipped, RotateFlags.Rotate180);
-        if (flipped.Width > upright.Width || flipped.Height > upright.Height)
-            return 0;
-        using var result = upright.MatchTemplate(flipped, TemplateMatchModes.CCoeffNormed);
-        Cv2.MinMaxLoc(result, out _, out var maxVal, out _, out _);
-        return Math.Clamp(1.0 - maxVal, 0, 1);
     }
 }

@@ -11,7 +11,7 @@ namespace RobotVision.Infrastructure.Inference.Strategies;
 
 /// <summary>
 /// 模式四：分割给粗框，精修给亚像素角与头尾。
-/// 模板匹配与卡尺融合：卡尺/直线定无向角与短轴中心，模板或凸起极性定 ±180°。
+/// 模板匹配：NCC 匹配峰定 XY（映回原图），转正窗（可关）定有向角，不跑卡尺。卡尺只在 RefineMethod=CaliperTab 时使用。
 /// 精修不过门默认不输出无向粗角（Usable=false → TRIGGER 1019）；AllowCoarseFallback 恢复旧行为。
 /// </summary>
 public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotationCache? rotations = null) : IAngleStrategy
@@ -19,14 +19,15 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
     private readonly MaskTemplateRotationCache _rotations = rotations ?? MaskTemplateRotationCache.Shared;
     private const double MinMaskAreaPx = 400;
     private const double CropMarginRatio = 0.15;
-    private const double MaxGeometryTemplateFightDeg = 4.0;
 
     public List<PixelPose> Compute(VisionImage undistorted, RecipeConfig recipe, CancellationToken ct = default)
     {
         var useRefineTemplate = recipe.Template.RefineMethod == SegmentRefineMethod.Template;
-        if (useRefineTemplate && string.IsNullOrEmpty(recipe.Template.TemplateImageBase64))
+        var useSift = recipe.Template.RefineMethod == SegmentRefineMethod.Sift;
+        var useShapeMatch = recipe.Template.RefineMethod == SegmentRefineMethod.ShapeMatch;
+        if ((useRefineTemplate || useSift || useShapeMatch) && string.IsNullOrEmpty(recipe.Template.TemplateImageBase64))
             throw new VisionException(VisionErrorCode.InvalidRecipeConfig,
-                "分割+精修（模板匹配方法）未示教模板（配方页「示教模板」自动生成，或改用直线拟合 / 卡尺+凸起）");
+                "分割+精修（模板匹配 / SIFT / 形状匹配）未示教模板（配方页「示教模板」自动生成，或改用直线拟合 / 卡尺+凸起）");
         var pack = useRefineTemplate ? _rotations.GetOrCreate(recipe) : null;
         var template = pack?.Gray.Source;
         var ownedTemplate = false;
@@ -35,6 +36,9 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
             template = MaskTemplateMatcher.DecodeTemplatePng(recipe.Template.TemplateImageBase64);
             ownedTemplate = true;
         }
+
+        var siftTeach = useSift ? MaskSiftRefine.GetOrCreate(recipe) : null;
+        var shapeModel = useShapeMatch ? MaskShapeMatch.GetOrCreate(recipe) : null;
         try
         {
             using var roiImage = RoiHelper.CropToVisionImage(undistorted, recipe.Roi, out var ox, out var oy);
@@ -69,13 +73,45 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
                         PixelPoint[]? tabMarker = null;
                         OverlayLine[]? debugLines = null;
                         OverlayDot[]? debugDots = null;
-                        if (template is not null)
+                        PixelPoint[]? matchWindow = null;
+                        if (useSift)
                         {
-                            var fused = RefineByTemplate(roiView, points, template, recipe, segmentation.Confidence, pack);
-                            pose = fused.Pose;
-                            tabMarker = fused.TabMarker;
-                            debugLines = fused.DebugLines;
-                            debugDots = fused.DebugDots;
+                            var sift = MaskSiftRefine.TryRefine(roiView, points, siftTeach);
+                            MapMatchDots(sift.Viz.Inliers, sift.Viz.Rejected, 0, 0, out debugDots);
+                            if (sift.Pose is null)
+                            {
+                                pose = Fallback(points, segmentation.Confidence, recipe, score: 0);
+                            }
+                            else
+                            {
+                                var r = sift.Pose;
+                                pose = Ok(r.Center.X, r.Center.Y, r.AngleDeg, r.Score, segmentation.Confidence);
+                                tabMarker = HeadingMarker(r.Center, r.AngleDeg, points);
+                            }
+                        }
+                        else if (useShapeMatch)
+                        {
+                            var housing = MaskHousing.Fit(points);
+                            var range = MaskHousing.AdaptiveRefineRange(recipe.Template.RefineRangeDeg, housing);
+                            var shape = MaskShapeMatch.TryRefine(roiView, points, shapeModel, range);
+                            MapMatchDots(shape.Viz.Inliers, shape.Viz.Rejected, 0, 0, out debugDots);
+                            if (shape.Pose is null)
+                            {
+                                pose = Fallback(points, segmentation.Confidence, recipe, score: 0);
+                            }
+                            else
+                            {
+                                var r = shape.Pose;
+                                pose = Ok(r.Center.X, r.Center.Y, r.AngleDeg, r.Score, segmentation.Confidence);
+                                tabMarker = HeadingMarker(r.Center, r.AngleDeg, points);
+                            }
+                        }
+                        else if (template is not null)
+                        {
+                            var refined = RefineByTemplate(roiView, points, template, recipe, segmentation.Confidence, pack);
+                            pose = refined.Pose;
+                            tabMarker = refined.TabMarker;
+                            matchWindow = refined.MatchWindow;
                         }
                         else if (recipe.Template.RefineMethod == SegmentRefineMethod.CentroidHoleLine)
                         {
@@ -116,8 +152,7 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
                         if (usable)
                         {
                             var area = Cv2.ContourArea(points);
-                            var housing = MaskHousing.Fit(points);
-                            var aspect = housing.LongLen / Math.Max(1.0, housing.ShortLen);
+                            var aspect = MaskHousing.Aspect(MaskHousing.FitObb(points));
                             if (!InstanceGeometry.Accepts(recipe.Template, area, aspect))
                                 usable = false;
                         }
@@ -136,6 +171,7 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
                                        new PixelPoint(tabMarker[1].X + ox, tabMarker[1].Y + oy)],
                                 DebugLines = ShiftLines(debugLines, ox, oy),
                                 DebugDots = ShiftDots(debugDots, ox, oy),
+                                MatchWindow = ShiftPoints(matchWindow, ox, oy),
                                 Label = segmentation.Label,
                                 BitPackedMask = segmentation.BitPackedMask is { Length: > 0 } packed
                                     ? packed
@@ -166,7 +202,7 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
     }
 
     private readonly record struct TemplateRefine(
-        PixelPose Pose, PixelPoint[]? TabMarker, OverlayLine[]? DebugLines, OverlayDot[]? DebugDots);
+        PixelPose Pose, PixelPoint[]? TabMarker, PixelPoint[]? MatchWindow = null);
 
     private static PixelPose Fallback(Point2f[] contourPoints, double segConfidence, RecipeConfig recipe, double score)
     {
@@ -213,6 +249,49 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
         for (var i = 0; i < dots.Length; i++)
             copy[i] = new OverlayDot(new PixelPoint(dots[i].At.X + ox, dots[i].At.Y + oy), dots[i].Kind);
         return copy;
+    }
+
+    private static PixelPoint[]? ShiftPoints(PixelPoint[]? points, double ox, double oy)
+    {
+        if (points is null || points.Length == 0)
+            return points;
+        var copy = new PixelPoint[points.Length];
+        for (var i = 0; i < points.Length; i++)
+            copy[i] = new PixelPoint(points[i].X + ox, points[i].Y + oy);
+        return copy;
+    }
+
+    private static PixelPoint[] HeadingMarker(Point2d center, double angleDeg, Point2f[] contour)
+    {
+        var rad = angleDeg * Math.PI / 180.0;
+        var housing = MaskHousing.Fit(contour);
+        var markerLen = Math.Max(24, housing.LongLen / 2.0);
+        return
+        [
+            new PixelPoint(center.X, center.Y),
+            new PixelPoint(
+                center.X + Math.Cos(rad) * markerLen,
+                center.Y + Math.Sin(rad) * markerLen),
+        ];
+    }
+
+    private static void MapMatchDots(
+        IReadOnlyList<Point2d> inliers, IReadOnlyList<Point2d> rejected, double ox, double oy, out OverlayDot[]? dots)
+    {
+        var n = inliers.Count + rejected.Count;
+        if (n == 0)
+        {
+            dots = null;
+            return;
+        }
+
+        var buf = new OverlayDot[n];
+        var d = 0;
+        foreach (var p in inliers)
+            buf[d++] = new OverlayDot(new PixelPoint(p.X + ox, p.Y + oy), OverlayDotKind.Inlier);
+        foreach (var p in rejected)
+            buf[d++] = new OverlayDot(new PixelPoint(p.X + ox, p.Y + oy), OverlayDotKind.Rejected);
+        dots = buf;
     }
 
     private static void MapCaliperDebug(
@@ -271,46 +350,41 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
         return Ok(center.X, center.Y, angle, score, segConfidence);
     }
 
-    /// <summary>转正裁剪 + 模板匹配；成功时用卡尺几何定 XY/无向角，模板定头尾。</summary>
+    /// <summary>可选转正裁剪 + 模板匹配；XY 用 NCC 匹配峰映回原图，有向角用 NCC（特征框决定示教吃哪块，峰在哪 XY 就在哪）。</summary>
     private static TemplateRefine RefineByTemplate(
         Mat roiView, Point2f[] contour, Mat template, RecipeConfig recipe, double segConfidence,
         MaskTemplateRotationPack? pack)
     {
         var housing = MaskHousing.Fit(contour);
         var range = MaskHousing.AdaptiveRefineRange(recipe.Template.RefineRangeDeg, housing);
-        var attempt = MaskCaliperTab.TryRefine(roiView, contour, CaliperRefineOptions.From(recipe.Template));
-        MapCaliperDebug(attempt.Viz, 0, 0, out var debugLines, out var debugDots);
-        PixelPoint[]? tabMarker = null;
-        if (attempt.Pose is { } cal)
-        {
-            tabMarker =
-            [
-                new PixelPoint(cal.TabMarkerFrom.X, cal.TabMarkerFrom.Y),
-                new PixelPoint(cal.TabMarkerTo.X, cal.TabMarkerTo.Y),
-            ];
-        }
+        var useUpright = recipe.Template.UseUprightCrop;
 
         UprightCropResult crop;
         try
         {
-            crop = MaskTemplateMatcher.UprightCrop(roiView, contour, CropMarginRatio);
+            crop = useUpright
+                ? MaskTemplateMatcher.UprightCrop(roiView, contour, CropMarginRatio)
+                : MaskTemplateMatcher.AxisAlignedCrop(roiView, contour, CropMarginRatio);
         }
         catch (InvalidOperationException)
         {
-            return new TemplateRefine(Fallback(contour, segConfidence, recipe, 0), tabMarker, debugLines, debugDots);
+            return new TemplateRefine(Fallback(contour, segConfidence, recipe, 0), null);
         }
 
         try
         {
-            var match = MatchOnUpright(crop.Upright, template, recipe, pack, range);
-            if (match is not null && MaskTemplateMatcher.NeedsUprightAlign(match))
+            var origin = useUpright ? 0.0 : housing.WarpAngleDeg;
+            var bank = useUpright ? pack : null;
+            var match = MatchOnUpright(crop.Upright, template, recipe, bank, range, origin);
+            if (useUpright && match is not null && MaskTemplateMatcher.NeedsUprightAlign(match))
             {
                 UprightCropResult? flipped = null;
                 try
                 {
                     flipped = MaskTemplateMatcher.UprightCrop(
                         roiView, contour, CropMarginRatio, extraWarpDeg: 180);
-                    var rematch = MatchOnUpright(flipped.Upright, template, recipe, pack, range, forceZeroBranch: true);
+                    var rematch = MatchOnUpright(
+                        flipped.Upright, template, recipe, bank, range, origin, forceZeroBranch: true);
                     if (rematch is not null && !MaskTemplateMatcher.IsOrientationFlip(rematch.RotationDeg))
                     {
                         crop.Upright.Dispose();
@@ -329,28 +403,17 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
             }
 
             if (match is null)
-                return new TemplateRefine(Fallback(contour, segConfidence, recipe, 0), tabMarker, debugLines, debugDots);
+                return new TemplateRefine(Fallback(contour, segConfidence, recipe, 0), null);
 
             var tplSigned = AngleGeometry.NormalizeSignedDeg(crop.WarpAngleDeg + match.RotationDeg);
-            var tplCenter = MaskTemplateMatcher.MapUprightToSource(crop, match.CenterInUpright);
-
-            if (attempt.Pose is { } geo)
-            {
-                var geoU = AngleGeometry.NormalizeDeg(geo.AngleDeg);
-                if (AngleGeometry.UndirectedDeltaDeg(geoU, tplSigned) > MaxGeometryTemplateFightDeg)
-                    return new TemplateRefine(
-                        Fallback(contour, segConfidence, recipe, match.Score), tabMarker, debugLines, debugDots);
-
-                var fused = AngleGeometry.FuseDirected(geoU, tplSigned);
-                var score = Math.Clamp(0.65 * match.Score + 0.35 * CaliperScore(MaskCaliperTab.LastDebug), 0, 1);
-                return new TemplateRefine(
-                    Ok(geo.Center.X, geo.Center.Y, fused, score, segConfidence),
-                    tabMarker, debugLines, debugDots);
-            }
-
+            var angled = AngleGeometry.FuseDirected(housing.LongAxisDeg, tplSigned);
+            var center = MaskTemplateMatcher.MapUprightToSource(crop, match.CenterInUpright);
+            var window = PoseOverlay.TemplateMatchWindow(
+                center.X, center.Y, angled, template.Width, template.Height);
             return new TemplateRefine(
-                Ok(tplCenter.X, tplCenter.Y, tplSigned, match.Score, segConfidence),
-                tabMarker, debugLines, debugDots);
+                Ok(center.X, center.Y, angled, match.Score, segConfidence),
+                HeadingMarker(center, angled, contour),
+                window);
         }
         finally
         {
@@ -360,15 +423,15 @@ public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotati
 
     private static MaskTemplateMatchResult? MatchOnUpright(
         Mat upright, Mat template, RecipeConfig recipe, MaskTemplateRotationPack? pack,
-        double refineRangeDeg, bool forceZeroBranch = false)
+        double refineRangeDeg, double searchOriginDeg, bool forceZeroBranch = false)
     {
-        double? branch = forceZeroBranch ? 0.0 : null;
+        double? branch = forceZeroBranch ? searchOriginDeg : null;
         return recipe.Template.UseEdgeMatch
             ? MaskTemplateMatcher.MatchBestHybrid(
                 upright, template, refineRangeDeg, recipe.Template.MatchThreshold,
-                pack?.Gray, pack?.Edge, branch)
+                pack?.Gray, pack?.Edge, branch, searchOriginDeg)
             : MaskTemplateMatcher.MatchBest(
                 upright, template, refineRangeDeg, recipe.Template.MatchThreshold,
-                pack?.Gray, orientationBranchDeg: branch);
+                pack?.Gray, orientationBranchDeg: branch, searchOriginDeg: searchOriginDeg);
     }
 }

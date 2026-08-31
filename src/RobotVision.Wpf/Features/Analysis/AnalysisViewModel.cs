@@ -555,7 +555,7 @@ public partial class AnalysisViewModel : ObservableObject
         if (!snapshot.DatabaseExists)
         {
             Message = _results is { SqliteEnabled: false }
-                ? "尚未生成结果库。请在 appsettings 打开 ResultLog.Sqlite 后触发检测。"
+                ? "尚未生成结果库。请在「服务设置」开启结果留档并勾选 SQLite 后触发检测。"
                 : "暂无结果记录。触发检测后将写入 data/results/results.db。";
         }
         else if (summary.Total == 0)

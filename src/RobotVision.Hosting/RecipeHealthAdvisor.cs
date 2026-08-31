@@ -1,5 +1,7 @@
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Models;
+using RobotVision.Core.Recipe;
+using RobotVision.Infrastructure.Inference.Strategies;
 
 namespace RobotVision.Hosting;
 
@@ -72,6 +74,17 @@ public static class RecipeHealthAdvisor
 
         return hints;
     }
+
+    public static RecipePrior? ToPlaybookPrior(
+        IReadOnlyList<RecipeHealthHint> hints,
+        SegmentRefineMethod? current,
+        IReadOnlyList<SegmentRefineMethod>? policyOrder = null) =>
+        ScenePlaybook.FromHealth(
+            hints.Any(h => h.Id == "refine_fail_rate"),
+            hints.Any(h => h.Id == "angle_bimodal"),
+            hints.Any(h => h.Id is "score_drift" or "score_low"),
+            current,
+            policyOrder);
 
     private static long CountCode(IReadOnlyList<ResultCodeCount> codes, int code)
     {

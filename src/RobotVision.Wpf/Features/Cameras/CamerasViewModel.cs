@@ -13,6 +13,7 @@ using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Cameras;
 using RobotVision.Infrastructure.Cameras;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Cameras;
 
@@ -33,7 +34,7 @@ public sealed record CameraListItem(
 /// 编辑面板按类型切换字段；测试取图按当前编辑内容临时构造对应相机，支持"先试后存"。
 /// Basler 相机注册成功后额外提供运行时调光（曝光/增益滑块 + 即时取图）。
 /// </summary>
-public partial class CamerasViewModel : ObservableObject
+public partial class CamerasViewModel : ObservableObject, ICommitPendingEdits
 {
     /// <summary>类型下拉数据源：来自相机工厂注册表，接入新品牌自动出现在下拉框。</summary>
     public IReadOnlyList<string> TypeOptions => _registry.TypeNames;
@@ -86,6 +87,12 @@ public partial class CamerasViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUnsavedChanges))]
     [NotifyPropertyChangedFor(nameof(UnsavedHint))]
     private string _editGain = "";
+
+    /// <summary>硬件相机：单帧取图超时（ms），须小于服务总超时 TimeoutMs。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUnsavedChanges))]
+    [NotifyPropertyChangedFor(nameof(UnsavedHint))]
+    private int _editGrabTimeoutMs = AppConfig.DefaultGrabTimeoutMs;
 
     [ObservableProperty]
     private string? _selectedBaslerDevice;
@@ -184,6 +191,12 @@ public partial class CamerasViewModel : ObservableObject
     /// <summary>防止 OnSelectedChanged 重入（程序内设置 Selected 时置位）。</summary>
     private bool _switching;
 
+    /// <summary>从磁盘/列表回填编辑区时置位：跳过切类型时的字段清空，避免把刚填入的 SN/目录冲掉。</summary>
+    private bool _applyingEditor;
+
+    /// <inheritdoc />
+    public Action? FlushPendingEdits { get; set; }
+
     /// <summary>连续实时预览定时器（Dispatcher 线程，150ms 一帧）。</summary>
     private readonly DispatcherTimer _previewTimer;
 
@@ -219,21 +232,47 @@ public partial class CamerasViewModel : ObservableObject
         ? "有未保存的修改：产线/测试触发仍使用磁盘旧配置，请先保存"
         : "";
 
-    /// <summary>编辑字段与磁盘配置逐字段比较（脏标记用）。</summary>
-    private static bool SameCamera(CameraConfig a, CameraConfig b) =>
-        string.Equals(a.Id, b.Id, StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(a.Name.Trim(), b.Name.Trim(), StringComparison.Ordinal) &&
-        string.Equals(a.Type, b.Type, StringComparison.OrdinalIgnoreCase) &&
-        a.Folder == b.Folder &&
-        a.DeviceId == b.DeviceId &&
-        a.ExposureTimeUs == b.ExposureTimeUs &&
-        a.Gain == b.Gain &&
-        a.Width == b.Width &&
-        a.Height == b.Height &&
-        string.Equals(a.Pattern, b.Pattern, StringComparison.OrdinalIgnoreCase) &&
-        a.ChessCellPx == b.ChessCellPx &&
-        a.IntervalMs == b.IntervalMs &&
-        a.NoiseSigma == b.NoiseSigma;
+    /// <summary>
+    /// 按当前类型比较「会写入该类型配置」的字段。
+    /// Basler 的 BuildConfig 不会带上 Folder/Width/Pattern，若拿全字段比，磁盘残留会导致永远“未保存”。
+    /// </summary>
+    private static bool SameCamera(CameraConfig a, CameraConfig b)
+    {
+        if (!string.Equals(a.Id, b.Id, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(a.Name.Trim(), b.Name.Trim(), StringComparison.Ordinal) ||
+            !string.Equals(a.Type, b.Type, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (string.Equals(a.Type, "File", StringComparison.OrdinalIgnoreCase))
+            return string.Equals(a.Folder, b.Folder, StringComparison.OrdinalIgnoreCase) &&
+                   a.IntervalMs == b.IntervalMs;
+        if (IsHardwareType(a.Type))
+            return string.Equals(a.DeviceId, b.DeviceId, StringComparison.OrdinalIgnoreCase) &&
+                   a.ExposureTimeUs == b.ExposureTimeUs &&
+                   a.Gain == b.Gain &&
+                   EffectiveGrabTimeout(a.GrabTimeoutMs) == EffectiveGrabTimeout(b.GrabTimeoutMs);
+        if (string.Equals(a.Type, "Virtual", StringComparison.OrdinalIgnoreCase))
+            return a.Width == b.Width &&
+                   a.Height == b.Height &&
+                   string.Equals(a.Pattern, b.Pattern, StringComparison.OrdinalIgnoreCase) &&
+                   a.ChessCellPx == b.ChessCellPx &&
+                   a.IntervalMs == b.IntervalMs &&
+                   a.NoiseSigma == b.NoiseSigma;
+        return true;
+    }
+
+    private static int EffectiveGrabTimeout(int ms) =>
+        ms > 0 ? ms : AppConfig.DefaultGrabTimeoutMs;
+
+    /// <summary>
+    /// HasUnsavedChanges 是计算属性，依赖 _baseline。保存后编辑框值不变时
+    /// Edit* 不会再发 PropertyChanged，界面会一直显示已过期的“未保存”条。
+    /// </summary>
+    private void NotifyDirtyState()
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(UnsavedHint));
+    }
 
     // ---- 已注册相机的运行时调光（经 IExposureControl 接口查询，不依赖具体品牌） ----
 
@@ -306,8 +345,10 @@ public partial class CamerasViewModel : ObservableObject
     public bool IsGigEVision => string.Equals(EditType, "GigEVision", StringComparison.OrdinalIgnoreCase);
     public bool IsVirtual => string.Equals(EditType, "Virtual", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Basler / GigEVision 共用序列号、曝光、增益、超时编辑面板。</summary>
+    /// <summary>Basler / GigEVision 共用序列号、曝光、增益、取图超时编辑面板。</summary>
     public bool IsHardwareCamera => IsBasler || IsGigEVision;
+
+    public bool ShowGrabTimeoutField => IsHardwareCamera;
 
     /// <summary>当前类型无内置编辑面板（外部工厂注册的类型）→ 显示通用提示卡片。</summary>
     public bool IsUnknownType => !IsFile && !IsBasler && !IsGigEVision && !IsVirtual;
@@ -362,6 +403,7 @@ public partial class CamerasViewModel : ObservableObject
         OnPropertyChanged(nameof(CanEnumerateDevices));
         OnPropertyChanged(nameof(ShowOpenFolderButton));
         OnPropertyChanged(nameof(ShowChessCellField));
+        OnPropertyChanged(nameof(ShowGrabTimeoutField));
         OnPropertyChanged(nameof(EnumerateDevicesLabel));
         OnPropertyChanged(nameof(EnumeratedDevicesCaption));
         OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -371,6 +413,8 @@ public partial class CamerasViewModel : ObservableObject
     partial void OnEditTypeChanged(string value)
     {
         NotifyTypePanelProperties();
+        if (_applyingEditor)
+            return;
         // 切换类型时把其他类型的字段重置为默认，避免残留值误存进新类型配置
         ResetFieldsForOtherTypes();
         BaslerDevices.Clear();
@@ -398,6 +442,7 @@ public partial class CamerasViewModel : ObservableObject
             EditDeviceId = "";
             EditExposureUs = "";
             EditGain = "";
+            EditGrabTimeoutMs = AppConfig.DefaultGrabTimeoutMs;
         }
         if (!IsVirtual)
         {
@@ -485,11 +530,11 @@ public partial class CamerasViewModel : ObservableObject
     };
 
     /// <summary>未注册原因（列表展示，让"未注册"在列表层面即可区分原因）。</summary>
-    private static string? UnregisterReason(CameraConfig c)
+    private string? UnregisterReason(CameraConfig c)
     {
         if (string.Equals(c.Type, "File", StringComparison.OrdinalIgnoreCase))
         {
-            var folder = c.ResolveCameraFolder();
+            var folder = c.ResolveCameraFolder(_cfg);
             if (!Directory.Exists(folder))
                 return "回放目录不存在";
             return Directory.EnumerateFiles(folder)
@@ -521,6 +566,7 @@ public partial class CamerasViewModel : ObservableObject
         EditDeviceId = "";
         EditExposureUs = "";
         EditGain = "";
+        EditGrabTimeoutMs = AppConfig.DefaultGrabTimeoutMs;
         EditWidth = 1280;
         EditHeight = 960;
         EditPattern = "Chessboard";
@@ -552,6 +598,7 @@ public partial class CamerasViewModel : ObservableObject
     [RelayCommand]
     private void Save()
     {
+        this.Commit();
         var id = EditId.Trim();
         if (id.Length == 0)
         {
@@ -575,13 +622,17 @@ public partial class CamerasViewModel : ObservableObject
             return;
         }
 
-        // 超时预算校验：硬件相机采集超时固定为 DefaultGrabTimeoutMs，须小于总超时
+        // 超时预算校验：硬件相机取图超时须小于服务总超时
         if (IsHardwareType(entry.Type))
         {
-            entry.GrabTimeoutMs = AppConfig.DefaultGrabTimeoutMs;
+            if (entry.GrabTimeoutMs <= 0)
+            {
+                Message = "保存失败: 取图超时须为正数（ms）";
+                return;
+            }
             if (entry.GrabTimeoutMs >= _cfg.TimeoutMs)
             {
-                Message = $"保存失败: 服务总超时 {_cfg.TimeoutMs}ms 不足（采集固定 {AppConfig.DefaultGrabTimeoutMs}ms），请在 appsettings.json 调大 TimeoutMs";
+                Message = $"保存失败: 取图超时 {entry.GrabTimeoutMs}ms 不小于服务总超时 {_cfg.TimeoutMs}ms（将表现为 1008 而非 1003），请调小取图超时或在服务设置调大总超时";
                 return;
             }
         }
@@ -603,6 +654,7 @@ public partial class CamerasViewModel : ObservableObject
             _baseline = entry; // 保存后的配置即新基线（Refresh 的脏检查不会误弹）
             Refresh(id, resetPreview: false, loadLiveParams: false);
             Message = error is null ? $"已保存 {id}（运行时已注册）" : $"已保存 {id}（运行时注册失败: {error}）";
+            NotifyDirtyState();
         }
         catch (Exception ex)
         {
@@ -640,7 +692,7 @@ public partial class CamerasViewModel : ObservableObject
                     entry.DeviceId = EditDeviceId.Trim();
                     entry.ExposureTimeUs = ParseOptional(EditExposureUs, "曝光时间");
                     entry.Gain = ParseOptional(EditGain, "增益");
-                    entry.GrabTimeoutMs = AppConfig.DefaultGrabTimeoutMs;
+                    entry.GrabTimeoutMs = EditGrabTimeoutMs;
                     break;
                 case "Virtual":
                     entry.Width = EditWidth;
@@ -805,7 +857,15 @@ public partial class CamerasViewModel : ObservableObject
     }
 
     /// <summary>定时取帧：已注册相机用运行时实例，未注册按编辑内容临时构造（与测试取图一致）。</summary>
-    private async void OnPreviewTick(object? sender, EventArgs e)
+    private void OnPreviewTick(object? sender, EventArgs e)
+    {
+        // 不用 async void：事件处理器保持 void，async 主体挪到返回 Task 的方法。
+        // _previewTickBusy 在首个 await 前同步置位（Task 方法 await 前同步执行），
+        // 重入保护语义与原 async void 完全一致；异常由 OnPreviewTickAsync 全捕获。
+        _ = OnPreviewTickAsync();
+    }
+
+    private async Task OnPreviewTickAsync()
     {
         // IsBusy（手动取图/调光进行中）或上一帧未完成时跳过，避免并发 Grab 与堆帧
         if (_previewTickBusy || IsBusy)
@@ -913,7 +973,7 @@ public partial class CamerasViewModel : ObservableObject
     private void BrowseFolder()
     {
         var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择回放目录" };
-        var resolved = AppConfigExtensions.ResolveFolder(EditFolder.Trim());
+        var resolved = _cfg.ResolveDataPath(EditFolder.Trim());
         if (Directory.Exists(resolved))
             dialog.InitialDirectory = resolved;
         if (dialog.ShowDialog() == true)
@@ -928,7 +988,7 @@ public partial class CamerasViewModel : ObservableObject
             Message = "仅 File 类型相机有回放目录";
             return;
         }
-        var resolved = AppConfigExtensions.ResolveFolder(EditFolder.Trim());
+        var resolved = _cfg.ResolveDataPath(EditFolder.Trim());
         if (Directory.Exists(resolved))
             Explorer.OpenFolder(resolved);
         else
@@ -1114,27 +1174,40 @@ public partial class CamerasViewModel : ObservableObject
         if (config is null)
             return;
 
-        _baseline = config;
-        EditId = config.Id;
-        EditName = config.Name;
-        EditType = config.Type;
-        EditFolder = config.Folder;
-        EditDeviceId = config.DeviceId;
-        EditExposureUs = config.ExposureTimeUs?.ToString("0") ?? "";
-        EditGain = config.Gain?.ToString("0.##") ?? "";
-        EditWidth = config.Width;
-        EditHeight = config.Height;
-        EditPattern = PatternOptions.Contains(config.Pattern, StringComparer.OrdinalIgnoreCase)
-            ? config.Pattern
-            : "Chessboard";
-        EditCellPx = config.ChessCellPx;
-        EditIntervalMs = config.IntervalMs;
-        EditNoiseSigma = config.NoiseSigma.ToString("0.##");
+        _applyingEditor = true;
+        try
+        {
+            _baseline = config;
+            EditId = config.Id;
+            EditName = config.Name;
+            EditType = config.Type;
+            EditFolder = config.Folder;
+            EditDeviceId = config.DeviceId;
+            EditExposureUs = config.ExposureTimeUs?.ToString("0") ?? "";
+            EditGain = config.Gain?.ToString("0.##") ?? "";
+            if (IsHardwareType(config.Type))
+                EditGrabTimeoutMs = config.GrabTimeoutMs > 0
+                    ? config.GrabTimeoutMs
+                    : AppConfig.DefaultGrabTimeoutMs;
+            EditWidth = config.Width;
+            EditHeight = config.Height;
+            EditPattern = PatternOptions.Contains(config.Pattern, StringComparer.OrdinalIgnoreCase)
+                ? config.Pattern
+                : "Chessboard";
+            EditCellPx = config.ChessCellPx;
+            EditIntervalMs = config.IntervalMs;
+            EditNoiseSigma = config.NoiseSigma.ToString("0.##");
 
-        if (config.ExposureTimeUs is > 0)
-            ExposureUs = config.ExposureTimeUs.Value;
-        if (config.Gain is >= 0)
-            Gain = config.Gain.Value;
+            if (config.ExposureTimeUs is > 0)
+                ExposureUs = config.ExposureTimeUs.Value;
+            if (config.Gain is >= 0)
+                Gain = config.Gain.Value;
+        }
+        finally
+        {
+            _applyingEditor = false;
+            NotifyDirtyState();
+        }
 
         var live = LiveExposureControl;
         HasLiveExposureControl = live is not null;

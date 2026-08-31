@@ -2,7 +2,7 @@ namespace RobotVision.Hosting;
 
 public sealed class AppConfig
 {
-    /// <summary>硬件相机单帧采集超时（ms）；UI 不暴露，保存相机时固定写入此值。</summary>
+    /// <summary>硬件相机单帧采集超时（ms）；相机管理页可编辑，须小于总超时 TimeoutMs。</summary>
     public const int DefaultGrabTimeoutMs = 60_000;
 
     /// <summary>单次 TRIGGER 总超时（ms）；须大于采集超时，为推理/坐标变换留裕量。</summary>
@@ -29,6 +29,12 @@ public sealed class AppConfig
 
     /// <summary>IP 白名单（空 = 允许所有；条目支持 192.168.* 前缀通配）。</summary>
     public List<string> IpWhitelist { get; set; } = [];
+
+    /// <summary>
+    /// 工位数据根（配方/标定/回放/失败图/结果等）。空 = 相对路径仍按 exe/CWD 解析（便携部署）。
+    /// 模型目录不走此根。启动时 <see cref="DataRootBinder.Apply"/> 把未设绝对路径的项绑到此目录下。
+    /// </summary>
+    public string DataRoot { get; set; } = "";
 
     public string RecipesFolder { get; set; } = "recipes";
 
@@ -69,9 +75,40 @@ public sealed class AppConfig
     /// <summary>本机 CPU 对话助手（连接 llama-server，不在视觉进程内加载权重）。</summary>
     public ChatConfig Chat { get; set; } = new();
 
+    /// <summary>运行监控页叠加模式：默认与配方试触发一致。</summary>
+    public MonitorOverlayMode MonitorOverlayMode { get; set; } = MonitorOverlayMode.MatchRecipeTest;
+
     public List<CameraConfig> Cameras { get; set; } = [];
 
     public List<LightControllerConfig> LightControllers { get; set; } = [];
+
+    /// <summary>界面主题：<see cref="UiThemes.Dark"/> 或 <see cref="UiThemes.Light"/>。</summary>
+    public string UiTheme { get; set; } = UiThemes.Dark;
+}
+
+/// <summary>appsettings / 设置页共用的界面主题键。</summary>
+public static class UiThemes
+{
+    public const string Dark = "Dark";
+    public const string Light = "Light";
+
+    public static readonly IReadOnlyList<string> All = [Dark, Light];
+
+    public static string Normalize(string? value) =>
+        string.Equals(value, Light, StringComparison.OrdinalIgnoreCase) ? Light : Dark;
+
+    public static string Label(string theme) =>
+        string.Equals(theme, Light, StringComparison.OrdinalIgnoreCase) ? "浅色" : "深色";
+}
+
+/// <summary>运行监控页检测叠加策略。</summary>
+public enum MonitorOverlayMode
+{
+    /// <summary>只画位姿本体（掩码/框/分数/十字等），不画检测 ROI 与卡尺探针。</summary>
+    Production = 0,
+
+    /// <summary>与配方页试触发结果图一致（含检测 ROI、卡尺调试层）。</summary>
+    MatchRecipeTest = 1,
 }
 
 public sealed class FailureImageConfig
@@ -215,6 +252,33 @@ public sealed class ChatConfig
     /// <summary>llama-server 上下文长度（token）。CPU 4B Q4 默认 8192。</summary>
     public int ContextSize { get; set; } = 8192;
 
+    /// <summary>发给模型的历史 token 预算；0 = 按 ContextSize 自动估算。</summary>
+    public int HistoryTokenBudget { get; set; }
+
+    /// <summary>单轮对话内工具调用最大轮次。</summary>
+    public int MaxToolRounds { get; set; } = 8;
+
+    /// <summary>拍照等工具结果是否以 base64 附图发给模型（需视觉模型或 llama-server 多模态支持）。</summary>
+    public bool SendImagesToModel { get; set; } = true;
+
+    /// <summary>附图 JPEG 缩放最长边（px），控制 token 与带宽。</summary>
+    public int ImageMaxEdgePx { get; set; } = 768;
+
+    /// <summary>危险写操作须在参数中 confirm:true，且用户最近一条消息明确同意。</summary>
+    public bool RequireDangerousActionConfirm { get; set; } = true;
+
+    /// <summary>是否记录工具调用审计 JSONL。</summary>
+    public bool AuditEnabled { get; set; } = true;
+
+    /// <summary>审计日志目录。</summary>
+    public string AuditFolder { get; set; } = "data/chat-audit";
+
+    /// <summary>对话拍照 PNG 目录。</summary>
+    public string CaptureFolder { get; set; } = "data/chat-captures";
+
+    /// <summary>审计日志保留天数；≤0 不清理。</summary>
+    public int AuditRetainedDays { get; set; } = 90;
+
     /// <summary>等待模型加载的秒数。</summary>
     public int LoadTimeoutSeconds { get; set; } = 180;
 }
@@ -345,19 +409,50 @@ public static class AppConfigExtensions
         return exeAnchored;
     }
 
-    public static string ResolveRecipesFolder(this AppConfig cfg) => ResolveFolder(cfg.RecipesFolder);
+    public static string ResolveRecipesFolder(this AppConfig cfg) => cfg.ResolveDataPath(cfg.RecipesFolder);
 
     /// <summary>
-    /// 运行时配方目录：相对路径固定锚定 exe 目录（不回退仓库根），避免 UI 改 bin 而列表读源码目录。
+    /// 工位数据根的绝对路径。未配置时为空。相对 DataRoot 按 <see cref="ResolveFolder"/> 解析。
+    /// </summary>
+    public static string ResolveDataRoot(this AppConfig cfg)
+    {
+        if (string.IsNullOrWhiteSpace(cfg.DataRoot))
+            return "";
+        var root = cfg.DataRoot.Trim();
+        return Path.IsPathRooted(root) ? Path.GetFullPath(root) : ResolveFolder(root);
+    }
+
+    /// <summary>
+    /// 工位数据路径：已是绝对路径则原样；配置了 DataRoot 时相对路径落在其下；否则与 <see cref="ResolveFolder"/> 相同。
+    /// 模型目录请用 <see cref="ResolveModelsFolder"/>，不走 DataRoot。
+    /// </summary>
+    public static string ResolveDataPath(this AppConfig cfg, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return path;
+        if (Path.IsPathRooted(path))
+            return Path.GetFullPath(path);
+        var root = cfg.ResolveDataRoot();
+        if (!string.IsNullOrEmpty(root))
+            return Path.GetFullPath(Path.Combine(root, path));
+        return ResolveFolder(path);
+    }
+
+    /// <summary>
+    /// 运行时配方目录：未配 DataRoot 时相对路径固定锚定 exe 目录（不回退仓库根），
+    /// 避免 UI 改 bin 而列表读源码目录。配了 DataRoot 则落在数据根下。
     /// 首次使用时从 <c>recipes.samples</c> 拷入示例，之后删除的配方不会因编译/重启被拷回。
     /// </summary>
     public static string ResolveAndPrepareRecipesFolder(this AppConfig cfg)
     {
-        var folder = string.IsNullOrWhiteSpace(cfg.RecipesFolder)
-            ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "recipes"))
-            : Path.IsPathRooted(cfg.RecipesFolder)
-                ? Path.GetFullPath(cfg.RecipesFolder)
-                : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, cfg.RecipesFolder));
+        string folder;
+        if (!string.IsNullOrWhiteSpace(cfg.RecipesFolder) && Path.IsPathRooted(cfg.RecipesFolder))
+            folder = Path.GetFullPath(cfg.RecipesFolder);
+        else if (!string.IsNullOrWhiteSpace(cfg.DataRoot))
+            folder = cfg.ResolveDataPath(string.IsNullOrWhiteSpace(cfg.RecipesFolder) ? "recipes" : cfg.RecipesFolder);
+        else
+            folder = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+                string.IsNullOrWhiteSpace(cfg.RecipesFolder) ? "recipes" : cfg.RecipesFolder));
         Directory.CreateDirectory(folder);
         RecipeSampleSeeder.SeedIfNeeded(folder);
         return folder;
@@ -365,11 +460,16 @@ public static class AppConfigExtensions
 
     public static string ResolveModelsFolder(this AppConfig cfg) => ResolveFolder(cfg.ModelsFolder);
 
-    public static string ResolveCalibrationFolder(this AppConfig cfg) => ResolveFolder(cfg.CalibrationFolder);
+    public static string ResolveCalibrationFolder(this AppConfig cfg) => cfg.ResolveDataPath(cfg.CalibrationFolder);
 
-    public static string ResolveMetricsFolder(this AppConfig cfg) => ResolveFolder(cfg.ProcessHealth.Folder);
+    public static string ResolveMetricsFolder(this AppConfig cfg) => cfg.ResolveDataPath(cfg.ProcessHealth.Folder);
 
-    public static string ResolveResultsFolder(this AppConfig cfg) => ResolveFolder(cfg.ResultLog.Folder);
+    public static string ResolveResultsFolder(this AppConfig cfg) => cfg.ResolveDataPath(cfg.ResultLog.Folder);
+
+    public static string ResolveChatCapturesFolder(this AppConfig cfg) =>
+        cfg.ResolveDataPath(string.IsNullOrWhiteSpace(cfg.Chat.CaptureFolder)
+            ? "data/chat-captures"
+            : cfg.Chat.CaptureFolder);
 
     /// <summary>
     /// 启动时对齐超时下限：请求总超时 ≥90s（避免旧配置 3s/5s 带病运行）。
@@ -396,5 +496,6 @@ public static class AppConfigExtensions
     public static bool UsesGrabTimeout(this CameraConfig camera) =>
         IsHardwareCameraType(camera.Type);
 
-    public static string ResolveCameraFolder(this CameraConfig cfg) => ResolveFolder(cfg.Folder);
+    public static string ResolveCameraFolder(this CameraConfig camera, AppConfig? app = null) =>
+        app is null ? ResolveFolder(camera.Folder) : app.ResolveDataPath(camera.Folder);
 }

@@ -240,6 +240,68 @@ public sealed class MaskTemplateCropMappingTests
         }
     }
 
+    [Fact]
+    public void MatchPeak_OffsetFeature_IsNotHousingCenter()
+    {
+        const int w = 640, h = 480;
+        using var src = new Mat(h, w, MatType.CV_8UC3, new Scalar(240, 240, 240));
+        using var feature = PaintOffsetFeature();
+        const int fx = 360, fy = 216;
+        feature.CopyTo(src[new Rect(fx, fy, feature.Width, feature.Height)]);
+        Point2f[] contour =
+        [
+            new(120, 180), new(520, 180), new(520, 300), new(120, 300),
+        ];
+        var housing = MaskHousing.Fit(contour);
+        var expect = new Point2d(fx + feature.Width / 2.0, fy + feature.Height / 2.0);
+
+        var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0.4);
+        using (crop.Upright)
+        {
+            var match = MaskTemplateMatcher.MatchBest(crop.Upright, feature, 5, 0.2);
+            Assert.NotNull(match);
+            var peak = MaskTemplateMatcher.MapUprightToSource(crop, match.CenterInUpright);
+            Assert.InRange(peak.X, expect.X - 16, expect.X + 16);
+            Assert.InRange(peak.Y, expect.Y - 16, expect.Y + 16);
+            Assert.True(Math.Abs(peak.X - housing.Center.X) > 40,
+                $"匹配峰 X={peak.X:0.0} 不应落在壳体中心 {housing.Center.X:0.0}");
+        }
+    }
+
+    [Fact]
+    public void AxisAlignedCrop_MatchPeak_TranslatesToSource()
+    {
+        using var src = new Mat(400, 600, MatType.CV_8UC3, new Scalar(240, 240, 240));
+        Cv2.Rectangle(src, new Rect(120, 160, 300, 80), new Scalar(200, 200, 200), -1);
+        using var feature = PaintOffsetFeature();
+        const int fx = 340, fy = 176;
+        feature.CopyTo(src[new Rect(fx, fy, feature.Width, feature.Height)]);
+        Point2f[] contour =
+        [
+            new(120, 160), new(420, 160), new(420, 240), new(120, 240),
+        ];
+        var expect = new Point2d(fx + feature.Width / 2.0, fy + feature.Height / 2.0);
+
+        var crop = MaskTemplateMatcher.AxisAlignedCrop(src, contour, 0.15);
+        using (crop.Upright)
+        {
+            Assert.Equal(0, crop.WarpAngleDeg);
+            var match = MaskTemplateMatcher.MatchBest(crop.Upright, feature, 5, 0.3);
+            Assert.NotNull(match);
+            var peak = MaskTemplateMatcher.MapUprightToSource(crop, match.CenterInUpright);
+            Assert.InRange(peak.X, expect.X - 8, expect.X + 8);
+            Assert.InRange(peak.Y, expect.Y - 8, expect.Y + 8);
+        }
+    }
+
+    private static Mat PaintOffsetFeature()
+    {
+        var mat = new Mat(48, 80, MatType.CV_8UC3, new Scalar(230, 230, 230));
+        Cv2.Rectangle(mat, new Point(6, 10), new Point(74, 22), new Scalar(40, 90, 200), -1);
+        Cv2.Rectangle(mat, new Point(28, 22), new Point(52, 42), new Scalar(20, 20, 20), -1);
+        return mat;
+    }
+
     private static Point2d CanonicalCenter(Mat src, Point2f[] contour, Mat template, double extraWarp)
     {
         var crop = MaskTemplateMatcher.UprightCrop(src, contour, 0.4, extraWarp);

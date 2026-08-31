@@ -146,23 +146,26 @@ public partial class SystemViewModel : ObservableObject
     private void RebuildDirectories()
     {
         var digest = string.Join("|",
+            _cfg.ResolveDataRoot(),
             _recipes.Folder,
             AppConfigExtensions.ResolveFolder(_cfg.ModelsFolder),
-            AppConfigExtensions.ResolveFolder(_cfg.CalibrationFolder),
+            _cfg.ResolveCalibrationFolder(),
             _failures.Folder,
-            AppConfigExtensions.ResolveFolder(_cfg.FileLogging.Folder),
-            AppConfigExtensions.ResolveFolder(_cfg.ResultLog.Folder));
+            _cfg.ResolveDataPath(_cfg.FileLogging.Folder),
+            _cfg.ResolveDataPath(_cfg.ResultLog.Folder));
         if (digest == _directoriesDigest)
             return;
         _directoriesDigest = digest;
 
         Directories.Clear();
+        if (!string.IsNullOrWhiteSpace(_cfg.DataRoot))
+            Directories.Add(new("数据根", _cfg.ResolveDataRoot()));
         Directories.Add(new("配方目录", _recipes.Folder));
         Directories.Add(new("模型目录", AppConfigExtensions.ResolveFolder(_cfg.ModelsFolder)));
-        Directories.Add(new("标定目录", AppConfigExtensions.ResolveFolder(_cfg.CalibrationFolder)));
+        Directories.Add(new("标定目录", _cfg.ResolveCalibrationFolder()));
         Directories.Add(new("失败现场目录", _failures.Folder));
-        Directories.Add(new("结果目录", AppConfigExtensions.ResolveFolder(_cfg.ResultLog.Folder)));
-        Directories.Add(new("日志目录", AppConfigExtensions.ResolveFolder(_cfg.FileLogging.Folder)));
+        Directories.Add(new("结果目录", _cfg.ResolveDataPath(_cfg.ResultLog.Folder)));
+        Directories.Add(new("日志目录", _cfg.ResolveDataPath(_cfg.FileLogging.Folder)));
     }
 
     /// <summary>页面进入时启动实时刷新（单例 VM，可反复启停）。</summary>

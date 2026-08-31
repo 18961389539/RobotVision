@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using RobotVision.Core.IO;
 using RobotVision.Core.Models;
 
 namespace RobotVision.Hosting;
@@ -141,12 +142,8 @@ public sealed class ProcessHealthStore
             })],
         };
         var json = JsonSerializer.Serialize(dto, JsonOptions);
-        var tmp = StatePath + $".{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
-        File.WriteAllText(tmp, json);
-        if (File.Exists(StatePath))
-            File.Replace(tmp, StatePath, null);
-        else
-            File.Move(tmp, StatePath);
+        // 原子落盘统一走 AtomicFile：原实现无 finally，写失败会残留 .tmp 文件
+        AtomicFile.WriteAllText(StatePath, json);
     }
 
     private void CleanupOldTsv()

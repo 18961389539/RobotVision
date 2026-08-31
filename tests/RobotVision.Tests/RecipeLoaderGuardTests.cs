@@ -172,6 +172,62 @@ public sealed class RecipeLoaderGuardTests : IDisposable
     }
 
     [Fact]
+    public void Validate_MaskTemplate_Sift_RequiresTaughtImage()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.Sift },
+        };
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+    }
+
+    [Fact]
+    public void Validate_MaskTemplate_Sift_WithTaughtImage_Ok()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.Sift, TemplateImageBase64 = "e30=" },
+        };
+        RecipeLoader.Validate(recipe);
+    }
+
+    [Fact]
+    public void Validate_MaskTemplate_ShapeMatch_RequiresTaughtImage()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.ShapeMatch },
+        };
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+    }
+
+    [Fact]
+    public void Validate_MaskTemplate_ShapeMatch_WithTaughtImage_Ok()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "T1",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.ShapeMatch, TemplateImageBase64 = "e30=" },
+        };
+        RecipeLoader.Validate(recipe);
+    }
+
+    [Fact]
     public void Validate_MaskTemplate_MatchThresholdOutOfRange_Throws()
     {
         var recipe = new RecipeConfig
@@ -212,6 +268,8 @@ public sealed class RecipeLoaderGuardTests : IDisposable
             ExpectedCount = 2,
             TeachAreaPx = 1200,
             TeachAspect = 2.4,
+            RefinePolicyOrder = [SegmentRefineMethod.Sift, SegmentRefineMethod.Template],
+            UseUprightCrop = false,
         };
         var clone = src.Clone();
         Assert.Equal(0.91, clone.TeachPeakScore);
@@ -221,6 +279,19 @@ public sealed class RecipeLoaderGuardTests : IDisposable
         Assert.Equal(2, clone.ExpectedCount);
         Assert.Equal(1200, clone.TeachAreaPx);
         Assert.Equal(2.4, clone.TeachAspect);
+        Assert.False(clone.UseUprightCrop);
+        Assert.Equal(new[] { SegmentRefineMethod.Sift, SegmentRefineMethod.Template }, clone.RefinePolicyOrder);
+        src.RefinePolicyOrder![0] = SegmentRefineMethod.CaliperTab;
+        Assert.Equal(SegmentRefineMethod.Sift, clone.RefinePolicyOrder![0]);
+    }
+
+    [Fact]
+    public void UsesFeatureTeachRoi_TemplateAndShape_NotSift()
+    {
+        Assert.True(TemplateOptions.UsesFeatureTeachRoi(SegmentRefineMethod.Template));
+        Assert.True(TemplateOptions.UsesFeatureTeachRoi(SegmentRefineMethod.ShapeMatch));
+        Assert.False(TemplateOptions.UsesFeatureTeachRoi(SegmentRefineMethod.Sift));
+        Assert.False(TemplateOptions.UsesFeatureTeachRoi(SegmentRefineMethod.CaliperTab));
     }
 
     [Fact]
@@ -307,6 +378,16 @@ public sealed class RecipeLoaderGuardTests : IDisposable
         {
             AngleMode = AngleMode.MaskTemplate,
             Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.CaliperTab },
+        }));
+        Assert.False(RecipeLoader.HasUndirectedAngle(new RecipeConfig
+        {
+            AngleMode = AngleMode.MaskTemplate,
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.Sift },
+        }));
+        Assert.False(RecipeLoader.HasUndirectedAngle(new RecipeConfig
+        {
+            AngleMode = AngleMode.MaskTemplate,
+            Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.ShapeMatch },
         }));
     }
 }

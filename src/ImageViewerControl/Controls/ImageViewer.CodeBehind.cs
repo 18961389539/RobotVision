@@ -58,8 +58,11 @@ namespace ImageViewer.Controls
             _imageSourceController.HandleLoaded();
         }
 
-        private async void OnUnloaded(object sender, RoutedEventArgs e)
+        private void OnUnloaded(object sender, RoutedEventArgs e)
         {
+            // 同步清理段在事件线程立即执行（与原 async void 的 await 前行为一致）；
+            // 排水落盘改为丢弃的 Task——RunShutdownOperationAsync 内部已全捕获异常，
+            // 避免 async void 使异常直冲同步上下文且不可观察。
             if (_hostWindow is not null)
             {
                 _hostWindow.PreviewKeyDown -= OnHostWindowPreviewKeyDown;
@@ -71,7 +74,7 @@ namespace ImageViewer.Controls
             _controlComposition.SessionController.StopAutoSave();
             _analysisState.DisposeAnalysisWork();
             _infoPanelStatisticsScheduler.Cancel();
-            await RunShutdownOperationAsync(
+            _ = RunShutdownOperationAsync(
                 "Drain autosave during unload",
                 () => _controlComposition.SessionController.DrainAutoSaveAsync());
         }
@@ -172,14 +175,16 @@ namespace ImageViewer.Controls
             return false;
         }
 
-        private async void OnKeyDown(object sender, KeyEventArgs e)
+        private void OnKeyDown(object sender, KeyEventArgs e)
         {
             // 修复：Ctrl+O 快捷键统一在键盘事件中处理（菜单 InputGestureText 已移除，
             // 避免同一快捷键在菜单与代码两处维护/触发）。
+            // 异步执行改为丢弃的 Task（RunUiOperationAsync 内部已全捕获），
+            // 不再使用 async void——异常直冲同步上下文且不可观察。
             if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.O)
             {
                 e.Handled = true;
-                await RunUiOperationAsync(
+                _ = RunUiOperationAsync(
                     "打开图像快捷键",
                     () => _fileMenuCommandController.ExecuteAsync(ImageViewerFileMenuCommand.OpenImage));
                 return;
@@ -330,9 +335,9 @@ namespace ImageViewer.Controls
 
         private void UpdateContextMenuState() => _contextMenuController.UpdateState();
 
-        private async void OnViewCommandMenuClick(object sender, RoutedEventArgs e)
+        private void OnViewCommandMenuClick(object sender, RoutedEventArgs e)
         {
-            await RunUiOperationAsync("视图菜单命令", () =>
+            _ = RunUiOperationAsync("视图菜单命令", () =>
             {
                 if (TryGetTaggedCommand(sender, out ImageViewerViewCommand command))
                 {
@@ -344,9 +349,9 @@ namespace ImageViewer.Controls
             });
         }
 
-        private async void OnAnalysisCommandMenuClick(object sender, RoutedEventArgs e)
+        private void OnAnalysisCommandMenuClick(object sender, RoutedEventArgs e)
         {
-            await RunUiOperationAsync("分析菜单命令", () =>
+            _ = RunUiOperationAsync("分析菜单命令", () =>
             {
                 if (TryGetTaggedCommand(sender, out ImageViewerAnalysisCommand command))
                 {
@@ -358,9 +363,9 @@ namespace ImageViewer.Controls
             });
         }
 
-        private async void OnRoiMenuCommandClick(object sender, RoutedEventArgs e)
+        private void OnRoiMenuCommandClick(object sender, RoutedEventArgs e)
         {
-            await RunUiOperationAsync("ROI 菜单命令", () =>
+            _ = RunUiOperationAsync("ROI 菜单命令", () =>
             {
                 if (TryGetTaggedCommand(sender, out ImageViewerRoiMenuCommand command))
                 {
@@ -372,14 +377,14 @@ namespace ImageViewer.Controls
             });
         }
 
-        private async void OnFileMenuCommandClick(object sender, RoutedEventArgs e)
+        private void OnFileMenuCommandClick(object sender, RoutedEventArgs e)
         {
-            await RunUiOperationAsync("文件菜单命令", () => HandleFileMenuCommandClickAsync(sender));
+            _ = RunUiOperationAsync("文件菜单命令", () => HandleFileMenuCommandClickAsync(sender));
         }
 
-        private async void OnToolbarFileCommandClick(object sender, RoutedEventArgs e)
+        private void OnToolbarFileCommandClick(object sender, RoutedEventArgs e)
         {
-            await RunUiOperationAsync("工具栏文件命令", () => HandleFileMenuCommandClickAsync(sender));
+            _ = RunUiOperationAsync("工具栏文件命令", () => HandleFileMenuCommandClickAsync(sender));
         }
 
         private void OnToolbarViewCommandClick(object sender, RoutedEventArgs e)
@@ -412,14 +417,14 @@ namespace ImageViewer.Controls
 
         private void OnDragOver(object sender, DragEventArgs e) => DroppedContentController.HandleDragOver(e);
 
-        private async void OnDrop(object sender, DragEventArgs e)
+        private void OnDrop(object sender, DragEventArgs e)
         {
-            await RunUiOperationAsync("拖放打开图像", () => _droppedContentController.HandleDropAsync(e));
+            _ = RunUiOperationAsync("拖放打开图像", () => _droppedContentController.HandleDropAsync(e));
         }
 
-        private async void OnRetryImageLoadClick(object sender, RoutedEventArgs e)
+        private void OnRetryImageLoadClick(object sender, RoutedEventArgs e)
         {
-            await RunUiOperationAsync("重试加载图像", RetryLastImageLoadAsync);
+            _ = RunUiOperationAsync("重试加载图像", RetryLastImageLoadAsync);
         }
 
         private void OnDismissDiagnosticErrorClick(object sender, RoutedEventArgs e)

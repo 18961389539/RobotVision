@@ -72,7 +72,7 @@
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          HorizontalContentAlignment="Stretch">
                     <ListBox.Style>
-                        <Style TargetType="ListBox">
+                        <Style TargetType="ListBox" BasedOn="{StaticResource DefaultListBoxStyle}">
                             <Setter Property="Visibility" Value="Visible" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding Messages.Count}" Value="0">
@@ -82,7 +82,7 @@
                         </Style>
                     </ListBox.Style>
                     <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem">
+                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource DefaultListBoxItemStyle}">
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                             <Setter Property="Padding" Value="0,4" />
                             <Setter Property="Focusable" Value="False" />
@@ -108,6 +108,9 @@
                                                               IsToolBarVisible="False" Padding="0" Background="Transparent"
                                                               VerticalScrollBarVisibility="Hidden"
                                                               HorizontalScrollBarVisibility="Disabled" />
+                                    <TextBlock Text="{Binding ToolActivity}" TextWrapping="Wrap" FontSize="11"
+                                               Margin="0,6,0,0" Opacity="0.75"
+                                               Visibility="{Binding HasToolActivity, Converter={StaticResource BoolToVisibilityConverter}}" />
                                     <Image MaxHeight="240" Margin="0,8,0,0" Stretch="Uniform"
                                            Source="{Binding ImagePath}"
                                            RenderOptions.BitmapScalingMode="HighQuality">
@@ -124,7 +127,7 @@
                                     </Image>
                                     <Button Content="预览 HTML" FontSize="11" Padding="10,4" Margin="0,8,0,0"
                                             HorizontalAlignment="Left"
-                                            ToolTip="用 WebView2 渲染模型回复中的 HTML（脚本已禁用）"
+                                            ToolTip="用 WebView2 渲染模型回复中的 HTML（脚本已禁用"
                                             Visibility="{Binding HasHtml, Converter={StaticResource BoolToVisibilityConverter}}"
                                             Command="{Binding DataContext.PreviewHtmlCommand, RelativeSource={RelativeSource AncestorType=Page}}"
                                             CommandParameter="{Binding HtmlPreview}" />
@@ -152,7 +155,7 @@
                     <KeyBinding Key="Return" Command="{Binding SendCommand}" />
                 </ui:TextBox.InputBindings>
             </ui:TextBox>
-            <ui:Button Grid.Column="1" Content="发送" IsDefault="True" Margin="8,0,0,0"
+            <ui:Button Grid.Column="1" Content="发" IsDefault="True" Margin="8,0,0,0"
                        MinWidth="88" Command="{Binding SendCommand}" />
             <ui:Button Grid.Column="2" Content="停止" Margin="8,0,0,0" MinWidth="72"
                        Command="{Binding StopCommand}" />

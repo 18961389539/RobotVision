@@ -146,6 +146,60 @@ public class VisionPipelineIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task RunPreview_DoesNotPublishFrameProcessed()
+    {
+        await using var server = await TestServer.StartAsync();
+        var fired = 0;
+        void Handler(VisionFrameSnapshot _) => Interlocked.Increment(ref fired);
+        server.Vision.FrameProcessed += Handler;
+        PreviewRunResult? preview = null;
+        try
+        {
+            preview = await server.Vision.RunPreviewAsync(new RecipeConfig
+            {
+                Name = "preview",
+                CameraId = "cam_virtual",
+                AngleMode = AngleMode.KeyPointLine,
+                Models = ["a01_kpt.onnx"],
+                Keypoint = { IndexA = 0, IndexB = 1 },
+            }, null, CancellationToken.None);
+
+            preview.Result.ErrorCode.Should().Be(VisionErrorCode.NoTargetFound);
+            await Task.Delay(200);
+            fired.Should().Be(0);
+        }
+        finally
+        {
+            server.Vision.FrameProcessed -= Handler;
+            preview!.Frame?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task RunPreview_ReturnsFrame_WhenInferenceCompletes()
+    {
+        await using var server = await TestServer.StartAsync();
+        var preview = await server.Vision.RunPreviewAsync(new RecipeConfig
+        {
+            Name = "preview",
+            CameraId = "cam_virtual",
+            AngleMode = AngleMode.KeyPointLine,
+            Models = ["a01_kpt.onnx"],
+            Keypoint = { IndexA = 0, IndexB = 1 },
+        }, null, CancellationToken.None);
+        try
+        {
+            preview.Frame.Should().NotBeNull();
+            preview.Frame!.UndistortedImage.Width.Should().BeGreaterThan(0);
+            preview.Frame.PixelPoses.Should().NotBeNull();
+        }
+        finally
+        {
+            preview.Frame?.Dispose();
+        }
+    }
+
     /// <summary>注入 OnArm 外参档案（示教位姿 100,100,RZ=0）。</summary>
     private static async Task WriteOnArmCalibration(TestServer server)
     {

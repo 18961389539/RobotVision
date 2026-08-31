@@ -37,6 +37,12 @@ public sealed partial class ChatBubble : ObservableObject
 
     public bool HasHtml => !string.IsNullOrEmpty(HtmlPreview);
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasToolActivity))]
+    private string _toolActivity = "";
+
+    public bool HasToolActivity => !string.IsNullOrWhiteSpace(ToolActivity);
+
     /// <summary>从回复文本提取 HTML 片段：优先 ```html 代码块，其次完整 &lt;html&gt; 文档。</summary>
     public static string? ExtractHtml(string text)
     {
@@ -137,13 +143,7 @@ public partial class ChatViewModel : ObservableObject
         Status = IsReady ? "正在生成…" : "正在加载本机模型并生成（首次约 1–2 分钟）…";
         try
         {
-            var turns = Messages
-                .Where(m => m.Text.Length > 0)
-                .Select(m => new ChatTurn(m.Role, m.Text))
-                .ToList();
-            // 当前助手气泡还是空的，不要当成历史
-            if (turns.Count > 0 && turns[^1].Role == "assistant" && turns[^1].Content.Length == 0)
-                turns.RemoveAt(turns.Count - 1);
+            var turns = BuildModelTurns(excludeEmptyTrailingAssistant: true);
 
             var any = false;
             if (_agent is not null)
@@ -158,9 +158,10 @@ public partial class ChatViewModel : ObservableObject
                             break;
                         case ChatToolNotice notice:
                             any = true;
-                            if (assistant.Text.Length > 0 && !assistant.Text.EndsWith('\n'))
-                                assistant.Text += "\n";
-                            assistant.Text += $"〔{notice.Name}〕{notice.Detail}\n";
+                            if (assistant.ToolActivity.Length > 0 && !assistant.ToolActivity.EndsWith('\n'))
+                                assistant.ToolActivity += "\n";
+                            assistant.ToolActivity += $"〔{notice.Name}〕{notice.Detail}";
+                            Status = $"工具 {notice.Name}…";
                             break;
                         case ChatImageEvent image:
                             any = true;
@@ -171,7 +172,9 @@ public partial class ChatViewModel : ObservableObject
             }
             else
             {
-                await foreach (var chunk in _client.CompleteStreamAsync(turns, token))
+                var composed = ChatHistoryComposer.Compose(
+                    turns, _cfg.ContextSize, _cfg.MaxTokens, _cfg.HistoryTokenBudget);
+                await foreach (var chunk in _client.CompleteStreamAsync(composed, token))
                 {
                     any = true;
                     assistant.Text += chunk;
@@ -206,6 +209,31 @@ public partial class ChatViewModel : ObservableObject
             assistant.HtmlPreview = ChatBubble.ExtractHtml(assistant.Text);
             IsBusy = false;
         }
+    }
+
+    private List<ChatTurn> BuildModelTurns(bool excludeEmptyTrailingAssistant)
+    {
+        var turns = new List<ChatTurn>();
+        foreach (var m in Messages)
+        {
+            if (!string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (m.Text.Length == 0 && string.IsNullOrEmpty(m.ImagePath))
+                continue;
+            turns.Add(new ChatTurn(
+                m.Role,
+                m.Text,
+                string.IsNullOrEmpty(m.ImagePath) ? null : [m.ImagePath]));
+        }
+
+        if (excludeEmptyTrailingAssistant
+            && turns.Count > 0
+            && string.Equals(turns[^1].Role, "assistant", StringComparison.OrdinalIgnoreCase)
+            && turns[^1].Content.Length == 0
+            && turns[^1].ImagePaths is not { Count: > 0 })
+            turns.RemoveAt(turns.Count - 1);
+        return turns;
     }
 
     private bool CanSend() => !IsBusy && !string.IsNullOrWhiteSpace(Draft);

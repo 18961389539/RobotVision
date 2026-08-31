@@ -1,6 +1,7 @@
 using System.Text.Json;
 using OpenCvSharp;
 using RobotVision.Core;
+using RobotVision.Core.IO;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Calibration;
@@ -488,7 +489,7 @@ public class CalibrationManagerTests
     }
 
     [Fact]
-    public void AtomicWriteAllText_OverwritesExistingFileAtomically()
+    public void AtomicFile_OverwritesExistingFileAtomically()
     {
         var folder = Path.Combine(Path.GetTempPath(), "rv_cal_atomic_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
@@ -497,7 +498,7 @@ public class CalibrationManagerTests
             var path = Path.Combine(folder, "cam1.intrinsic.json");
             File.WriteAllText(path, "old content");
 
-            CalibrationManager.AtomicWriteAllText(path, "{\"a\":1}");
+            AtomicFile.WriteAllText(path, "{\"a\":1}");
 
             Assert.Equal("{\"a\":1}", File.ReadAllText(path));
             // 不残留临时文件

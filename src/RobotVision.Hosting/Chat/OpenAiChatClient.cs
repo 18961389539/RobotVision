@@ -65,7 +65,7 @@ public sealed class OpenAiChatClient : ILocalChatClient, IDisposable
         IReadOnlyList<ChatTurn> turns,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var messages = turns.Select(t => new ChatApiMessage(t.Role, t.Content)).ToList();
+        var messages = turns.Select(t => new ChatApiMessage(t.Role, t.Content, ImagePaths: t.ImagePaths)).ToList();
         await foreach (var part in CompletePartsAsync(messages, tools: null, cancellationToken).ConfigureAwait(false))
         {
             if (!string.IsNullOrEmpty(part.Content))
@@ -81,16 +81,7 @@ public sealed class OpenAiChatClient : ILocalChatClient, IDisposable
         var dtoMessages = new List<ChatMessageDto>(messages.Count + 1);
         dtoMessages.Add(new ChatMessageDto("system", ChatSystemPrompt.Resolve(_cfg.SystemPrompt)));
         foreach (var msg in messages)
-        {
-            IReadOnlyList<ToolCallDto>? calls = null;
-            if (msg.ToolCalls is { Count: > 0 })
-            {
-                calls = msg.ToolCalls
-                    .Select(c => new ToolCallDto(c.Id, "function", new ToolFnDto(c.Name, c.Arguments)))
-                    .ToList();
-            }
-            dtoMessages.Add(new ChatMessageDto(msg.Role, msg.Content, msg.ToolCallId, msg.Name, calls));
-        }
+            dtoMessages.Add(BuildMessageDto(msg));
 
         IReadOnlyList<ToolSpecDto>? toolDtos = null;
         string? toolChoice = null;
@@ -179,6 +170,45 @@ public sealed class OpenAiChatClient : ILocalChatClient, IDisposable
             cur.Arguments.Append(d.Arguments);
     }
 
+    private ChatMessageDto BuildMessageDto(ChatApiMessage msg)
+    {
+        IReadOnlyList<ToolCallDto>? calls = null;
+        if (msg.ToolCalls is { Count: > 0 })
+        {
+            calls = msg.ToolCalls
+                .Select(c => new ToolCallDto(c.Id, "function", new ToolFnDto(c.Name, c.Arguments)))
+                .ToList();
+        }
+
+        return new ChatMessageDto(
+            msg.Role,
+            BuildMessageContent(msg.Content, msg.ImagePaths),
+            msg.ToolCallId,
+            msg.Name,
+            calls);
+    }
+
+    private object? BuildMessageContent(string? text, IReadOnlyList<string>? imagePaths)
+    {
+        if (!_cfg.SendImagesToModel || imagePaths is not { Count: > 0 })
+            return string.IsNullOrEmpty(text) ? null : text;
+
+        var parts = new List<object>();
+        if (!string.IsNullOrEmpty(text))
+            parts.Add(new ContentPartDto("text", text, null));
+
+        foreach (var path in imagePaths)
+        {
+            var url = ChatImageContext.ToDataUrl(path, _cfg.ImageMaxEdgePx);
+            if (url is not null)
+                parts.Add(new ContentPartDto("image_url", null, new ImageUrlDto(url)));
+        }
+
+        if (parts.Count == 0)
+            return string.IsNullOrEmpty(text) ? null : text;
+        return parts;
+    }
+
     private static string TrimError(string body)
     {
         var t = body.Trim().ReplaceLineEndings(" ");
@@ -211,10 +241,17 @@ public sealed class OpenAiChatClient : ILocalChatClient, IDisposable
 
     private sealed record ChatMessageDto(
         string Role,
-        string? Content,
+        object? Content,
         [property: JsonPropertyName("tool_call_id")] string? ToolCallId = null,
         string? Name = null,
         [property: JsonPropertyName("tool_calls")] IReadOnlyList<ToolCallDto>? ToolCalls = null);
+
+    private sealed record ContentPartDto(
+        string Type,
+        string? Text,
+        [property: JsonPropertyName("image_url")] ImageUrlDto? ImageUrl);
+
+    private sealed record ImageUrlDto(string Url);
 
     private sealed record ToolCallDto(string Id, string Type, ToolFnDto Function);
 

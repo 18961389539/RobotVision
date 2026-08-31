@@ -102,6 +102,16 @@ public sealed class CameraManager : IDisposable
     public CameraFrame Grab(string id, CancellationToken ct = default) =>
         GrabCore(id, () => Get(id).Grab(ct), ct);
 
+    /// <summary>
+    /// 示教/框选：文件夹相机再读上次文件、不推进回放下标；其它相机与 <see cref="Grab(string, CancellationToken)"/> 相同。
+    /// </summary>
+    public CameraFrame GrabForTeach(string id, CancellationToken ct = default) =>
+        GrabCore(id, () =>
+        {
+            var cam = Get(id);
+            return cam is FileCamera file ? file.RepeatLast(ct) : cam.Grab(ct);
+        }, ct);
+
     /// <summary>按相机 Id 串行取图（临时实例与已注册同 Id 互斥，供「先试后存」）。</summary>
     public CameraFrame Grab(ICamera camera, CancellationToken ct = default)
     {

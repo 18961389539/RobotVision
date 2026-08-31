@@ -4,6 +4,7 @@ using OpenCvSharp;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
+using RobotVision.Hosting;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Inference;
@@ -50,8 +51,7 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
         if (!Enabled)
             return;
 
-        var recipeDir = Path.Combine(RepoRoot, "src", "RobotVision.Wpf",
-            "bin", "Debug", "net8.0-windows", "recipes");
+        var recipeDir = OsdpRecipesDir();
         var modelsDir = Path.Combine(RepoRoot, "models");
         if (!File.Exists(Path.Combine(modelsDir, "OSFP-SEG.onnx")))
         {
@@ -158,8 +158,7 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
 
     private void RunOsdpLive(SegmentRefineMethod method, string tag)
     {
-        var recipeDir = Path.Combine(RepoRoot, "src", "RobotVision.Wpf",
-            "bin", "Debug", "net8.0-windows", "recipes");
+        var recipeDir = OsdpRecipesDir();
         var modelsDir = Path.Combine(RepoRoot, "models");
         if (!File.Exists(Path.Combine(modelsDir, "OSFP-SEG.onnx")))
         {
@@ -301,6 +300,31 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
             foreach (var s in full.Take(5))
                 output.WriteLine($"  {s.Label} conf={s.Confidence:0.000} box={s.Box.Width:0}x{s.Box.Height:0}");
         }
+    }
+
+    private static string OsdpRecipesDir()
+    {
+        var wpfBin = Path.Combine(RepoRoot, "src", "RobotVision.Wpf", "bin", "Debug", "net8.0-windows");
+        var settings = Path.Combine(wpfBin, "appsettings.json");
+        if (File.Exists(settings))
+        {
+            try
+            {
+                var cfg = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(settings),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (cfg is { DataRoot.Length: > 0 })
+                {
+                    DataRootBinder.Apply(cfg);
+                    if (File.Exists(Path.Combine(cfg.RecipesFolder, "OSDP.json")))
+                        return cfg.RecipesFolder;
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return Path.Combine(wpfBin, "recipes");
     }
 
     private static (string DeviceId, double? ExposureUs, double? Gain) ReadCamBasler(string appsettingsPath)

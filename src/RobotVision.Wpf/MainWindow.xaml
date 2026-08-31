@@ -17,7 +17,7 @@
         xmlns:sys="clr-namespace:RobotVision.WpfHost.Features.SystemInfo"
         xmlns:about="clr-namespace:RobotVision.WpfHost.Features.About"
         xmlns:chat="clr-namespace:RobotVision.WpfHost.Features.Chat"
-        Title="RobotVision 视觉调试台"
+        Title="RobotVision 视觉调试"
         Width="1280" Height="820"
         MinWidth="960" MinHeight="600"
         FontFamily="Microsoft YaHei UI, Segoe UI"
@@ -25,9 +25,9 @@
         TextOptions.TextFormattingMode="Display"
         WindowStartupLocation="CenterScreen">
     <DockPanel>
-        <ui:TitleBar DockPanel.Dock="Top" Title="RobotVision 视觉调试台" />
+        <ui:TitleBar DockPanel.Dock="Top" Title="RobotVision 视觉调试" />
 
-        <!-- 全局状态栏：所有页面可见 -->
+        <!-- 全局状态栏：所有页面可"-->
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource ApplicationBackgroundBrush}"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
@@ -40,7 +40,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <!-- TCP 服务状态圆点：绿=运行 / 橙=未启动 -->
+                <!-- TCP 服务状态圆点：● 运行 / ○ 未启动"-->
                 <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center">
                     <Ellipse.Style>
                         <Style TargetType="Ellipse">

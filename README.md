@@ -20,22 +20,49 @@ RobotVision.sln
 │   │   ├── Communication/              #   TcpServerManager（行协议、超时、连接管理）
 │   │   └── Inference/                  #   ModelManager（IInferenceEngine 抽象）/ 策略与工厂注册表
 │   ├── RobotVision.Hosting/            # 共享组装层：AddRobotVision 统一 DI、VisionService
-│   │                                  #   （编排）/ PipelineScheduler（并发队列）/ VisionMetrics（统计）、
-│   │                                  #   文件日志（滚动文件 + UI 日志sink）
+│   │                                   #   （编排）/ PipelineScheduler（并发队列）/ VisionMetrics（统计）、
+│   │                                   #   文件日志（滚动文件 + UI 日志sink）
+│   │   └── Chat/                       #   工艺助手：OpenAI 兼容 SSE 客户端 / llama-server 托管、
+│   │                                   #     StationChatTools 站内工具、危险操作守卫、调用审计
+│   ├── ImageViewerControl/             # 通用 WPF 图像查看控件库（独立可复用，不含视觉业务）
+│   │   ├── Controls/                   #   ImageViewer 主体（partial 多文件）/ 自适应与显示变体
+│   │   ├── Services/                   #   渲染 / 视口 / 会话 / 工程打包 / ROI 几何与持久化
+│   │   ├── Models/                     #   ROI 数据模型、选项与持久化 DTO
+│   │   ├── Plugins/                    #   IRoiPlugin 插件体系、RoiPluginRegistry 自动发现
+│   │   ├── Rendering/                  #   叠加层绘制上下文与渲染状态
+│   │   └── Abstractions/               #   IImageViewerLogger / IImageViewerTelemetry 等注入点
 │   └── RobotVision.Wpf/                # WPF 宿主（TCP 服务 + 实时画面叠加、手动触发调试）
+│       └── Features/                   #   Monitor 监控 / Recipe 配方 / Cameras / Models /
+│                                       #     Lightings / Calibration(+Wizard) / Analysis 结果分析 /
+│                                       #     Failures / Logs / Settings / Communication / Chat
 ├── tools/
-│   ├── RobotVision.CalibTool/          # 命令行标定工具（内参 + 外参）
-│   └── RobotVision.InferenceBench/     # CPU vs OpenVINO 推理对比（工控机上跑）
+│   ├── RobotVision.CalibTool/          # 命令行标定工具（内参/外参/旋转中心/多项式）
+│   ├── RobotVision.InferenceBench/     # CPU vs OpenVINO 推理对比（主进程 + ov-worker + Shared）
+│   ├── HardwareCameraVerify/           # 真实相机硬件接入验证
+│   ├── CaptureBasler/                  # Basler 取图小工具
+│   ├── RobotVision.Diag/               # 现场诊断
+│   ├── ViewerControlCompare/           # ImageViewerControl 对照验证宿主
+│   └── *.ps1                           # smoke-test / carve-burn / pe-imports 脚本
 ├── tests/
-│   └── RobotVision.Tests/              # 单元测试（几何/标定/协议/队列/模型并发/日志/失败留存）
+│   ├── RobotVision.Tests/              # 单元测试（几何/标定/协议/队列/模型并发/日志/失败留存）
+│   ├── RobotVision.Wpf.Tests/          # ViewModel 层测试（不依赖 UI 线程）
+│   ├── RobotVision.IntegrationTests/   # 端到端（真实 socket / 全链路 / DI / 并发压力）
+│   └── ImageViewerControl.Tests/       # 控件层（撤销重做 / ROI 几何与持久化 / 插件注册表）
 ├── recipes/                            # 配方 JSON（A01 关键点示例 / A02 双模型示例）
 ├── models/                             # ONNX 模型（自行放置，不入库）
 ├── logs/                               # 运行日志（按天滚动，appsettings 可配置，不入库）
 └── data/
     ├── replay/                         # 回放图片目录（联调用）
     ├── calibration/                    # 标定结果（App 启动自动加载）
+    ├── captures/                       # 成功检测存图（CaptureSuccess 开启时才有）
+    ├── metrics/                        # 过程能力 tsv（按天）+ health.json（累计）
+    ├── results/                        # 触发结果留档 jsonl（坐标/角度/置信度/耗时）
+    ├── chat-audit/                     # 工艺助手工具调用审计 jsonl（默认保留 90 天）
     └── failures/                       # 失败现场留存（PNG+JSON 成对，滚动清理，不入库）
 ```
+
+> `src/ImageViewerControl` 是当前体量最大的工程（约 3.2 万行，占 src 的 82%），
+> 与视觉业务完全解耦，可独立复用到其他图像处理项目。详见文末「已知技术债」。
 
 ## 构建与测试
 
@@ -445,8 +472,51 @@ YoloDotNet **每个进程只能引用一种 Execution Provider 包**，因此仓
 换整个推理框架（如 ONNX Runtime 直连）＝实现 `IInferenceEngine` + `IInferenceEngineFactory` 替换注册，
 同样零改动策略层。`ModelSession.Run(Func&lt;IInferenceEngine,T&gt;)` 内信号量串行化语义保留（引擎实例非线程安全）。
 
+## 工艺助手（本地大模型对话）
+
+对话页内置一个**完全本地**的工艺问答助手：模型跑在本机 llama-server（CPU，`-ngl 0`），
+**不上传任何图像、坐标或配方到公网**。用于现场查结果、看趋势、定位失败原因。
+
+链路：
+`ChatPage`/`ChatViewModel`（Markdig 渲染气泡 + 流式输出）→ `ChatAgent`（工具循环，最多
+`MaxToolRounds` 轮，默认 8）→ `OpenAiChatClient`（OpenAI 兼容 SSE，增量合并 `tool_calls`）
+→ `LlamaServerHost`（按需拉起 `llama-server.exe`，退出时回收进程）。
+
+工具分两类：
+
+| 分类 | 说明 | 代表工具 |
+|---|---|---|
+| 只读 | 查配方/错误码/结果分析/趋势/日志摘要/系统信息 | `info` `recipes` `codes` `summary` `trend` `rows` |
+| 写操作 | 会改变运行态，**受守卫拦截** | `tcp_control`(stop/restart/disconnect)、配方 `enable`/`disable`/`delete`/`patch` |
+
+安全设计：
+
+- `ChatDangerousActionGuard`：写操作须参数带 `confirm:true` **且**用户最近一条消息含明确意图并点名对象（配方名/路径/TCP），否则拦截；
+- `ChatToolAuditStore`：工具调用审计写入 `data/chat-audit/*.jsonl`（默认开，保留 90 天，含参数与结果）；
+- `RequireDangerousActionConfirm` / `AuditEnabled` 可在 appsettings 的 `Chat` 段关闭或调整。
+
+**部署注意**：`Chat:LlamaServerPath` 与 `Chat:GgufPath` 是**机器相关**的配置，
+默认值仅作占位，换工控机必须按实际路径填写；路径不存在时对话页不可用，
+但**不影响主视觉管线**（TCP 触发、取图、推理照常）。无本地模型时把
+`Chat:AutoStart` 设为 `false` 即可整体闲置。
+
 ## 并发与线程安全
 
 - `VisionService` 通过信号量串行化整个管线，并发 TRIGGER 排队执行；
 - 每个模型的 Yolo 实例通过 `ModelSession` 内部信号量串行化（Yolo 非线程安全）；
 - 模型加载后空跑一帧预热，避免首次请求耗时突增。
+
+## 已知技术债
+
+按优先级排列。均为**已识别、未处理**的结构性问题，改动前请先读这一节。
+
+| # | 位置 | 问题 | 影响 |
+|---|---|---|---|
+| 1 | `ImageViewerControl/Controls/ImageViewer.*.cs` | 单个 `partial class ImageViewer` 横跨 38 个文件、约 5,807 行 | partial 拆分掩盖了 God Object：状态仍共享，重命名/提取接口等重构无法安全进行，IDE 引用查找失效 |
+| 2 | `ImageViewerControl`（整体） | 约 31,682 行生产代码仅有 733 行测试（23 行/千行） | 全仓最大的测试缺口；`Services`/`Plugins`/`Rendering`/`Utils` 是纯逻辑，可优先补测，`Controls` 依赖 UI 线程，性价比低 |
+| 3 | `Hosting/Chat/ChatDangerousActionGuard.cs` | 写操作守卫依赖模型自填的 `confirm:true` + 中文关键词匹配 | 提示词级防护，幻觉或 prompt injection 可自行构造参数绕过。目标方案：模型只「提议」，由服务端持有待确认状态、UI 弹窗由人确认后凭一次性 token 执行 |
+| 4 | `Infrastructure/Calibration/CalibrationManager.cs` | 单类 1,348 行 / 约 80 个方法，同时管内参/外参/旋转中心/多项式/比例五种标定 | 新增标定类型要改同一个大类。项目已有 `CameraTypeRegistry`/`AngleStrategyTypeRegistry` 模式，应按同构方式拆为 `ICalibrationKindHandler` + 门面 |
+| 5 | `Hosting/AppConfig.cs` (`ChatConfig`) | `LlamaServerPath`/`GgufPath` 默认值是开发机绝对路径 | 换机必失效且静默。应改为空值 + 启动校验 + 页面提示（不抛异常打断主流程） |
+
+**分层依赖目前是干净的**（`Core` 零外部依赖 ← `Infrastructure` ← `Hosting` ← `Wpf`，
+Wpf 不直接引用 Infrastructure）。若加架构守护测试锁住这条边界，可防止后续提交破坏它。

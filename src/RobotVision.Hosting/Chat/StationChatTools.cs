@@ -80,21 +80,21 @@ public sealed class StationChatTools
         Tool("query_results", "本机结果库（与分析页同一套查询）。action=dashboard|rows|summary|angles|codes|by_recipe|trend|recipes|info。range=today|7d|30d|all；可筛 recipe/station/camera/code/ok_only/message、from/to、days、hours、grain=hour|day、bins、limit、offset。分析/合格率/分布用 dashboard。", Props("action", "range", "recipe", "station", "camera", "code", "ok_only", "message", "from", "to", "days", "hours", "grain", "bins", "limit", "offset"), QueryResults),
         Tool("list_failures", "列出失败留存图文件。", Props("limit"), ListFailures),
         Tool("list_calibrations", "列出内参/外参/多项式/比例/旋转中心档案。", Empty(), ListCalib),
-        Tool("set_light", "开关光源或发原始指令。action=on|off|raw；on 用 channel/brightness；raw 用 command。", Props("id", "action", "channel", "brightness", "command"), SetLight),
-        Tool("clear_inhibit", "解除过程联锁(1018)。可选 recipe，空则全部解除。", Props("recipe"), ClearInhibit),
-        Tool("tcp_control", "PLC 通信。action=status|stop|start|restart|disconnect；disconnect 需 client_id。停/重启会断开机器人。", Props("action", "client_id"), TcpControl),
+        Tool("set_light", "开关光源或发原始指令。action=on|off|raw；raw 须 confirm:true。", Props("id", "action", "channel", "brightness", "command", "confirm"), SetLight),
+        Tool("clear_inhibit", "解除过程联锁(1018)。须 confirm:true 且用户明确同意。可选 recipe。", Props("recipe", "confirm"), ClearInhibit),
+        Tool("tcp_control", "PLC 通信。action=status|stop|start|restart|disconnect；stop/restart/disconnect 须 confirm:true。", Props("action", "client_id", "confirm"), TcpControl),
         Tool("get_logs", "最近界面日志。", Props("limit"), GetLogs),
         Tool("get_settings", "超时、队列、TCP 端口、位姿校验等运行设置。", Empty(), GetSettings),
-        Tool("manage_recipe", "配方写操作。action=enable|disable|delete|duplicate|validate|patch。patch 可改 enabled/confidence/iou/camera_id/description/serial。duplicate 需 new_name。", Props("action", "name", "new_name", "confidence", "iou", "camera_id", "description", "serial", "enabled"), ManageRecipe),
-        Tool("set_camera", "改相机曝光/增益并写配置，也可立刻下发到已打开的相机。可 unregister。", Props("camera_id", "exposure_us", "gain", "grab_timeout_ms", "action"), SetCamera),
-        Tool("update_settings", "改运行参数并热应用。可填 timeout_ms/max_queue/tcp_port/ip/whitelist/pose_check/xy_tol/rz_tol/idle_timeout_ms/failure_enabled/process_health 等。", Props("timeout_ms", "max_queue", "tcp_port", "ip", "whitelist", "pose_check", "xy_tol", "rz_tol", "idle_timeout_ms", "max_concurrent", "tcp_backlog", "max_connections", "failure_enabled", "failure_retained", "process_health", "consecutive_fail_limit", "inhibit_on_limit"), UpdateSettings),
-        Tool("manage_model", "模型。action=list|unload|unload_all；unload 需 file，可选 task=ObjectDetection|Segmentation|PoseEstimation。", Props("action", "file", "task"), ManageModel),
-        Tool("manage_calibration", "标定档案。action=delete 时 kind=intrinsic|extrinsic|polynomial|scale|rotation，id 为相机或工位。", Props("action", "kind", "id"), ManageCalibration),
-        Tool("manage_files", "失败图/留存图/对话拍照。action=list_captures|delete_failure|delete_capture|delete_chat；删除需 path。", Props("action", "path", "limit"), ManageFiles),
+        Tool("manage_recipe", "配方写操作。写操作须 confirm:true。action=enable|disable|delete|duplicate|validate|patch。", Props("action", "name", "new_name", "confidence", "iou", "camera_id", "description", "serial", "enabled", "confirm"), ManageRecipe),
+        Tool("set_camera", "改相机曝光/增益并写配置。unregister 须 confirm:true。", Props("camera_id", "exposure_us", "gain", "grab_timeout_ms", "action", "confirm"), SetCamera),
+        Tool("update_settings", "改运行参数并热应用。任何字段变更须 confirm:true。", Props("timeout_ms", "max_queue", "tcp_port", "ip", "whitelist", "pose_check", "xy_tol", "rz_tol", "idle_timeout_ms", "max_concurrent", "tcp_backlog", "max_connections", "failure_enabled", "failure_retained", "process_health", "consecutive_fail_limit", "inhibit_on_limit", "confirm"), UpdateSettings),
+        Tool("manage_model", "模型。unload/unload_all 须 confirm:true。", Props("action", "file", "task", "confirm"), ManageModel),
+        Tool("manage_calibration", "标定档案。delete 须 confirm:true。", Props("action", "kind", "id", "confirm"), ManageCalibration),
+        Tool("manage_files", "失败图/留存图/对话拍照。删除须 confirm:true。", Props("action", "path", "limit", "confirm"), ManageFiles),
         Tool("convert_pose", "像素坐标换机器人坐标。需 station_id、px、py，可选 angle_deg、camera_id。", Props("station_id", "px", "py", "angle_deg", "camera_id"), ConvertPose),
         Tool("system_info", "内存、本机时间、目录、推理后端、各配方统计。问今天几号/现在几点用这个。", Empty(), SystemInfo),
         Tool("list_files", "列目录。folder=recipes|models|calibration|failures|captures|chat|results。", Props("folder"), ListFiles),
-        Tool("light_send_raw", "向光源控制器发原始协议字符串。", Props("id", "command"), LightSendRaw),
+        Tool("light_send_raw", "向光源控制器发原始协议字符串。须 confirm:true。", Props("id", "command", "confirm"), LightSendRaw),
     ];
 
     private Task<ChatToolResult> Overview(string _, CancellationToken ct)
@@ -216,7 +216,7 @@ public sealed class StationChatTools
 
         using var frame = await _cameras.GrabAsync(id, ct).ConfigureAwait(false);
         using var mat = VisionImageCv.AsMat(frame.Image);
-        var folder = AppConfigExtensions.ResolveFolder("data/chat-captures");
+        var folder = _cfg.ResolveChatCapturesFolder();
         Directory.CreateDirectory(folder);
         var safeId = string.Join("_", id.Split(Path.GetInvalidFileNameChars()));
         var path = Path.Combine(folder, $"chat_{DateTime.Now:yyyyMMdd_HHmmss}_{safeId}.png");
@@ -896,8 +896,8 @@ public sealed class StationChatTools
         if (action is "" or "list_captures")
         {
             var limit = Math.Clamp(Int(doc, "limit", 15), 1, 50);
-            var chatDir = AppConfigExtensions.ResolveFolder("data/chat-captures");
-            var capDir = AppConfigExtensions.ResolveFolder(_cfg.CaptureSuccess.Folder);
+            var chatDir = _cfg.ResolveChatCapturesFolder();
+            var capDir = _cfg.ResolveDataPath(_cfg.CaptureSuccess.Folder);
             return Task.FromResult(Ok(new
             {
                 ok = true,
@@ -912,8 +912,8 @@ public sealed class StationChatTools
         var root = action switch
         {
             "delete_failure" => _failures.Folder,
-            "delete_capture" => AppConfigExtensions.ResolveFolder(_cfg.CaptureSuccess.Folder),
-            "delete_chat" => AppConfigExtensions.ResolveFolder("data/chat-captures"),
+            "delete_capture" => _cfg.ResolveDataPath(_cfg.CaptureSuccess.Folder),
+            "delete_chat" => _cfg.ResolveChatCapturesFolder(),
             _ => "",
         };
         if (root.Length == 0)
@@ -1004,10 +1004,10 @@ public sealed class StationChatTools
         {
             "recipes" => _recipes.Folder,
             "models" => _models.ModelsFolder,
-            "calibration" => AppConfigExtensions.ResolveFolder(_cfg.CalibrationFolder),
+            "calibration" => _cfg.ResolveCalibrationFolder(),
             "failures" => _failures.Folder,
-            "captures" => AppConfigExtensions.ResolveFolder(_cfg.CaptureSuccess.Folder),
-            "chat" => AppConfigExtensions.ResolveFolder("data/chat-captures"),
+            "captures" => _cfg.ResolveDataPath(_cfg.CaptureSuccess.Folder),
+            "chat" => _cfg.ResolveChatCapturesFolder(),
             "results" => _sqlite.Folder,
             _ => null,
         };
@@ -1051,7 +1051,8 @@ public sealed class StationChatTools
         PoseRzToleranceDeg: _cfg.PoseCheck.RzToleranceDeg,
         ProcessHealthEnabled: _cfg.ProcessHealth.Enabled,
         ConsecutiveFailLimit: _cfg.ProcessHealth.ConsecutiveFailLimit,
-        InhibitOnLimit: _cfg.ProcessHealth.InhibitOnLimit);
+        InhibitOnLimit: _cfg.ProcessHealth.InhibitOnLimit,
+        UiTheme: _cfg.UiTheme);
 
     private static IReadOnlyList<object> ListPng(string folder, int limit)
     {
@@ -1098,7 +1099,7 @@ public sealed class StationChatTools
             properties[n] = n switch
             {
                 "ok_only" or "enabled" or "pose_check" or "failure_enabled" or "process_health"
-                    or "inhibit_on_limit" => new { type = "boolean" },
+                    or "inhibit_on_limit" or "confirm" => new { type = "boolean" },
                 "limit" or "channel" or "brightness" or "client_id" or "serial" or "timeout_ms"
                     or "max_queue" or "tcp_port" or "grab_timeout_ms" or "max_concurrent"
                     or "tcp_backlog" or "max_connections" or "failure_retained"
@@ -1119,14 +1120,10 @@ public sealed class StationChatTools
 
     private static JsonDocument Parse(string json)
     {
-        try
-        {
-            return JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
-        }
-        catch (JsonException)
-        {
-            return JsonDocument.Parse("{}");
-        }
+        var parsed = ChatToolArguments.TryParse(json);
+        if (!parsed.IsSuccess)
+            throw new InvalidOperationException(parsed.Error);
+        return parsed.Document!;
     }
 
     private static string Str(JsonDocument doc, string name) =>

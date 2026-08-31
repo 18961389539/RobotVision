@@ -26,6 +26,10 @@ public partial class RecipePage : Page
     private bool _startDrawTemplateAfterGrab;
     private bool _roiWired;
 
+    /// <summary>有结果图且正在看结果页时，框选画在结果图上，避免切到 ROI 预览换图。</summary>
+    private ImageViewer.Controls.ImageViewer LiveHost =>
+        _vm is { ShowTestImage: true, Test.ResultImage: not null } ? TestViewer : RoiViewer;
+
     public RecipePage()
     {
         InitializeComponent();
@@ -86,17 +90,35 @@ public partial class RecipePage : Page
     {
         if (_vm is null)
             return;
-        if (template && !_vm.IsTemplateMethod)
+        if (template && !_vm.UsesFeatureTeachRoi)
             return;
         _drawTarget = template ? LiveRoiKind.Template : LiveRoiKind.Detection;
         _startDrawAfterGrab = false;
         _startDrawTemplateAfterGrab = false;
+
+        var adopted = _vm.Roi.TryAdoptDisplayedImage(
+            _vm.Test.ResultImage,
+            _vm.Editor.CameraId,
+            template ? "框选特征：沿用当前结果图" : "框选检测区：沿用当前结果图");
+        if (adopted)
+        {
+            _vm.ShowTestImageViewCommand.Execute(null);
+            if (template)
+                _vm.Roi.EnsureFeatureRoiDrawable();
+            SyncLiveRectsFromRecipe();
+            LiveHost.StartRoiMode();
+            return;
+        }
+
         _vm.ShowRoiPreviewViewCommand.Execute(null);
         if (_vm.Roi.HasRoiRefFrame)
         {
-            RoiViewer.StartRoiMode();
+            if (template)
+                _vm.Roi.EnsureFeatureRoiDrawable();
+            LiveHost.StartRoiMode();
             return;
         }
+
         if (template)
             _startDrawTemplateAfterGrab = true;
         else
@@ -111,7 +133,9 @@ public partial class RecipePage : Page
         _roiWired = true;
         _vm.PropertyChanged += OnVmPropertyChanged;
         _vm.Roi.PropertyChanged += OnRoiPropertyChanged;
+        _vm.Test.PropertyChanged += OnTestPropertyChanged;
         RoiViewer.ViewerState.RectRois.CollectionChanged += OnRoiCollectionChanged;
+        TestViewer.ViewerState.RectRois.CollectionChanged += OnRoiCollectionChanged;
     }
 
     private void UnwireRoiEditor()
@@ -123,8 +147,10 @@ public partial class RecipePage : Page
         {
             _vm.PropertyChanged -= OnVmPropertyChanged;
             _vm.Roi.PropertyChanged -= OnRoiPropertyChanged;
+            _vm.Test.PropertyChanged -= OnTestPropertyChanged;
         }
         RoiViewer.ViewerState.RectRois.CollectionChanged -= OnRoiCollectionChanged;
+        TestViewer.ViewerState.RectRois.CollectionChanged -= OnRoiCollectionChanged;
         DetachRect(ref _detectionRect);
         DetachRect(ref _templateRect);
     }
@@ -135,12 +161,25 @@ public partial class RecipePage : Page
             return;
         if (e.PropertyName == nameof(RecipeViewModel.Editor))
             ApplyScaleToViewers();
+        if (e.PropertyName == nameof(RecipeViewModel.ShowTestImage) && _vm.Roi.HasRoiRefFrame)
+            SyncLiveRectsFromRecipe();
         if (e.PropertyName is nameof(RecipeViewModel.IsTemplateMethod)
+            or nameof(RecipeViewModel.UsesFeatureTeachRoi)
             or nameof(RecipeViewModel.Editor))
         {
             if (_vm.Roi.HasRoiRefFrame)
                 SyncLiveRectsFromRecipe();
         }
+    }
+
+    private void OnTestPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_vm is null || e.PropertyName != nameof(RecipeTestSession.ResultImage))
+            return;
+        if (_vm.ShowTestImage)
+            _drawTarget = LiveRoiKind.Detection;
+        if (_vm.Roi.HasRoiRefFrame)
+            SyncLiveRectsFromRecipe();
     }
 
     private void OnRoiPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -157,15 +196,15 @@ public partial class RecipePage : Page
                     {
                         _startDrawAfterGrab = false;
                         _drawTarget = LiveRoiKind.Detection;
-                        RoiViewer.StartRoiMode();
+                        LiveHost.StartRoiMode();
                     }
                     else if (_startDrawTemplateAfterGrab)
                     {
                         _startDrawTemplateAfterGrab = false;
-                        if (_vm.IsTemplateMethod)
+                        if (_vm.UsesFeatureTeachRoi)
                         {
                             _drawTarget = LiveRoiKind.Template;
-                            RoiViewer.StartRoiMode();
+                            LiveHost.StartRoiMode();
                         }
                     }
                 }
@@ -190,7 +229,7 @@ public partial class RecipePage : Page
             case nameof(RecipeRoiEditor.UseTemplateRoi):
                 if (!_syncingRect && _vm.Roi.HasRoiRefFrame)
                 {
-                    if (_vm.IsTemplateMethod && _vm.Roi.UseTemplateRoi)
+                    if (_vm.UsesFeatureTeachRoi && _vm.Roi.UseTemplateRoi)
                         SyncLiveRectsFromRecipe();
                     else
                         ClearLiveRect(ref _templateRect);
@@ -210,7 +249,7 @@ public partial class RecipePage : Page
             case nameof(RecipeRoiEditor.TemplateRoiPxY):
             case nameof(RecipeRoiEditor.TemplateRoiPxWidth):
             case nameof(RecipeRoiEditor.TemplateRoiPxHeight):
-                if (_vm.IsTemplateMethod)
+                if (_vm.UsesFeatureTeachRoi)
                     UpdateLiveRectFromRecipe(_templateRect, _vm.Editor.Template?.Roi);
                 break;
         }
@@ -269,6 +308,7 @@ public partial class RecipePage : Page
         if (ReferenceEquals(previous, _detectionRect) || ReferenceEquals(previous, _templateRect))
             return;
         RoiViewer.ViewerState.RemoveRoi(previous);
+        TestViewer.ViewerState.RemoveRoi(previous);
     }
 
     private void OnLiveRectPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -304,7 +344,7 @@ public partial class RecipePage : Page
         {
             if (isTemplate)
             {
-                if (!_vm.IsTemplateMethod)
+                if (!_vm.UsesFeatureTeachRoi)
                     return;
                 _vm.Roi.ApplyTemplateRoiFromRect(rect.Center.X, rect.Center.Y, rect.Width, rect.Height);
             }
@@ -349,13 +389,23 @@ public partial class RecipePage : Page
             ClearAllLiveRects();
             if (_vm.Roi.UseRoi && _vm.Editor.Roi is { } det)
                 _detectionRect = AddLiveRect(det, isTemplate: false);
-            if (_vm.IsTemplateMethod && _vm.Roi.UseTemplateRoi && _vm.Editor.Template?.Roi is { } feat)
+            if (ShowTeachFeatureRect() && _vm.Editor.Template?.Roi is { } feat)
                 _templateRect = AddLiveRect(feat, isTemplate: true);
         }
         finally
         {
             _syncingRect = false;
         }
+    }
+
+    /// <summary>橙框只在示教预览或正在「框选特征」时显示；测试/监控结果只看金框匹配窗。</summary>
+    private bool ShowTeachFeatureRect()
+    {
+        if (_vm is null || !_vm.UsesFeatureTeachRoi || !_vm.Roi.UseTemplateRoi)
+            return false;
+        if (_vm.ShowTestImage && _vm.Test.ResultImage is not null && _drawTarget != LiveRoiKind.Template)
+            return false;
+        return true;
     }
 
     private RotatedRect AddLiveRect(RobotVision.Core.Models.Roi r, bool isTemplate)
@@ -368,7 +418,7 @@ public partial class RecipePage : Page
         };
         StyleLiveRect(rect, isTemplate);
         rect.PropertyChanged += OnLiveRectPropertyChanged;
-        RoiViewer.ViewerState.AddRoi(rect);
+        LiveHost.ViewerState.AddRoi(rect);
         return rect;
     }
 
@@ -389,7 +439,10 @@ public partial class RecipePage : Page
         var old = slot;
         DetachRect(ref slot);
         if (old is not null)
+        {
             RoiViewer.ViewerState.RemoveRoi(old);
+            TestViewer.ViewerState.RemoveRoi(old);
+        }
     }
 
     private void DetachRect(ref RotatedRect? slot)

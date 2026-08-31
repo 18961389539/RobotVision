@@ -38,6 +38,23 @@ public sealed class MaskHousingTests
     }
 
     [Fact]
+    public void FatFilledRect_OccupancyDoesNotShrinkHousing()
+    {
+        using var mask = new Mat(H, W, MatType.CV_8UC1, Scalar.All(0));
+        var expand = 22.0;
+        var hh = BodyH / 2.0 + expand / 2.0;
+        var cy = H / 2.0 + expand / 2.0;
+        Cv2.FillConvexPoly(mask, RectCorners(W / 2.0, cy, BodyW / 2.0, hh), Scalar.All(255));
+        Cv2.FindContours(mask, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxNone);
+        var contour = contours.OrderByDescending(c => Cv2.ContourArea(c)).First()
+            .Select(p => new Point2f(p.X, p.Y)).ToArray();
+        var obb = MaskHousing.FitObb(contour);
+        var housing = MaskHousing.Fit(contour);
+        Assert.InRange(housing.ShortLen, obb.ShortLen * 0.92, obb.ShortLen * 1.08);
+        Assert.InRange(housing.Center.Y, obb.Center.Y - 3, obb.Center.Y + 3);
+    }
+
+    [Fact]
     public void ProbeCount_ScalesWithLength()
     {
         Assert.Equal(8, MaskHousing.ProbeCount(50));

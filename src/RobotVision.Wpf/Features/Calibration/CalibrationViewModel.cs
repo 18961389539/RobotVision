@@ -624,15 +624,14 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
 
     private bool ConfirmDelete(string fileName)
     {
-        var path = Path.Combine(AppConfigExtensions.ResolveFolder(_cfg.CalibrationFolder), fileName);
+        var path = Path.Combine(_cfg.ResolveCalibrationFolder(), fileName);
         var detail = File.Exists(path) ? "\n文件将从磁盘删除（不可恢复）。" : "";
         return MessageBox.Show($"删除档案 {fileName}？{detail}", "删除标定档案",
             MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
     }
 
     [RelayCommand]
-    private void OpenFolder() => Explorer.OpenFolder(
-        AppConfigExtensions.ResolveFolder(_cfg.CalibrationFolder));
+    private void OpenFolder() => Explorer.OpenFolder(_cfg.ResolveCalibrationFolder());
 
     private static string QualityText(CalibrationQuality quality) => quality switch
     {

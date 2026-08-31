@@ -11,7 +11,7 @@
     </Page.InputBindings>
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
-        <Style x:Key="PlotCard" TargetType="{x:Type ui:Card}">
+        <Style x:Key="PlotCard" TargetType="{x:Type ui:Card}" BasedOn="{StaticResource {x:Type ui:Card}}">
             <Setter Property="Padding" Value="10,8" />
             <Setter Property="Margin" Value="4" />
         </Style>
@@ -296,17 +296,17 @@
                                 <TextBlock Grid.Column="2" Text="X" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 <TextBlock Grid.Column="3" Text="Y" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 <TextBlock Grid.Column="4" Text="角度" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                <TextBlock Grid.Column="5" Text="置信" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Grid.Column="5" Text="置信度" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 <TextBlock Grid.Column="6" Text="结果" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 <TextBlock Grid.Column="7" Text="工位" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 <TextBlock Grid.Column="8" Text="耗时" FontSize="11" TextAlignment="Right"
                                            Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                             </Grid>
-                            <TextBlock Grid.Row="1" Text="暂无明细。确认 ResultLog.Sqlite 已开启并已触发检测。"
+                            <TextBlock Grid.Row="1" Text="暂无明细。确认 ResultLog.Sqlite 已开启并已触发检测"
                                        TextWrapping="Wrap" Margin="12" FontSize="12"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}">
                                 <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding HasRows}" Value="False">
@@ -322,7 +322,7 @@
                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                      VirtualizingStackPanel.IsVirtualizing="True">
                                 <ListBox.ItemContainerStyle>
-                                    <Style TargetType="ListBoxItem">
+                                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource DefaultListBoxItemStyle}">
                                         <Setter Property="Background" Value="Transparent" />
                                         <Setter Property="BorderThickness" Value="0" />
                                         <Setter Property="Padding" Value="8,3" />

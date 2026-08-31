@@ -1,0 +1,34 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- FontTypography 会加载这些键；库内排版样式不带可读前景，须绑定主题主文字色"-->
+    <Style x:Key="CaptionTextBlockStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource __CaptionTextBlockStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+    <Style x:Key="BodyTextBlockStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource __BodyTextBlockStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+    <Style x:Key="BodyStrongTextBlockStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource __BodyStrongTextBlockStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+    <Style x:Key="SubtitleTextBlockStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource __SubtitleTextBlockStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+    <Style x:Key="TitleTextBlockStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource __TitleTextBlockStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+    <Style x:Key="TitleLargeTextBlockStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource __TitleLargeTextBlockStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+    <Style x:Key="DisplayTextBlockStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource __DisplayTextBlockStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+
+</ResourceDictionary>

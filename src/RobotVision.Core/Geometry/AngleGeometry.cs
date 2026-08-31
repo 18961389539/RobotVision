@@ -63,4 +63,32 @@ public static class AngleGeometry
         var d = Math.Abs(NormalizeDeg(a) - NormalizeDeg(b));
         return d > 90.0 ? 180.0 - d : d;
     }
+
+    /// <summary>
+    /// 圆标准差（度）。<paramref name="period"/> 为 360（有向）或 180（无向）。
+    /// 有效样本少于 2 返回 0。
+    /// </summary>
+    public static double CircularStdDeg(IReadOnlyList<double> degrees, double period = 360)
+    {
+        if (degrees.Count < 2 || period <= 0)
+            return 0;
+        var radPer = 2 * Math.PI / period;
+        var x = 0.0;
+        var y = 0.0;
+        var n = 0;
+        foreach (var d in degrees)
+        {
+            if (!double.IsFinite(d))
+                continue;
+            var a = d * radPer;
+            x += Math.Cos(a);
+            y += Math.Sin(a);
+            n++;
+        }
+
+        if (n < 2)
+            return 0;
+        var r = Math.Clamp(Math.Sqrt(x * x + y * y) / n, 1e-12, 1);
+        return Math.Sqrt(-2 * Math.Log(r)) / radPer;
+    }
 }

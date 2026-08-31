@@ -98,4 +98,25 @@ public class AngleGeometryTests
             (float)(cx + c.X * cos - c.Y * sin),
             (float)(cy + c.X * sin + c.Y * cos))).ToArray();
     }
+
+    [Fact]
+    public void CircularStdDeg_IdenticalAngles_NearZero()
+    {
+        var std = AngleGeometry.CircularStdDeg([10, 10, 10.2, 9.8]);
+        Assert.True(std < 0.3, $"σ={std:0.00}");
+    }
+
+    [Fact]
+    public void CircularStdDeg_OppositeDirected_IsLarge()
+    {
+        var std = AngleGeometry.CircularStdDeg([0, 180], period: 360);
+        Assert.True(std > 40, $"0°/180° 应对头，σ={std:0.00}");
+    }
+
+    [Fact]
+    public void CircularStdDeg_Undirected_Treats0And180AsSame()
+    {
+        var std = AngleGeometry.CircularStdDeg([0, 179.5], period: 180);
+        Assert.True(std < 2, $"无向 0/180 应接近，σ={std:0.00}");
+    }
 }

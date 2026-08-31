@@ -31,6 +31,25 @@
             <Setter Property="BorderBrush"
                     Value="{DynamicResource CardBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+
+        <Style x:Key="SectionTitle" TargetType="ui:TextBlock" BasedOn="{StaticResource AppSectionTitleStyle}">
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+        <Style x:Key="SectionTitleCompact" TargetType="ui:TextBlock" BasedOn="{StaticResource AppSectionTitleStyle}">
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+        <Style x:Key="RowLabel" TargetType="TextBlock" BasedOn="{StaticResource AppLightTextBlockStyle}">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+        <Style x:Key="MetricValue" TargetType="ui:TextBlock" BasedOn="{StaticResource AppLightTextBlockStyle}">
+            <Setter Property="FontTypography" Value="BodyStrong" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,4,0,0" />
         </Style>
     </Page.Resources>
 
@@ -41,22 +60,20 @@
                       HorizontalAlignment="Stretch">
             <StackPanel MaxWidth="920">
 
-            <!-- 运行状态：迷你指标卡 -->
+            <!-- 运行状态：迷你指标"-->
             <Border Style="{StaticResource SectionPanel}">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Subtitle" Text="运行状态" Margin="0,0,0,12" />
+                    <ui:TextBlock Style="{StaticResource SectionTitle}" Text="运行状态" />
                     <UniformGrid Columns="3">
                         <StackPanel Margin="0,0,12,0">
                             <TextBlock Text="TCP 服务" FontSize="11"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                            <ui:TextBlock FontTypography="BodyStrong" Text="{Binding TcpStatus}"
-                                          Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <ui:TextBlock Style="{StaticResource MetricValue}" Text="{Binding TcpStatus}" />
                         </StackPanel>
                         <StackPanel Margin="0,0,12,0">
                             <TextBlock Text="推理管线" FontSize="11"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                            <ui:TextBlock FontTypography="BodyStrong" Text="{Binding QueueStatus}"
-                                          Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <ui:TextBlock Style="{StaticResource MetricValue}" Text="{Binding QueueStatus}" />
                             <TextBlock Text="{Binding HealthStatus}" FontSize="11" Margin="0,4,0,0"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap" />
@@ -64,8 +81,7 @@
                         <StackPanel>
                             <TextBlock Text="资产" FontSize="11"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                            <ui:TextBlock FontTypography="BodyStrong" Text="{Binding RecipeStatus}"
-                                          Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <ui:TextBlock Style="{StaticResource MetricValue}" Text="{Binding RecipeStatus}" />
                         </StackPanel>
                     </UniformGrid>
                 </StackPanel>
@@ -74,7 +90,7 @@
             <!-- 数据目录 -->
             <Border Style="{StaticResource SectionPanel}">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Subtitle" Text="数据目录" Margin="0,0,0,4" />
+                    <ui:TextBlock Style="{StaticResource SectionTitleCompact}" Text="数据目录" />
                     <TextBlock Text="点击行末按钮在资源管理器中打开" FontSize="11" Margin="0,0,0,10"
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                     <ItemsControl ItemsSource="{Binding Directories}">
@@ -87,8 +103,7 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Key}" FontWeight="SemiBold"
-                                                   VerticalAlignment="Center" />
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="{Binding Key}" />
                                         <TextBlock Grid.Column="1" Text="{Binding Value}"
                                                    Margin="10,0,10,0" VerticalAlignment="Center"
                                                    TextTrimming="CharacterEllipsis"
@@ -108,7 +123,7 @@
             <!-- 配置摘要 -->
             <Border Style="{StaticResource SectionPanel}">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Subtitle" Text="配置摘要" Margin="0,0,0,4" />
+                    <ui:TextBlock Style="{StaticResource SectionTitleCompact}" Text="配置摘要" />
                     <TextBlock Text="可修改项见「服务设置」页" FontSize="11" Margin="0,0,0,10"
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                     <ItemsControl ItemsSource="{Binding Settings}">
@@ -120,8 +135,7 @@
                                             <ColumnDefinition Width="148" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Key}" FontWeight="SemiBold"
-                                                   VerticalAlignment="Center" />
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="{Binding Key}" />
                                         <TextBlock Grid.Column="1" Text="{Binding Value}"
                                                    Margin="10,0,0,0" VerticalAlignment="Center"
                                                    TextWrapping="Wrap"
@@ -137,8 +151,8 @@
             <!-- 相机资产 -->
             <Border Style="{StaticResource SectionPanel}" Margin="0">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Subtitle" Text="相机资产" Margin="0,0,0,4" />
-                    <TextBlock Text="配置中的全部相机；未注册项以琥珀色标出" FontSize="11" Margin="0,0,0,10"
+                    <ui:TextBlock Style="{StaticResource SectionTitleCompact}" Text="相机资产" />
+                    <TextBlock Text="配置中的全部相机；未注册项以琥珀色标识" FontSize="11" Margin="0,0,0,10"
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                     <ItemsControl ItemsSource="{Binding CameraBadges}">
                         <ItemsControl.ItemsPanel>
@@ -178,6 +192,7 @@
                                             </Ellipse.Style>
                                         </Ellipse>
                                         <TextBlock Text="{Binding Id}" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                                    Margin="8,0,0,0" VerticalAlignment="Center" />
                                         <Border Margin="8,0,0,0" Padding="5,1" CornerRadius="3"
                                                 Background="{DynamicResource SystemFillColorCautionBrush}"

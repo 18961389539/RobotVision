@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using OpenCvSharp;
 using RobotVision.Core;
+using RobotVision.Core.IO;
 using RobotVision.Core.Models;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure;
@@ -881,7 +882,7 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
         Directory.CreateDirectory(_calibrationFolder);
         var path = Path.Combine(_calibrationFolder, fileName);
         // 原子落盘：标定档案是产线关键资产，写一半崩溃不得留下截断 JSON
-        CalibrationManager.AtomicWriteAllText(path,
+        AtomicFile.WriteAllText(path,
             JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
         return path;
     }

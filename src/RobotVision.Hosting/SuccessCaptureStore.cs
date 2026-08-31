@@ -43,6 +43,16 @@ public sealed class SuccessCaptureStore
     /// <summary>按天目录保留天数；≤0 不清理。</summary>
     public int RetainedDays { get; set; }
 
+    /// <summary>保存配置后热应用开关与保留策略（目录启动时锚定，不热切换）。</summary>
+    public void ApplyConfig(CaptureSuccessConfig cfg)
+    {
+        Enabled = cfg.Enabled;
+        MaxWidth = cfg.MaxWidth;
+        RetainedDays = cfg.RetainedDays;
+    }
+
+    public string Folder => _folder;
+
     /// <summary>
     /// 提交一次成功留存（尽力而为）：克隆（或缩图）在调用线程完成并立即返回，
     /// PNG 编码/元数据/清理移到后台线程池，绝不在管线线程同步落盘拖累产线。

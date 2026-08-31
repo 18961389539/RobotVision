@@ -31,7 +31,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <ui:TextBlock FontTypography="BodyStrong" Text="标定档案（启动时从 data/calibration 加载）"
+                <ui:TextBlock FontTypography="BodyStrong" Text="标定档案（启动时从 data/calibration 加载"
                               VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{Binding Message}" Margin="16,0,0,0"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Message}"
@@ -214,7 +214,7 @@
                                         <TextBlock FontSize="11" Margin="0,4,0,0">
                                             <Run Text="RMS " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                             <Run Text="{Binding Rms}" FontWeight="SemiBold" />
-                                            <Run Text=" · 最大残差 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                            <Run Text=" · 最大残差" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                             <Run Text="{Binding MaxResidual}" />
                                         </TextBlock>
                                         <TextBlock Text="{Binding CalibratedAt}" FontSize="10" Margin="0,2,0,0"
@@ -400,7 +400,7 @@
                                             <Run Text="{Binding CameraId}" />
                                         </TextBlock>
                                         <TextBlock FontSize="11" Margin="0,2,0,0">
-                                            <Run Text="分辨率 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                            <Run Text="分辨率" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                             <Run Text="{Binding Resolution}" />
                                             <Run Text=" · " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                             <Run Text="{Binding Order}" />
@@ -412,7 +412,7 @@
                                         <TextBlock FontSize="11" Margin="0,4,0,0">
                                             <Run Text="RMS " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                             <Run Text="{Binding Rms}" FontWeight="SemiBold" />
-                                            <Run Text=" · 最大残差 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                            <Run Text=" · 最大残差" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                             <Run Text="{Binding MaxResidual}" />
                                         </TextBlock>
                                         <TextBlock Text="{Binding CalibratedAt}" FontSize="10" Margin="0,2,0,0"
@@ -472,7 +472,7 @@
                             Content="比例档案" Padding="14,8" FontWeight="SemiBold" Panel.ZIndex="30"
                             Command="{Binding ToggleScaleListPanelCommand}">
                         <Button.Style>
-                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                            <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsScaleListPanelVisible}" Value="True">
                                         <Setter Property="Visibility" Value="Collapsed" />
@@ -488,6 +488,13 @@
                             BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                             BorderThickness="1" CornerRadius="8"
                             Visibility="{Binding IsScaleListPanelVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Border.Resources>
+                            <ResourceDictionary>
+                                <ResourceDictionary.MergedDictionaries>
+                                    <ResourceDictionary Source="/Shared/OverlayPanelResources.xaml" />
+                                </ResourceDictionary.MergedDictionaries>
+                            </ResourceDictionary>
+                        </Border.Resources>
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -501,9 +508,9 @@
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <ui:TextBlock Text="比例档案" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                                <ui:TextBlock Text="比例档案" FontTypography="BodyStrong" Foreground="{DynamicResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
                                 <ui:Button Grid.Column="1" Content="新建" Padding="8,3" FontSize="11" Margin="6,0,0,0"
-                                           ToolTip="清空表单，填写新工位 Id 后保存即可新建比例档案"
+                                           ToolTip="清空表单，填写新工位 Id 后保存即可新建比例档"
                                            Command="{Binding NewScaleCommand}" />
                                 <ui:Button Grid.Column="2" Content="刷新" Padding="8,3" FontSize="11" ToolTip="F5"
                                            Command="{Binding RefreshCommand}" />
@@ -517,7 +524,7 @@
                                     <DataTemplate>
                                         <StackPanel Margin="2" Width="178">
                                             <StackPanel Orientation="Horizontal">
-                                                <ui:TextBlock Text="{Binding StationId, Mode=OneWay}" FontTypography="BodyStrong"
+                                                <ui:TextBlock Text="{Binding StationId, Mode=OneWay}" FontTypography="BodyStrong" Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                                               TextTrimming="CharacterEllipsis" />
                                                 <Border Margin="6,2,0,0" Padding="4,1" CornerRadius="3"
                                                         Background="{DynamicResource SystemFillColorSuccessBrush}">
@@ -536,7 +543,7 @@
                                                 </Border>
                                             </StackPanel>
                                             <TextBlock FontSize="10" TextTrimming="CharacterEllipsis"
-                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                                                       Foreground="#FFB8C0CC">
                                                 <Run Text="{Binding CameraId, Mode=OneWay}" />
                                                 <Run Text=" · " />
                                                 <Run Text="{Binding ScaleX, Mode=OneWay, StringFormat={}{0:0.######}}" />
@@ -560,7 +567,7 @@
                             Content="参数" Padding="14,8" FontWeight="SemiBold" Panel.ZIndex="30"
                             Command="{Binding ToggleScaleParamPanelCommand}">
                         <Button.Style>
-                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                            <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsScaleParamPanelVisible}" Value="True">
                                         <Setter Property="Visibility" Value="Collapsed" />
@@ -570,12 +577,19 @@
                         </Button.Style>
                     </Button>
 
-                    <!-- 右：比例录入参数（浮动面板 428px，可折叠） -->
+                    <!-- 右：比例录入参数（浮动面板 428px，可折叠"-->
                     <Border HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="428" Margin="12"
                             Panel.ZIndex="20" ClipToBounds="True" Background="#F01E2836"
                             BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                             BorderThickness="1" CornerRadius="8"
                             Visibility="{Binding IsScaleParamPanelVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Border.Resources>
+                            <ResourceDictionary>
+                                <ResourceDictionary.MergedDictionaries>
+                                    <ResourceDictionary Source="/Shared/OverlayPanelResources.xaml" />
+                                </ResourceDictionary.MergedDictionaries>
+                            </ResourceDictionary>
+                        </Border.Resources>
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -587,7 +601,7 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <ui:TextBlock Text="比例标定" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                                <ui:TextBlock Text="比例标定" FontTypography="BodyStrong" Foreground="{DynamicResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
                                 <Button Grid.Column="1" Content="收起" Padding="10,4" FontSize="12"
                                         Command="{Binding ToggleScaleParamPanelCommand}" />
                             </Grid>
@@ -595,13 +609,13 @@
                                           host:ViewportPageLayout.IsolateWheel="True">
                                 <StackPanel>
                                     <TextBlock FontSize="11" Margin="0,0,0,10" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                               Text="像素 → 毫米线性比例 (mm/px)。取图后在画面上量像素，配合换算助手录入；保存后即时热加载。" />
+                                               Foreground="#FFD0D8E4"
+                                               Text="像素 → 毫米线性比例 (mm/px)。取图后在画面上量像素，配合换算助手录入；保存后即时热加载" />
                                     <UniformGrid Columns="2" Margin="0,0,0,8">
                                         <StackPanel Margin="0,0,8,8">
                                             <TextBlock Text="工位 Id" Margin="0,0,0,4" FontSize="12" />
                                             <ui:TextBox Text="{Binding ScaleStationId, UpdateSourceTrigger=PropertyChanged}"
-                                                        ToolTip="与配方/外参同名的工位标识" />
+                                                        ToolTip="与配方外参同名的工位标" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,8">
                                             <TextBlock Text="相机" Margin="0,0,0,4" FontSize="12" />
@@ -630,11 +644,11 @@
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                         <ui:Button Content="取图显示" Command="{Binding GrabScalePreviewCommand}"
                                                    IsEnabled="{Binding CanUseScaleGrab}"
-                                                   ToolTip="取一帧显示在主画面，并同步填入宽高" />
+                                                   ToolTip="取一帧显示在主画面，并同步填入宽" />
                                         <ui:Button Content="仅读分辨率" Margin="6,0,0,0"
                                                    Command="{Binding ReadCameraResolutionCommand}"
                                                    IsEnabled="{Binding CanUseScaleGrab}"
-                                                   ToolTip="只填宽高，不刷新主画面" />
+                                                   ToolTip="只填宽高，不刷新主画" />
                                     </StackPanel>
                                     <UniformGrid Columns="2" Margin="0,0,0,8">
                                         <StackPanel Margin="0,0,8,8">
@@ -651,8 +665,8 @@
                                     <Border Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="4"
                                             Padding="10,8" Margin="0,0,0,4">
                                         <StackPanel>
-                                            <TextBlock Text="换算助手：物长 mm ÷ 图上 px = 比例" FontSize="11"
-                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock Text="换算助手：物体 mm ÷ 图上 px = 比例" FontSize="11"
+                                                       Foreground="#FFD0D8E4" />
                                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                                 <ui:NumberBox Value="{Binding RefLengthMm}" Minimum="0" Maximum="100000"
                                                               SmallChange="0.1" SpinButtonPlacementMode="Compact"
@@ -660,9 +674,9 @@
                                                 <ui:NumberBox Value="{Binding RefLengthPx}" Minimum="0" Maximum="100000"
                                                               SmallChange="1" SpinButtonPlacementMode="Compact"
                                                               MinWidth="80" Margin="6,0,0,0" ToolTip="图上像素长度" />
-                                                <ui:Button Content="→ X" Padding="8,3" Margin="6,0,0,0"
+                                                <ui:Button Content="填 X" Padding="8,3" Margin="6,0,0,0"
                                                            Command="{Binding ApplyRefToXCommand}" />
-                                                <ui:Button Content="→ Y" Padding="8,3" Margin="6,0,0,0"
+                                                <ui:Button Content="填 Y" Padding="8,3" Margin="6,0,0,0"
                                                            Command="{Binding ApplyRefToYCommand}" />
                                             </StackPanel>
                                         </StackPanel>
@@ -673,7 +687,7 @@
                                 <TextBlock Text="{Binding ScaleFormMessage}" FontSize="11" TextWrapping="Wrap"
                                            Margin="0,0,0,8">
                                     <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                             <Setter Property="Foreground"
                                                     Value="{DynamicResource SystemFillColorSuccessBrush}" />
                                             <Style.Triggers>

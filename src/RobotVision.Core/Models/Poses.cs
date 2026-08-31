@@ -105,6 +105,12 @@ public sealed record PoseOverlay
     /// <summary>精修调试点（抓边内点/剔点）；仅画面用，不连成骨架。</summary>
     public IReadOnlyList<OverlayDot>? DebugDots { get; init; }
 
+    /// <summary>
+    /// 运行时匹配窗四角（示教模板矩形绕匹配峰按输出角旋转）。
+    /// 与配方「特征」橙框分开：橙框是示教裁剪、全图固定；本窗跟峰走。
+    /// </summary>
+    public IReadOnlyList<PixelPoint>? MatchWindow { get; init; }
+
     /// <summary>类别标签（模型输出）；纯图像处理模式为 null。</summary>
     public string? Label { get; init; }
 
@@ -114,6 +120,23 @@ public sealed record PoseOverlay
     public int MaskWidth { get; init; }
 
     public int MaskHeight { get; init; }
+
+    /// <summary>
+    /// 示教模板矩形绕匹配峰旋转后的四角（与 AngleGeometry 同口径：y 向下，逆时针为正）。
+    /// 宽=模板列数，高=模板行数（示教时已转正，宽沿长边）。
+    /// </summary>
+    public static PixelPoint[] TemplateMatchWindow(
+        double cx, double cy, double angleDeg, double widthPx, double heightPx)
+    {
+        var hw = widthPx / 2.0;
+        var hh = heightPx / 2.0;
+        var rad = angleDeg * Math.PI / 180.0;
+        var cos = Math.Cos(rad);
+        var sin = Math.Sin(rad);
+        PixelPoint Map(double x, double y) =>
+            new(cx + x * cos - y * sin, cy + x * sin + y * cos);
+        return [Map(-hw, -hh), Map(hw, -hh), Map(hw, hh), Map(-hw, hh)];
+    }
 }
 
 /// <summary>叠加调试线段。</summary>

@@ -39,6 +39,8 @@ public static class ServiceCollectionExtensions
                 "PLC Socket 收包超时须大于此值，文档按 90s 配置，不要再用 5s/10s。");
         }
         AppSettingsStore.ValidateConfig(cfg);
+        DataRootBinder.Apply(cfg);
+        DataRootBinder.CopyLegacyIfEmpty(cfg, AppContext.BaseDirectory);
 
         // 目录缺失等启动告警：组装阶段宿主日志尚未可用（自建 LoggerFactory 只输出控制台、
         // 不进文件日志，无头部署会丢），改为暂存文本、由宿主日志管道补发一次
@@ -66,8 +68,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ChatConfig>()));
         services.AddSingleton<StationChatTools>();
         services.AddSingleton<WebChatClient>();
+        services.AddSingleton<ChatToolAuditStore>();
         services.AddSingleton(sp => new ChatToolRegistry(
-            sp.GetRequiredService<StationChatTools>().Tools.Concat(sp.GetRequiredService<WebChatClient>().Tools)));
+            sp.GetRequiredService<StationChatTools>().Tools.Concat(sp.GetRequiredService<WebChatClient>().Tools),
+            sp.GetRequiredService<ChatToolAuditStore>(),
+            sp.GetRequiredService<ChatConfig>()));
         services.AddSingleton<ChatAgent>();
         services.AddSingleton<CameraConfigStore>(new CameraConfigStore(cfg));
         services.AddSingleton<LightingConfigStore>(new LightingConfigStore(cfg));
@@ -75,6 +80,7 @@ public static class ServiceCollectionExtensions
         // 相机工厂注册表：内置 File/Basler/GigEVision/Virtual 已注册，第三方品牌在启动早期
         // 调 CameraTypeRegistry.Default.Register(...) 一行接入，此处与 UI 均从注册表查询。
         services.AddSingleton(CameraTypeRegistry.Default);
+        CameraTypeRegistry.Default.Register(new FileCameraFactory(cfg));
 
         // 光源控制器工厂注册表：内置 None 已注册，真实控制器（奥普特/康耐视等，
         // 串口/Modbus/TCP）在启动早期调 LightControllerTypeRegistry.Default.Register(...)
@@ -96,8 +102,25 @@ public static class ServiceCollectionExtensions
                 {
                     recipeLog.LogWarning(ex, "配方 {Name} 模板旋转缓存预热失败，首次匹配将现场旋转", recipe.Name);
                 }
+
+                try { MaskSiftRefine.Warm(recipe); }
+                catch (Exception ex)
+                {
+                    recipeLog.LogWarning(ex, "配方 {Name} SIFT 示教缓存预热失败，首次精修将现场提取", recipe.Name);
+                }
+
+                try { MaskShapeMatch.Warm(recipe); }
+                catch (Exception ex)
+                {
+                    recipeLog.LogWarning(ex, "配方 {Name} 形状匹配示教缓存预热失败，首次精修将现场提取", recipe.Name);
+                }
             };
-            loader.AfterDelete = rotations.Remove;
+            loader.AfterDelete = name =>
+            {
+                rotations.Remove(name);
+                MaskSiftRefine.Remove(name);
+                MaskShapeMatch.Remove(name);
+            };
             loader.ReferenceValidator = recipe => ValidateRecipeReferences(
                 recipe,
                 sp.GetRequiredService<CameraManager>(),
@@ -374,6 +397,9 @@ public static class ServiceCollectionExtensions
                 var failures = sp.GetRequiredService<FailureImageStore>();
                 failures.Enabled = updated.FailureImage.Enabled;
                 failures.RetainedCount = updated.FailureImage.RetainedCount;
+                failures.RetainedDays = updated.FailureImage.RetainedDays;
+
+                sp.GetRequiredService<SuccessCaptureStore>().ApplyConfig(updated.CaptureSuccess);
 
                 // MaxConcurrent/TcpBacklog 首次固化或启动时读取，运行时修改不生效（UI 已提示重启）
                 if (updated.MaxConcurrent != vision.MaxConcurrent || updated.TcpBacklog != tcp.Backlog)

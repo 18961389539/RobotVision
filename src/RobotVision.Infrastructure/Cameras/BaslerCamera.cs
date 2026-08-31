@@ -528,6 +528,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             return;
         try
         {
+           
             // StreamGrabber 可能为 null(pylon 可空标注);未就绪时视为未在采集
             if (_camera.IsOpen && _camera.StreamGrabber is { } grabber && grabber.IsGrabbing)
                 grabber.Stop();

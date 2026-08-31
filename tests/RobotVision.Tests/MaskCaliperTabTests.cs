@@ -51,6 +51,11 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
     [InlineData(12.0)]
     [InlineData(-18.0)]
     [InlineData(37.0)]
+    [InlineData(90.0)]
+    [InlineData(135.0)]
+    [InlineData(180.0)]
+    [InlineData(-90.0)]
+    [InlineData(-135.0)]
     public void RotatedTabBelow_FollowsAngle(double deg)
     {
         using var img = Paint(tabOnPlusShort: true, rotateDeg: deg);
@@ -62,6 +67,44 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
         Assert.InRange(r.Center.X, W / 2.0 - 4, W / 2.0 + 4);
         Assert.InRange(r.Center.Y, H / 2.0 - 4, H / 2.0 + 4);
         Dump($"rot {deg}°", r);
+    }
+
+    /// <summary>
+    /// 示教在 0° 把凸起锁在 −短轴后，产品转到任意角仍应出有向角。
+    /// 无向长边框的 ±短轴会随 MinAreaRect 在 0°/180° 换手，锁定只能当弱极性回退，不能把对侧实测判失败。
+    /// </summary>
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(45.0)]
+    [InlineData(90.0)]
+    [InlineData(135.0)]
+    [InlineData(180.0)]
+    [InlineData(-45.0)]
+    [InlineData(-90.0)]
+    public void TaughtMinusLock_FollowsRotation(double deg)
+    {
+        var opt = new CaliperRefineOptions(HousingEdgePolarity.BrightToDark, TabPolarityLock.MinusShortAxis);
+        using var img = Paint(tabOnPlusShort: false, rotateDeg: deg);
+        var contour = AccurateContour(tabOnPlusShort: false, rotateDeg: deg);
+        var r = MaskCaliperTab.Refine(img, contour, opt);
+        Assert.NotNull(r);
+        var expected = AngleGeometry.NormalizeSignedDeg(deg + 180.0);
+        var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - expected));
+        Assert.True(err < 1.2, $"锁 −短轴后转 {deg}°：得 {r.AngleDeg:0.00}，目标 {expected:0.00}，误差 {err:0.00}°");
+        Dump($"taught-minus rot {deg}°", r);
+    }
+
+    [Fact]
+    public void DarkField_Rotated90_StillDirected()
+    {
+        const double deg = 90.0;
+        using var img = PaintDarkField(tabOnPlusShort: true, rotateDeg: deg);
+        var r = MaskCaliperTab.Refine(img, AccurateContourDark(true, deg),
+            new CaliperRefineOptions(HousingEdgePolarity.DarkToBright, TabPolarityLock.MinusShortAxis));
+        Assert.NotNull(r);
+        var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - deg));
+        Assert.True(err < 1.5, $"暗场 90° 误差 {err:0.00}°（得 {r.AngleDeg:0.00}）");
+        Dump("dark 90°", r);
     }
 
     [Fact]
@@ -78,6 +121,7 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
         Assert.InRange(r.Center.Y, H / 2.0 - 3, H / 2.0 + 3);
         Assert.True(Math.Abs(r.Center.Y - coarse.Center.Y) > 5,
             "卡尺中心不应等于分割外接矩形中心");
+        Assert.InRange(r.AngleDeg, -2.0, 2.0);
         Dump($"fat mask minAreaY={coarse.Center.Y:0.1}", r);
     }
 
@@ -89,9 +133,9 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
         var contour = AccurateContour(tabOnPlusShort: true, rotateDeg: trueDeg + 4.0);
         var r = MaskCaliperTab.Refine(img, contour);
         Assert.NotNull(r);
+        Dump("coarse +4°", r);
         var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - trueDeg));
         Assert.True(err < 1.2, $"粗角偏 4° 后误差 {err:0.00}°（得 {r.AngleDeg:0.00}）");
-        Dump("coarse +4°", r);
     }
 
     [Fact]
@@ -148,16 +192,18 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void LockedWrongTabSign_ReturnsNull()
+    public void LockedWrongTabSign_UsesMeasuredSign()
     {
         using var img = Paint(tabOnPlusShort: true, rotateDeg: 0);
         var contour = AccurateContour(tabOnPlusShort: true, rotateDeg: 0);
         var ok = MaskCaliperTab.Refine(img, contour,
             new CaliperRefineOptions(HousingEdgePolarity.BrightToDark, TabPolarityLock.PlusShortAxis));
         Assert.NotNull(ok);
-        var ng = MaskCaliperTab.Refine(img, contour,
+        var flippedTeach = MaskCaliperTab.Refine(img, contour,
             new CaliperRefineOptions(HousingEdgePolarity.BrightToDark, TabPolarityLock.MinusShortAxis));
-        Assert.Null(ng);
+        Assert.NotNull(flippedTeach);
+        Assert.Equal(1, flippedTeach.TabSign);
+        Assert.InRange(flippedTeach.AngleDeg, -1.0, 1.0);
     }
 
     [Fact]
@@ -194,6 +240,66 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
         Assert.InRange(Math.Abs(r0.Center.X - r1.Center.X), 0, 2.5);
         Assert.InRange(Math.Abs(r0.Center.Y - r1.Center.Y), 0, 2.5);
         Assert.True(Math.Abs(AngleGeometry.NormalizeSignedDeg(r0.AngleDeg - r1.AngleDeg)) > 170);
+    }
+
+    [Fact]
+    public void CombOnTop_DarkField_TabSignMinus_AngleNearZero()
+    {
+        using var img = PaintCombDark(0);
+        var contour = CombContour(0);
+        var r = MaskCaliperTab.Refine(img, contour,
+            new CaliperRefineOptions(HousingEdgePolarity.DarkToBright));
+        Assert.NotNull(r);
+        Dump("comb 0°", r);
+        Assert.Equal(-1, r.TabSign);
+        var a = Math.Abs(r.AngleDeg);
+        Assert.True(a > 170, $"齿列在上应为 ±180°，实际 {r.AngleDeg:0.00}");
+        Assert.InRange(r.Center.X, W / 2.0 - 6, W / 2.0 + 6);
+        Assert.InRange(r.Center.Y, H / 2.0 - 12, H / 2.0 + 8);
+    }
+
+    [Theory]
+    [InlineData(12.0)]
+    [InlineData(-18.0)]
+    [InlineData(37.0)]
+    public void CombOnTop_FollowsRotation(double deg)
+    {
+        using var img = PaintCombDark(deg);
+        var r = MaskCaliperTab.Refine(img, CombContour(deg),
+            new CaliperRefineOptions(HousingEdgePolarity.DarkToBright));
+        Assert.NotNull(r);
+        var expected = AngleGeometry.NormalizeSignedDeg(deg + 180.0);
+        var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - expected));
+        Assert.True(err < 2.5, $"齿列件转 {deg}°：得 {r.AngleDeg:0.00}，目标 {expected:0.00}，误差 {err:0.00}°");
+        Dump($"comb rot {deg}°", r);
+    }
+
+    [Fact]
+    public void CombOnTop_LateralLayout_DoesNotUseLongWidthAsTabHalf()
+    {
+        using var img = PaintCombDark(0);
+        var r = MaskCaliperTab.Refine(img, CombContour(0),
+            new CaliperRefineOptions(HousingEdgePolarity.DarkToBright, TabPolarityLock.Auto,
+                CaliperProbeLayout.AcrossLongAxis));
+        Assert.NotNull(r);
+        Assert.Equal(-1, r.TabSign);
+        var a = Math.Abs(r.AngleDeg);
+        Assert.True(a > 170, $"左右卡尺齿列在上应为 ±180°，实际 {r.AngleDeg:0.00}");
+        Dump("comb lateral", r);
+    }
+
+    [Fact]
+    public void Housing_OpenComb_CenterCloserToBody()
+    {
+        var contour = CombContour(0);
+        var full = Cv2.MinAreaRect(contour);
+        var housing = MaskHousing.Fit(contour);
+        Assert.True(full.Size.Width > 0);
+        Assert.True(
+            Math.Abs(housing.Center.Y - H / 2.0) < Math.Abs(full.Center.Y - H / 2.0) - 0.5,
+            $"开运算后中心应靠近壳体 housingY={housing.Center.Y:0.1} fullY={full.Center.Y:0.1}");
+        Assert.True(housing.ShortLen < Math.Min(full.Size.Width, full.Size.Height) - 6,
+            $"壳体短边应短于含齿列外接框 {housing.ShortLen:0.1} vs {Math.Min(full.Size.Width, full.Size.Height):0.1}");
     }
 
     private void Dump(string tag, MaskCaliperTab.Result r)
@@ -293,5 +399,47 @@ public sealed class MaskCaliperTabTests(ITestOutputHelper output)
             Rot(cx + hw, cy + hh),
             Rot(cx - hw, cy + hh),
         ];
+    }
+
+    private const int CombBodyW = 240;
+    private const int CombBodyH = 64;
+    private const int ToothW = 14;
+    private const int ToothH = 18;
+    private const int ToothCount = 10;
+
+    private static Mat PaintCombDark(double rotateDeg)
+    {
+        var img = new Mat(H, W, MatType.CV_8UC1, new Scalar(22));
+        FillComb(img, rotateDeg, 200);
+        Cv2.GaussianBlur(img, img, new Size(3, 3), 0.5);
+        return img;
+    }
+
+    private static Point2f[] CombContour(double rotateDeg)
+    {
+        using var mask = new Mat(H, W, MatType.CV_8UC1, Scalar.All(0));
+        FillComb(mask, rotateDeg, 255);
+        return LargestContour(mask);
+    }
+
+    private static void FillComb(Mat img, double rotateDeg, byte value)
+    {
+        Cv2.FillConvexPoly(img, RectCorners(W / 2.0, H / 2.0, CombBodyW / 2.0, CombBodyH / 2.0, rotateDeg),
+            new Scalar(value));
+        var pitch = CombBodyW * 0.82 / ToothCount;
+        var x0 = W / 2.0 - (ToothCount - 1) * pitch / 2.0;
+        var ty = H / 2.0 - CombBodyH / 2.0 - ToothH / 2.0;
+        for (var i = 0; i < ToothCount; i++)
+        {
+            var tx = x0 + i * pitch;
+            Cv2.FillConvexPoly(img, RectCorners(tx, ty, ToothW / 2.0, ToothH / 2.0, rotateDeg), new Scalar(value));
+        }
+
+        for (var n = 0; n < 3; n++)
+        {
+            var nx = W / 2.0 + (n - 1) * CombBodyW * 0.28;
+            var ny = H / 2.0 + CombBodyH / 2.0 - 6;
+            Cv2.FillConvexPoly(img, RectCorners(nx, ny, 16, 8, rotateDeg), Scalar.All(0));
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -14,6 +15,7 @@ using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
 using RobotVision.Infrastructure.Lighting;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
@@ -36,6 +38,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private readonly CameraManager _cameras;
     private readonly ModelManager _models;
     private readonly CalibrationManager _calibration;
+    private readonly LightingManager _lighting;
     private readonly AngleStrategyTypeRegistry _angleRegistry;
     private readonly AssetIntegrityChecker _assets;
     private readonly SqliteResultStore? _sqlite;
@@ -45,6 +48,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private string _originalName = "";
     private RecipeListItem? _lastConfirmed;
     private bool _switching;
+    private RecipePrior? _playbookPrior;
+    private string _templatePreviewKey = "\0";
 
     public Action? FlushPendingEdits { get; set; }
 
@@ -82,6 +87,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private string _searchText = "";
 
     string IRecipeWorkspace.OriginalName => _originalName;
+    RecipePrior? IRecipeWorkspace.PlaybookPrior => _playbookPrior;
 
     public RecipeViewModel(
         RecipeLoader loader,
@@ -101,6 +107,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         _cameras = cameras;
         _models = models;
         _calibration = calibration;
+        _lighting = lighting;
         _angleRegistry = angleRegistry;
         _assets = assets;
         _sqlite = sqlite;
@@ -132,6 +139,23 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     [RelayCommand]
     private void ShowRoiPreviewView() => ShowTestImage = false;
 
+    private bool CanOpenSetupWizard => !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanOpenSetupWizard))]
+    private void OpenSetupWizard()
+    {
+        this.Commit();
+        var wizard = new RecipeSetupWizardViewModel(this, _cameras, _models, _calibration, _lighting);
+        var window = new RecipeSetupWizardWindow
+        {
+            Owner = Application.Current?.MainWindow,
+            DataContext = wizard,
+        };
+        window.ShowDialog();
+        if (wizard.Applied && wizard.NeedsTeachAfterApply)
+            Test.TeachTemplateCommand.Execute(null);
+    }
+
     public void StartDirtyWatch() => _dirtyTimer.Start();
 
     public void StopDirtyWatch() => _dirtyTimer.Stop();
@@ -149,6 +173,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(IsMaskTemplateMode));
         OnPropertyChanged(nameof(IsDualBlobMode));
         OnPropertyChanged(nameof(IsTemplateMethod));
+        OnPropertyChanged(nameof(UsesFeatureTeachRoi));
+        OnPropertyChanged(nameof(NeedsTaughtTemplate));
+        OnPropertyChanged(nameof(ShowRefineRange));
         OnPropertyChanged(nameof(HasTemplate));
         OnPropertyChanged(nameof(ShowBlobFixedThreshold));
         OnPropertyChanged(nameof(ShowDualCropExpand));
@@ -162,6 +189,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(TeachGeometryHint));
         OnPropertyChanged(nameof(UndirectedEccentricHint));
         OnPropertyChanged(nameof(OutputOffsetTeachHint));
+        RefreshTemplatePreview();
         Test.RefreshAdviceCanApply();
         Test.NotifyCanExecuteChanged();
         RecordTeachOutputCommand.NotifyCanExecuteChanged();
@@ -174,6 +202,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
+        OnPropertyChanged(nameof(TemplateStatusText));
     }
 
     void IRecipeWorkspace.RefreshEditorBindings()
@@ -271,7 +300,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     {
         AngleMode.MaskMinAreaRect => "最小外接矩形角度为 [0,180)，无头尾。与偏心工具同时保存会被拒绝。",
         AngleMode.DualCenterLine => "默认全局就近配对，多目标间距接近时可能配错；开「窗口配对」后 B 只在 A 外扩窗口内检测，多目标不配错",
-        AngleMode.MaskTemplate => "分割给粗框，精修过门才输出有向角。失败默认 1019。示教/试触发会赛马推荐并锁定极性；试触发走编辑器，保存后才上产线。",
+        AngleMode.MaskTemplate => "分割给粗框，精修过门才输出有向角。失败默认 1019。示教会写模板/极性到编辑器；测试走当前下拉（未点采用推荐则不变）。保存后才上产线。",
         AngleMode.DualBlobCenterLine => "主BLOB质心定位、主→次质心定向（有方向）；次BLOB缺失该目标不输出；无需模型",
         _ => "",
     };
@@ -287,7 +316,11 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
                     "质心连到掩码内最大孔/槽，有头尾。分割须能画出孔或槽。失败默认 1019。",
                 SegmentRefineMethod.CaliperTab =>
                     "卡尺放在壳体长边上（短轴中心取两线中线）；黄线指向暗凸起一侧。配方测试会叠加探针。失败默认 1019。切到此方法后抓取原点与模板中心不同，需重新对示教。",
-                _ => "模板匹配定头尾；若卡尺成功则用卡尺 XY/无向角与模板融合。匹配失败默认 1019。",
+                SegmentRefineMethod.Sift =>
+                    "SIFT 把示教模板配到当前分割框内的原图，相似变换给出 XY 和有向角。需先示教整颗目标（不要只裁局部特征框）。弱纹理或外观变化大会配不上，失败默认 1019。切到此方法后抓取原点与卡尺中心不同，需重新对示教。",
+                SegmentRefineMethod.ShapeMatch =>
+                    "形状匹配把示教图的 Canny 轮廓配到当前分割目标的转正窗。可示教整颗，或与模板一样框选局部轮廓（齿/缺口）。切到此方法后抓取原点与卡尺中心不同，需重新对示教。",
+                _ => "模板匹配：十字是 NCC 匹配峰。结果图只画金框「匹配」（随峰）；橙框「特征」仅示教预览或框选时出现。转正裁剪窗默认开启。匹配失败默认 1019。",
             };
 
     public IEnumerable<RecipeListItem> VisibleRecipes =>
@@ -301,8 +334,22 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         _baseline is not null && !RecipeCompare.Same(Editor, _baseline);
 
     public string UnsavedHint => HasUnsavedChanges
-        ? "有未保存的修改：试触发已用当前编辑器，保存后才上产线；切换/刷新将丢弃"
+        ? "有未保存的修改：测试触发已用当前编辑器，保存后才上产线；切换/刷新将丢弃"
         : "";
+
+    public string RecipesFolderHint => _loader.Folder;
+
+    public ImageSource? TemplatePreview { get; private set; }
+
+    public string TemplateStatusText =>
+        !HasTemplate
+            ? "未示教模板：点击「示教模板」自动生成（画面需有目标）"
+            : HasUnsavedChanges
+                ? $"编辑器已有模板 {TemplatePreviewSize}（未保存不上产线）"
+                : $"已示教模板 {TemplatePreviewSize}";
+
+    private string TemplatePreviewSize =>
+        TemplatePreview is { } img ? $"{(int)img.Width}×{(int)img.Height}px" : "";
 
     public bool CanTestTrigger =>
         !string.IsNullOrWhiteSpace(Editor.CameraId) &&
@@ -355,12 +402,24 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     public IReadOnlyList<EnumItem<SegmentRefineMethod>> RefineMethodOptions { get; } =
     [
         new(SegmentRefineMethod.Template, "模板匹配（需示教，可判头尾）"),
+        new(SegmentRefineMethod.Sift, "SIFT特征匹配（需示教，可判头尾）"),
+        new(SegmentRefineMethod.ShapeMatch, "形状匹配（需示教，分割框内几何，可判头尾）"),
         new(SegmentRefineMethod.LineFit, "直线拟合（弱纹理矩形，免示教）"),
         new(SegmentRefineMethod.CentroidHoleLine, "质心-内标连线（掩码有孔/槽，有方向）"),
         new(SegmentRefineMethod.CaliperTab, "卡尺长边+凸起极性（免示教，有方向）"),
     ];
 
     public bool IsTemplateMethod => Editor.Template.RefineMethod == SegmentRefineMethod.Template;
+
+    /// <summary>模板匹配与形状匹配可框选示教训练区域；SIFT 必须整颗。</summary>
+    public bool UsesFeatureTeachRoi =>
+        TemplateOptions.UsesFeatureTeachRoi(Editor.Template.RefineMethod);
+
+    public bool NeedsTaughtTemplate =>
+        TemplateOptions.NeedsTaughtImage(Editor.Template.RefineMethod);
+
+    public bool ShowRefineRange =>
+        Editor.Template.RefineMethod is SegmentRefineMethod.Template or SegmentRefineMethod.ShapeMatch;
 
     public string TeachGeometryHint =>
         Editor.Template.TeachAreaPx > 1
@@ -398,7 +457,12 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             };
             if (edge.Length == 0 && tab.Length == 0)
                 return "";
-            return "已锁定：" + string.Join("，", new[] { edge, tab }.Where(s => s.Length > 0));
+            var parts = new List<string>();
+            if (edge.Length > 0)
+                parts.Add(edge);
+            if (tab.Length > 0)
+                parts.Add($"{tab}（每帧实测，不按示教侧别拒识）");
+            return "已锁定：" + string.Join("，", parts);
         }
     }
 
@@ -564,6 +628,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
                 return;
             }
 
+            if (!ConfirmGrabOriginIfNeeded("保存"))
+                return;
+
             _loader.Save(Editor, IsNew ? null : previousName);
 
             var savedMessage = isRename && !string.IsNullOrEmpty(previousName) &&
@@ -628,6 +695,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private void RecordTeachOutput()
     {
         if (Test.LastPreview is not { Ok: true, Poses.Count: > 0 } preview)
+            return;
+        if (!ConfirmGrabOriginIfNeeded("记下示教输出"))
             return;
         var p = preview.Poses[0];
         Editor.OutputOffset.TeachX = p.X;
@@ -721,7 +790,6 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         _dirtyTimer.Stop();
         Roi.PropertyChanged -= OnRoiOrTestChanged;
         Test.PropertyChanged -= OnRoiOrTestChanged;
-        Test.EndSnapshotAwait();
     }
 
     partial void OnSearchTextChanged(string value) => OnPropertyChanged(nameof(VisibleRecipes));
@@ -741,6 +809,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     partial void OnIsBusyChanged(bool value)
     {
         Test.NotifyCanExecuteChanged();
+        OpenSetupWizardCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ShowTestImageViewer));
         OnPropertyChanged(nameof(ShowRoiImageViewer));
     }
@@ -846,6 +915,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(IsMaskTemplateMode));
         OnPropertyChanged(nameof(IsDualBlobMode));
         OnPropertyChanged(nameof(IsTemplateMethod));
+        OnPropertyChanged(nameof(UsesFeatureTeachRoi));
+        OnPropertyChanged(nameof(NeedsTaughtTemplate));
+        OnPropertyChanged(nameof(ShowRefineRange));
         OnPropertyChanged(nameof(HasTemplate));
         OnPropertyChanged(nameof(ShowBlobFixedThreshold));
         OnPropertyChanged(nameof(ShowDualCropExpand));
@@ -859,11 +931,13 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(UndirectedEccentricHint));
         OnPropertyChanged(nameof(OutputOffsetTeachHint));
         OnPropertyChanged(nameof(CanTestTrigger));
+        RefreshTemplatePreview();
     }
 
     private void RefreshRecipeHealth()
     {
         RecipeHealthHint = "";
+        _playbookPrior = ScenePlaybook.FromTemplate(Editor.Template);
         if (_sqlite is null)
             return;
         var name = RecipeLoader.IsValidRecipeName(_originalName) ? _originalName : Editor.Name;
@@ -882,12 +956,73 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
                 _sqlite.QuerySpread(q with { OkOnly = true }),
                 Editor.Template.TeachPeakScore);
             RecipeHealthHint = string.Join(Environment.NewLine, hints.Select(h => h.Message));
+            var current = Editor.AngleMode == AngleMode.MaskTemplate ? Editor.Template.RefineMethod : (SegmentRefineMethod?)null;
+            _playbookPrior = ScenePlaybook.Merge(
+                ScenePlaybook.FromTemplate(Editor.Template),
+                RecipeHealthAdvisor.ToPlaybookPrior(hints, current, Editor.Template.RefinePolicyOrder));
         }
         catch (Exception)
         {
             // 结果库读失败不影响编辑
         }
     }
+
+    private void RefreshTemplatePreview()
+    {
+        var b64 = Editor.Template.TemplateImageBase64 ?? "";
+        if (b64 == _templatePreviewKey)
+        {
+            OnPropertyChanged(nameof(TemplateStatusText));
+            return;
+        }
+
+        _templatePreviewKey = b64;
+        TemplatePreview = null;
+        if (b64.Length > 0)
+        {
+            try
+            {
+                using var mat = MaskTemplateMatcher.DecodeTemplatePng(b64);
+                var src = ImageConverter.ToBitmapSource(mat);
+                src.Freeze();
+                TemplatePreview = src;
+            }
+            catch (Exception)
+            {
+                TemplatePreview = null;
+            }
+        }
+
+        OnPropertyChanged(nameof(TemplatePreview));
+        OnPropertyChanged(nameof(TemplateStatusText));
+    }
+
+    private bool ConfirmGrabOriginIfNeeded(string action)
+    {
+        if (_baseline is null || IsNew)
+            return true;
+        if (!GrabOriginChanged(_baseline, Editor))
+            return true;
+        return MessageBox.Show(
+            $"{action}：精修方法或特征框已变，抓取原点可能与上次示教输出不同，需要重新对示教。继续？",
+            "抓取原点已变",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning) == MessageBoxResult.Yes;
+    }
+
+    private static bool GrabOriginChanged(RecipeConfig a, RecipeConfig b) =>
+        a.AngleMode != b.AngleMode ||
+        a.Template.RefineMethod != b.Template.RefineMethod ||
+        a.Template.UseUprightCrop != b.Template.UseUprightCrop ||
+        !SameRoi(a.Template.Roi, b.Template.Roi);
+
+    private static bool SameRoi(Roi? a, Roi? b) =>
+        a is null && b is null ||
+        a is not null && b is not null &&
+        Math.Abs(a.X - b.X) < 1e-4 &&
+        Math.Abs(a.Y - b.Y) < 1e-4 &&
+        Math.Abs(a.Width - b.Width) < 1e-4 &&
+        Math.Abs(a.Height - b.Height) < 1e-4;
 
     private RecipeListItem DescribeItem(string name)
     {
@@ -902,6 +1037,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
                 AngleMode.MaskTemplate => r.Template.RefineMethod switch
                 {
                     SegmentRefineMethod.Template => "分割+模板",
+                    SegmentRefineMethod.Sift => "分割+SIFT",
+                    SegmentRefineMethod.ShapeMatch => "分割+形状",
                     SegmentRefineMethod.LineFit => "分割+直线",
                     SegmentRefineMethod.CentroidHoleLine => "分割+孔槽",
                     SegmentRefineMethod.CaliperTab => "分割+卡尺",
@@ -916,6 +1053,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
                 tags.Add($"工位:{r.StationId}");
             if (r.Roi is not null)
                 tags.Add("ROI");
+            if (r.Template.Roi is not null &&
+                TemplateOptions.UsesFeatureTeachRoi(r.Template.RefineMethod))
+                tags.Add("特征框");
             if (r.Lighting is not null)
                 tags.Add($"光:{r.LightControllerId}");
             if (!r.OutputOffset.IsZero)

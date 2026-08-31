@@ -22,6 +22,7 @@ public static class OverlayDrawer
     private static readonly Scalar MaskFillColor = Scalar.Lime;
     private static readonly Scalar ContourColor = Scalar.Lime;
     private static readonly Scalar BoxColor = Scalar.OrangeRed;
+    private static readonly Scalar MatchWindowColor = Scalar.Gold;
     private static readonly Scalar KeyPointLineColor = Scalar.DodgerBlue;
     private static readonly Scalar BaselineColor = Scalar.Yellow;
     private static readonly Scalar CaliperBarColor = Scalar.Cyan;
@@ -53,7 +54,7 @@ public static class OverlayDrawer
             var label = pose.Usable
                 ? $"#{i} {pose.Score:F2}"
                 : $"#{i} NG {pose.Score:F2}";
-            DrawLabel(image, new Point(center.X + 10, center.Y - 10), label, 1.3,
+            DrawLabel(image, ScoreLabelOrigin(pose, image.Width, image.Height), label, 1.1,
                 pose.Usable ? Scalar.White : Scalar.OrangeRed);
         }
     }
@@ -126,10 +127,16 @@ public static class OverlayDrawer
             if (overlay.Contour is { Count: >= 3 } contour)
                 Cv2.Polylines(image, [ToPoints(contour)], true, ContourColor, 2, LineTypes.AntiAlias);
 
+            if (overlay.MatchWindow is { Count: >= 4 } window)
+                Cv2.Polylines(image, [ToPoints(window)], true, MatchWindowColor, 2, LineTypes.AntiAlias);
+
             if (overlay.Boxes is not null)
             {
                 foreach (var box in overlay.Boxes)
                     Cv2.Rectangle(image, ToRect(box), BoxColor, 2, LineTypes.AntiAlias);
+                if (pose.SegmentScore is { } seg && overlay.Boxes.Count > 0)
+                    DrawLabel(image, BoxLabelOrigin(overlay.Boxes[0], image.Width, image.Height),
+                        $"分割 {seg:F2}", 1.0, Scalar.Lime);
             }
 
             if (overlay.KeyPoints is { Count: > 1 } keyPoints)
@@ -171,6 +178,56 @@ public static class OverlayDrawer
             var color = dot.Kind == OverlayDotKind.Rejected ? RejectedDotColor : InlierDotColor;
             Cv2.Circle(image, ToPoint(dot.At), 3, color, -1, LineTypes.AntiAlias);
         }
+    }
+
+    /// <summary>分数标签放在匹配窗/检测框上方，避免黑底盖住十字和黄线。</summary>
+    private static Point ScoreLabelOrigin(PixelPose pose, int imageWidth, int imageHeight)
+    {
+        double x;
+        double y;
+        if (pose.Overlay?.MatchWindow is { Count: >= 4 } window)
+        {
+            x = window[0].X;
+            y = window[0].Y;
+            for (var i = 1; i < window.Count; i++)
+            {
+                if (window[i].X < x)
+                    x = window[i].X;
+                if (window[i].Y < y)
+                    y = window[i].Y;
+            }
+        }
+        else if (pose.SegmentScore is not null && pose.Overlay?.Boxes is { Count: > 0 })
+        {
+            // 分割分已经写在外接矩形上，精修分避开同一角
+            x = pose.Cx + 18;
+            y = pose.Cy - 22;
+        }
+        else if (pose.Overlay?.Boxes is { Count: > 0 } boxes)
+        {
+            x = boxes[0].X;
+            y = boxes[0].Y;
+        }
+        else
+        {
+            x = pose.Cx + 18;
+            y = pose.Cy - 22;
+        }
+
+        var ox = (int)Math.Round(x) + 2;
+        var oy = (int)Math.Round(y) - 14;
+        ox = Math.Clamp(ox, 2, Math.Max(2, imageWidth - 8));
+        oy = Math.Clamp(oy, 14, Math.Max(14, imageHeight - 4));
+        return new Point(ox, oy);
+    }
+
+    private static Point BoxLabelOrigin(PixelRect box, int imageWidth, int imageHeight)
+    {
+        var ox = (int)Math.Round(box.X) + 2;
+        var oy = (int)Math.Round(box.Y) - 14;
+        ox = Math.Clamp(ox, 2, Math.Max(2, imageWidth - 8));
+        oy = Math.Clamp(oy, 14, Math.Max(14, imageHeight - 4));
+        return new Point(ox, oy);
     }
 
     /// <summary>深色底 + 白字黑描边；中文走 WPF 字体（Hershey 会变成问号）。</summary>

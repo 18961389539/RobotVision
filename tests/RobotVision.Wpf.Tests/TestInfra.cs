@@ -1,4 +1,6 @@
 using System.Runtime.ExceptionServices;
+using System.Windows;
+using System.Windows.Threading;
 using Microsoft.Extensions.Logging.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
@@ -9,29 +11,60 @@ using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
 using RobotVision.Infrastructure.Lighting;
+using RobotVision.WpfHost;
 
 namespace RobotVision.Wpf.Tests;
 
 /// <summary>
 /// WPF ViewModel 测试共享设施：
-/// - RunSta：WPF 成像/剪贴板等 STA 要求操作在独立 STA 线程执行；
+/// - RunSta：在常驻 STA 消息泵线程上执行（与 Application 同线程）；
 /// - CreateVisionService / CreateTcp：轻量构造 ViewModel 依赖（不启动真实 TCP 监听、无模型加载）。
 /// </summary>
 public static class TestInfra
 {
-    /// <summary>在独立 STA 线程执行委托（WPF 位图解码等要求 STA）。异常原样传播。</summary>
+    /// <summary>WPF Application 单例：主题测试共用同一 App，禁止并行创建。</summary>
+    public static readonly object WpfAppLock = new();
+
+    private static Thread? _uiThread;
+
+    public static void EnsureWpfApp()
+    {
+        lock (WpfAppLock)
+        {
+            if (Application.Current is App)
+                return;
+
+            if (Application.Current is not null)
+                return;
+
+            var ready = new ManualResetEventSlim(false);
+            _uiThread = new Thread(() =>
+            {
+                var app = new App();
+                app.InitializeComponent();
+                ready.Set();
+                Dispatcher.Run();
+            })
+            {
+                IsBackground = true,
+                Name = "RobotVision.Wpf.Tests.UI",
+            };
+            _uiThread.SetApartmentState(ApartmentState.STA);
+            _uiThread.Start();
+            ready.Wait();
+        }
+    }
+
     public static T RunSta<T>(Func<T> func)
     {
+        EnsureWpfApp();
         T? result = default;
         Exception? error = null;
-        var thread = new Thread(() =>
+        Application.Current!.Dispatcher.Invoke(() =>
         {
             try { result = func(); }
             catch (Exception ex) { error = ex; }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
         if (error is not null)
             ExceptionDispatchInfo.Capture(error).Throw();
         return result!;

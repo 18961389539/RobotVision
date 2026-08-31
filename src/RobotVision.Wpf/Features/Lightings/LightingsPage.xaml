@@ -1,4 +1,4 @@
-<Page x:Class="RobotVision.WpfHost.Features.Lightings.LightingsPage"
+﻿<Page x:Class="RobotVision.WpfHost.Features.Lightings.LightingsPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -37,7 +37,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <ui:TextBlock Text="光源控制器" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                    <ui:TextBlock Text="光源控制" FontTypography="BodyStrong" VerticalAlignment="Center" />
                     <ui:Button Grid.Column="1" Content="删除" Margin="8,0,0,0"
                                Command="{Binding DeleteCommand}" />
                     <ui:Button Grid.Column="2" Content="刷新" Margin="4,0,0,0"
@@ -81,7 +81,7 @@
                                     <TextBlock Grid.Column="3" Text="{Binding Status}" FontSize="11"
                                                VerticalAlignment="Center" Margin="6,0,0,0">
                                         <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
+                                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                                 <Setter Property="Foreground"
                                                         Value="{DynamicResource TextFillColorTertiaryBrush}" />
                                                 <Style.Triggers>
@@ -145,12 +145,12 @@
                                           Margin="0,0,0,8" />
                             <UniformGrid Columns="2">
                                 <StackPanel Margin="0,0,8,0">
-                                    <ui:TextBlock Text="串口名" Margin="0,0,0,4" />
+                                    <ui:TextBlock Text="串口" Margin="0,0,0,4" />
                                     <TextBox Text="{Binding NewPort, UpdateSourceTrigger=PropertyChanged}"
                                              ToolTip="如 COM3" />
                                 </StackPanel>
                                 <StackPanel>
-                                    <ui:TextBlock Text="波特率" Margin="0,0,0,4" />
+                                    <ui:TextBlock Text="波特" Margin="0,0,0,4" />
                                     <ui:NumberBox Value="{Binding NewBaudRate}" Minimum="1200" Maximum="921600"
                                                   SmallChange="9600" SpinButtonPlacementMode="Compact" />
                                 </StackPanel>
@@ -176,7 +176,7 @@
                                 <StackPanel>
                                     <ui:TextBlock Text="本机绑定（可选，UDP 固定端口用）" Margin="0,0,0,4" />
                                     <TextBox Text="{Binding NewLocalEndpoint, UpdateSourceTrigger=PropertyChanged}"
-                                           ToolTip="本机绑定地址（可选）；UDP 需固定本地端口时填写" />
+                                           ToolTip="本机绑定地址（可选）；UDP 需固定本地端口时填" />
                                 </StackPanel>
                             </UniformGrid>
                             <StackPanel Visibility="{Binding IsNewTcp,
@@ -190,7 +190,7 @@
 
                         <ui:TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                      Text="None = 无操作虚拟控制器（调试兜底）；真实类型由工厂注册表提供。" />
+                                      Text="None = 无操作虚拟控制器（调试兜底）；真实类型由工厂注册表提供" />
                     </StackPanel>
                 </ui:Card>
 
@@ -202,7 +202,7 @@
                         <ui:TextBlock FontTypography="Subtitle" Text="虚拟控制器（None）" Margin="0,0,0,8" />
                         <ui:TextBlock FontSize="11" TextWrapping="Wrap"
                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                      Text="无硬件连接参数。配方引用后可走完整取图/推理链路；手动开灯仅模拟成功，不会点亮任何光源。" />
+                                      Text="无硬件连接参数。配方引用后可走完整取图/推理链路；手动开灯仅模拟成功，不会点亮任何光源" />
                     </StackPanel>
                 </ui:Card>
 
@@ -237,7 +237,7 @@
                             <StackPanel Margin="0,0,0,8">
                                 <ui:TextBlock Text="本机绑定（可选，UDP 固定端口用）" Margin="0,0,0,4" />
                                 <TextBox Text="{Binding EditLocalEndpoint, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="本机绑定地址（可选）；UDP 需固定本地端口时填写" />
+                                 ToolTip="本机绑定地址（可选）；UDP 需固定本地端口时填" />
                             </StackPanel>
                         </UniformGrid>
 
@@ -260,7 +260,7 @@
 
                         <ui:TextBlock FontSize="11" TextWrapping="Wrap"
                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                      Text="指令帧默认 ASCII 行协议（SET ch brightness / OFF ALL / PING）；实际控制器协议不同时替换 NetworkLightController.BuildSetFrame 等。" />
+                                      Text="指令帧默认 ASCII 行协议（SET ch brightness / OFF ALL / PING）；实际控制器协议不同时替换 NetworkLightController.BuildSetFrame 等" />
 
                         <!-- 协议调试：手动发送原始指令 -->
                         <Border Margin="0,14,0,0" Padding="10"
@@ -278,9 +278,9 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <ui:Button Content="发送" Command="{Binding SendDebugCommand}" />
+                                    <ui:Button Content="发" Command="{Binding SendDebugCommand}" />
                                     <TextBlock Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"
-                                               Text="{Binding DebugResult, StringFormat=最近发送: {0}}"
+                                               Text="{Binding DebugResult, StringFormat=最近发送：{0}}"
                                                FontSize="11" TextTrimming="CharacterEllipsis"
                                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                 </Grid>
@@ -307,12 +307,12 @@
 
                         <UniformGrid Columns="2">
                             <StackPanel Margin="0,0,8,0">
-                                <ui:TextBlock Text="串口名" Margin="0,0,0,4" />
+                                <ui:TextBlock Text="串口" Margin="0,0,0,4" />
                                 <TextBox Text="{Binding EditPort, UpdateSourceTrigger=PropertyChanged}"
                                          ToolTip="串口名称，如 COM3" />
                             </StackPanel>
                             <StackPanel>
-                                <ui:TextBlock Text="波特率" Margin="0,0,0,4" />
+                                <ui:TextBlock Text="波特" Margin="0,0,0,4" />
                                 <ui:NumberBox Value="{Binding EditBaudRate}" Minimum="1200" Maximum="921600"
                                               SmallChange="9600" SpinButtonPlacementMode="Compact" />
                             </StackPanel>
@@ -320,7 +320,7 @@
 
                         <ui:TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                      Text="指令帧默认 ASCII 行协议（SET ch brightness / OFF ALL）；实际控制器协议不同时替换 SerialLightController.BuildSetFrame 等。" />
+                                      Text="指令帧默认 ASCII 行协议（SET ch brightness / OFF ALL）；实际控制器协议不同时替换 SerialLightController.BuildSetFrame 等" />
 
                         <!-- 协议调试：手动发送原始指令 -->
                         <Border Margin="0,14,0,0" Padding="10"
@@ -338,9 +338,9 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <ui:Button Content="发送" Command="{Binding SendDebugCommand}" />
+                                    <ui:Button Content="发" Command="{Binding SendDebugCommand}" />
                                     <TextBlock Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"
-                                               Text="{Binding DebugResult, StringFormat=最近发送: {0}}"
+                                               Text="{Binding DebugResult, StringFormat=最近发送：{0}}"
                                                FontSize="11" TextTrimming="CharacterEllipsis"
                                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                 </Grid>
@@ -355,12 +355,12 @@
                         <ui:TextBlock FontTypography="Subtitle" Text="手动调光（作用于运行中的服务）" Margin="0,0,0,10" />
                         <UniformGrid Columns="2">
                             <StackPanel Margin="0,0,10,8">
-                                <TextBlock Text="通道号（≥1）" Margin="0,0,0,4" />
+                                <TextBlock Text="通道号（1-64）" Margin="0,0,0,4" />
                                 <ui:NumberBox Value="{Binding Channel}" Minimum="1" Maximum="64"
                                               SmallChange="1" SpinButtonPlacementMode="Compact" />
                             </StackPanel>
                             <StackPanel Margin="0,0,10,8">
-                                <TextBlock Text="亮度（0-255）" Margin="0,0,0,4" />
+                                <TextBlock Text="亮度 0-255" Margin="0,0,0,4" />
                                 <ui:NumberBox Value="{Binding Brightness}" Minimum="0" Maximum="255"
                                               SmallChange="5"
                                               SpinButtonPlacementMode="Compact" />
@@ -390,7 +390,7 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <ui:Button Content="开灯" Appearance="Primary" Command="{Binding TurnOnCommand}" />
+                            <ui:Button Content="开" Appearance="Primary" Command="{Binding TurnOnCommand}" />
                             <ui:Button Grid.Column="1" Content="关灯" Margin="8,0,0,0"
                                        Command="{Binding TurnOffCommand}" />
                             <ui:TextBlock Grid.Column="2" FontSize="11" Margin="16,0,0,0"

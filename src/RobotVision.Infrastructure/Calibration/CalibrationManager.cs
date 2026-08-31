@@ -4,6 +4,7 @@ using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Assets;
 using RobotVision.Core.Geometry;
+using RobotVision.Core.IO;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure;
@@ -44,10 +45,19 @@ public enum StationMappingMode
 /// 标定管理类：
 /// 1. 内参档案（按相机 Id）——去畸变 Remap，推理前强制要求已标定；
 /// 2. 外参档案（按工位 Id）——像素坐标到机器人坐标的仿射变换；
-/// 3. 旋转中心档案（按工位 Id）——第 4 轴轴心，偏心工具补偿用。
+/// 3. 旋转中心档案（按工位 Id）——第 4 轴轴心，偏心工具补偿用；
+/// 4. 多项式档案（按工位 Id）——单图模式，原图推理 + 多项式映射；
+/// 5. 比例档案（按工位 Id）——无标定板工位的回退路径。
 /// 一致性铁律：去畸变后的图像 = 推理输入 = 外参/旋转中心标定时的图像坐标系。
 /// 并发安全：Undistort 与 LoadIntrinsic/DeleteIntrinsic 通过 ReaderWriterLockSlim
 /// 互斥，防止热加载替换档案时 Remap 使用已释放的 OpenCV Mat。
+/// <para>
+/// 实现说明：外参/旋转中心/多项式/比例四类为纯 JSON 档案，载入-保存-删除-目录扫描
+/// 语义完全一致，已下沉到泛型仓储 <see cref="JsonProfileStore{TProfile}"/>，
+/// 各自的校验与质量规则由 <see cref="IJsonProfileKind{TProfile}"/> 描述符提供
+/// （见 JsonProfileKinds.cs）。本类保留跨档案种类的编排职责（映射优先级、
+/// 工位指纹、双档案并存告警、位姿校验、坐标换算）与内参的 OpenCV 生命周期管理。
+/// </para>
 /// </summary>
 public sealed class CalibrationManager : IDisposable
 {
@@ -61,13 +71,24 @@ public sealed class CalibrationManager : IDisposable
     public const double RotationRmsFair = 0.5;
     public const double RotationAxisRatioLimit = 1.2;
 
+    /// <summary>留一交叉验证最大误差告警阈值（机器人单位）：超过说明可能存在抄错/误点
+    /// （单个坏点对整体拟合被均摊，残差好看但留一误差急剧放大）。</summary>
+    public const double LeaveOneOutWarnLimit = 1.0;
+
+    /// <summary>比例 X/Y 各向异性告警阈值：|kx/ky − 1| 超过 2% 说明存在旋转/透视/畸变，
+    /// 线性比例只能近似，建议改用多项式标定。</summary>
+    public const double ScaleAnisotropyWarnLimit = 0.02;
+
     private sealed record IntrinsicState(IntrinsicProfile Profile, Mat MapX, Mat MapY);
 
+    // 内参：含 OpenCV 映射表与非托管内存，生命周期与其余四类不同，单独管理（不进泛型仓储）
     private readonly ConcurrentDictionary<string, IntrinsicState> _intrinsics = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, ExtrinsicProfile> _extrinsics = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, RotationCenterProfile> _rotationCenters = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, PolynomialProfile> _polynomials = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, ScaleProfile> _scales = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly JsonProfileStore<ExtrinsicProfile> _extrinsics = new(ExtrinsicKind.Instance);
+    private readonly JsonProfileStore<RotationCenterProfile> _rotationCenters = new(RotationCenterKind.Instance);
+    private readonly JsonProfileStore<PolynomialProfile> _polynomials = new(PolynomialKind.Instance);
+    private readonly JsonProfileStore<ScaleProfile> _scales = new(ScaleKind.Instance);
+
     private readonly ConcurrentQueue<string> _qualityWarnings = new();
 
     /// <summary>质量警告保留上限：只保留最近 N 条，避免加载大量档案时无限累积。</summary>
@@ -99,20 +120,17 @@ public sealed class CalibrationManager : IDisposable
         _scales.Values.OrderBy(p => p.StationId, StringComparer.OrdinalIgnoreCase).ToList();
 
     /// <summary>工位比例档案（像素→毫米换算，测量显示用）。无档案返回 null。</summary>
-    public ScaleProfile? GetScale(string? stationId) =>
-        string.IsNullOrEmpty(stationId) ? null : _scales.TryGetValue(stationId, out var p) ? p : null;
+    public ScaleProfile? GetScale(string? stationId) => _scales.Get(stationId);
 
     /// <summary>已加载的多项式标定档案（供管理界面显示）。</summary>
     public IReadOnlyList<PolynomialProfile> PolynomialProfiles =>
         _polynomials.Values.OrderBy(p => p.StationId, StringComparer.OrdinalIgnoreCase).ToList();
 
     /// <summary>工位是否使用多项式标定（单图模式）：管线据此跳过内参去畸变、走多项式映射。</summary>
-    public bool HasPolynomial(string? stationId) =>
-        !string.IsNullOrEmpty(stationId) && _polynomials.ContainsKey(stationId);
+    public bool HasPolynomial(string? stationId) => _polynomials.Contains(stationId);
 
     /// <summary>工位是否已有外参档案。</summary>
-    public bool HasExtrinsic(string? stationId) =>
-        !string.IsNullOrEmpty(stationId) && _extrinsics.ContainsKey(stationId);
+    public bool HasExtrinsic(string? stationId) => _extrinsics.Contains(stationId);
 
     /// <summary>工位映射模式：管线据此选择坐标换算路径与图像预处理（去畸变与否）。
     /// 优先级：多项式 &gt; 外参 &gt; 比例——外参/多项式输出机器人系坐标（生产首选），
@@ -122,11 +140,11 @@ public sealed class CalibrationManager : IDisposable
     {
         if (string.IsNullOrEmpty(stationId))
             return StationMappingMode.None;
-        if (_polynomials.ContainsKey(stationId))
+        if (_polynomials.Contains(stationId))
             return StationMappingMode.Polynomial;
-        if (_extrinsics.ContainsKey(stationId))
+        if (_extrinsics.Contains(stationId))
             return StationMappingMode.Extrinsic;
-        if (_scales.ContainsKey(stationId))
+        if (_scales.Contains(stationId))
             return StationMappingMode.Scale;
         return StationMappingMode.None;
     }
@@ -147,11 +165,11 @@ public sealed class CalibrationManager : IDisposable
         var mode = GetMappingMode(stationId);
         MappingFingerprint? mapping = mode switch
         {
-            StationMappingMode.Polynomial when _polynomials.TryGetValue(stationId, out var poly) =>
+            StationMappingMode.Polynomial when _polynomials.Get(stationId) is { } poly =>
                 FromPolynomial(poly),
-            StationMappingMode.Extrinsic when _extrinsics.TryGetValue(stationId, out var ext) =>
+            StationMappingMode.Extrinsic when _extrinsics.Get(stationId) is { } ext =>
                 FromExtrinsic(ext),
-            StationMappingMode.Scale when _scales.TryGetValue(stationId, out var scale) =>
+            StationMappingMode.Scale when _scales.Get(stationId) is { } scale =>
                 FromScale(scale),
             _ => null,
         };
@@ -169,7 +187,7 @@ public sealed class CalibrationManager : IDisposable
         }
 
         RotationFingerprint? rotation = null;
-        if (includeRotation && _rotationCenters.TryGetValue(stationId, out var rot))
+        if (includeRotation && _rotationCenters.Get(stationId) is { } rot)
             rotation = FromRotation(rot);
 
         return FileSha256.ComputeUtf8(
@@ -247,7 +265,7 @@ public sealed class CalibrationManager : IDisposable
         _rotationCenters.Values.OrderBy(p => p.StationId, StringComparer.OrdinalIgnoreCase).ToList();
 
     /// <summary>
-    /// 扫描目录加载 *.intrinsic.json / *.extrinsic.json / *.rotation.json。
+    /// 扫描目录加载 *.intrinsic.json / *.extrinsic.json / *.rotation.json / *.polynomial.json / *.scale.json。
     /// 返回加载失败清单（坏档案隔离，不影响其他档案；同时记录质量超标警告）。
     /// </summary>
     public IReadOnlyList<(string File, string Error)> LoadDirectory(string folder)
@@ -257,129 +275,63 @@ public sealed class CalibrationManager : IDisposable
         if (!Directory.Exists(folder))
             return errors;
 
-        // 按文件名排序遍历 + 档案 Id 去重：手工重命名产生同 Id 双档案时，
-        // 确定性地"文件名排序在先者生效、后者报错"（此前是枚举序后者覆盖，结果不可预测）
-        var seenIntrinsic = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in Directory.EnumerateFiles(folder, "*.intrinsic.json")
-                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var profile = JsonSerializer.Deserialize<IntrinsicProfile>(File.ReadAllText(file))
-                    ?? throw new InvalidDataException("档案内容为空");
-                if (seenIntrinsic.TryGetValue(profile.CameraId, out var firstFile))
-                {
-                    errors.Add((Path.GetFileName(file),
-                        $"档案 Id 重复: {profile.CameraId} 已由 {Path.GetFileName(firstFile)} 加载（按文件名排序先者生效），请删除多余档案"));
-                    continue;
-                }
-                LoadIntrinsic(profile);
-                seenIntrinsic[profile.CameraId] = file;
-                WarnIfFileNameMismatch(file, "intrinsic", profile.CameraId);
-            }
-            catch (Exception ex)
-            {
-                errors.Add((Path.GetFileName(file), ex.Message));
-            }
-        }
-
-        var seenExtrinsic = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in Directory.EnumerateFiles(folder, "*.extrinsic.json")
-                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var profile = JsonSerializer.Deserialize<ExtrinsicProfile>(File.ReadAllText(file))
-                    ?? throw new InvalidDataException("档案内容为空");
-                if (seenExtrinsic.TryGetValue(profile.StationId, out var firstFile))
-                {
-                    errors.Add((Path.GetFileName(file),
-                        $"档案 Id 重复: {profile.StationId} 已由 {Path.GetFileName(firstFile)} 加载（按文件名排序先者生效），请删除多余档案"));
-                    continue;
-                }
-                LoadExtrinsic(profile);
-                seenExtrinsic[profile.StationId] = file;
-                WarnIfFileNameMismatch(file, "extrinsic", profile.StationId);
-            }
-            catch (Exception ex)
-            {
-                errors.Add((Path.GetFileName(file), ex.Message));
-            }
-        }
-
-        var seenRotation = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in Directory.EnumerateFiles(folder, "*.rotation.json")
-                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var profile = JsonSerializer.Deserialize<RotationCenterProfile>(File.ReadAllText(file))
-                    ?? throw new InvalidDataException("档案内容为空");
-                if (seenRotation.TryGetValue(profile.StationId, out var firstFile))
-                {
-                    errors.Add((Path.GetFileName(file),
-                        $"档案 Id 重复: {profile.StationId} 已由 {Path.GetFileName(firstFile)} 加载（按文件名排序先者生效），请删除多余档案"));
-                    continue;
-                }
-                LoadRotationCenter(profile);
-                seenRotation[profile.StationId] = file;
-                WarnIfFileNameMismatch(file, "rotation", profile.StationId);
-            }
-            catch (Exception ex)
-            {
-                errors.Add((Path.GetFileName(file), ex.Message));
-            }
-        }
-
-        var seenPolynomial = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in Directory.EnumerateFiles(folder, "*.polynomial.json")
-                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var profile = JsonSerializer.Deserialize<PolynomialProfile>(File.ReadAllText(file))
-                    ?? throw new InvalidDataException("档案内容为空");
-                if (seenPolynomial.TryGetValue(profile.StationId, out var firstFile))
-                {
-                    errors.Add((Path.GetFileName(file),
-                        $"档案 Id 重复: {profile.StationId} 已由 {Path.GetFileName(firstFile)} 加载（按文件名排序先者生效），请删除多余档案"));
-                    continue;
-                }
-                LoadPolynomial(profile);
-                seenPolynomial[profile.StationId] = file;
-                WarnIfFileNameMismatch(file, "polynomial", profile.StationId);
-            }
-            catch (Exception ex)
-            {
-                errors.Add((Path.GetFileName(file), ex.Message));
-            }
-        }
-
-        var seenScale = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in Directory.EnumerateFiles(folder, "*.scale.json")
-                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var profile = JsonSerializer.Deserialize<ScaleProfile>(File.ReadAllText(file))
-                    ?? throw new InvalidDataException("档案内容为空");
-                if (seenScale.TryGetValue(profile.StationId, out var firstFile))
-                {
-                    errors.Add((Path.GetFileName(file),
-                        $"档案 Id 重复: {profile.StationId} 已由 {Path.GetFileName(firstFile)} 加载（按文件名排序先者生效），请删除多余档案"));
-                    continue;
-                }
-                LoadScale(profile);
-                seenScale[profile.StationId] = file;
-                WarnIfFileNameMismatch(file, "scale", profile.StationId);
-            }
-            catch (Exception ex)
-            {
-                errors.Add((Path.GetFileName(file), ex.Message));
-            }
-        }
+        // 加载顺序与原实现保持一致：内参 → 外参 → 旋转中心 → 多项式 → 比例。
+        // 五类共用同一份扫描实现（排序遍历 + Id 去重 + 文件名一致性告警），
+        // 仅"取 Id"与"载入动作"不同——内参要即时构建去畸变映射表，故单独传 LoadIntrinsic。
+        LoadKindFromDirectory<IntrinsicProfile>(folder, "intrinsic", errors, p => p.CameraId, LoadIntrinsic);
+        LoadKindFromDirectory<ExtrinsicProfile>(folder, _extrinsics.Kind, errors, _extrinsics.IdOf, LoadExtrinsic);
+        LoadKindFromDirectory<RotationCenterProfile>(folder, _rotationCenters.Kind, errors, _rotationCenters.IdOf, LoadRotationCenter);
+        LoadKindFromDirectory<PolynomialProfile>(folder, _polynomials.Kind, errors, _polynomials.IdOf, LoadPolynomial);
+        LoadKindFromDirectory<ScaleProfile>(folder, _scales.Kind, errors, _scales.IdOf, LoadScale);
 
         return errors;
+    }
+
+    /// <summary>
+    /// 目录扫描的统一实现：按文件名排序遍历 + 档案 Id 去重 + 文件名一致性告警 + 坏档案隔离。
+    /// 原先五类档案各有一份近乎复制粘贴的循环（约 120 行），现只保留一份，
+    /// 杜绝"某一类漏了排序/去重"这类只会在现场暴露的偏差。
+    /// </summary>
+    /// <param name="kind">文件名中缀，扫描 <c>*.{kind}.json</c>。</param>
+    /// <param name="idOf">取档案主键（内参按相机 Id，其余按工位 Id）。</param>
+    /// <param name="load">载入动作（含校验与质量告警），异常由本方法捕获并计入错误清单。</param>
+    private void LoadKindFromDirectory<TProfile>(
+        string folder,
+        string kind,
+        List<(string File, string Error)> errors,
+        Func<TProfile, string> idOf,
+        Action<TProfile> load)
+        where TProfile : class
+    {
+        if (!Directory.Exists(folder))
+            return;
+
+        // 按文件名排序遍历 + 档案 Id 去重：手工重命名产生同 Id 双档案时，
+        // 确定性地"文件名排序在先者生效、后者报错"（此前是枚举序后者覆盖，结果不可预测）
+        var seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Directory.EnumerateFiles(folder, $"*.{kind}.json")
+                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var profile = JsonSerializer.Deserialize<TProfile>(File.ReadAllText(file))
+                    ?? throw new InvalidDataException("档案内容为空");
+                var id = idOf(profile);
+                if (seen.TryGetValue(id, out var firstFile))
+                {
+                    errors.Add((Path.GetFileName(file),
+                        $"档案 Id 重复: {id} 已由 {Path.GetFileName(firstFile)} 加载（按文件名排序先者生效），请删除多余档案"));
+                    continue;
+                }
+                load(profile);
+                seen[id] = file;
+                WarnIfFileNameMismatch(file, kind, id);
+            }
+            catch (Exception ex)
+            {
+                errors.Add((Path.GetFileName(file), ex.Message));
+            }
+        }
     }
 
     /// <summary>文件名与档案内部 Id 一致性警告：手工重命名文件后，Save 按 Id 写出新文件，
@@ -394,6 +346,101 @@ public sealed class CalibrationManager : IDisposable
         if (!string.Equals(nameId, id, StringComparison.OrdinalIgnoreCase))
             AddQualityWarning($"档案文件名 {name} 与内部 Id \"{id}\" 不一致：保存时将按 Id 写出新文件，请重命名或删除旧文件");
     }
+
+    // ---- 载入：纯 JSON 档案统一走泛型仓储，跨种类的"双档案并存"告警由本类编排 ----
+
+    public void LoadExtrinsic(ExtrinsicProfile profile)
+    {
+        _extrinsics.Load(profile, AddQualityWarning);
+        WarnIfDualMapping(profile.StationId);
+    }
+
+    public void LoadRotationCenter(RotationCenterProfile profile) =>
+        _rotationCenters.Load(profile, AddQualityWarning);
+
+    public void LoadPolynomial(PolynomialProfile profile)
+    {
+        _polynomials.Load(profile, AddQualityWarning);
+        WarnIfDualMapping(profile.StationId);
+    }
+
+    public void LoadScale(ScaleProfile profile)
+    {
+        _scales.Load(profile, AddQualityWarning);
+        WarnIfDualMapping(profile.StationId);
+    }
+
+    /// <summary>同一工位映射档案并存警告：多项式+外参 → 管线只走多项式；
+    /// (多项式|外参)+比例 → 比例不参与管线（仅测量显示）。必须警告，否则操作员以为被忽略的那份仍生效。</summary>
+    private void WarnIfDualMapping(string stationId)
+    {
+        if (_polynomials.Contains(stationId) && _extrinsics.Contains(stationId))
+            AddQualityWarning($"工位 {stationId} 同时存在多项式与外参档案：生产优先使用多项式（原图+多项式映射），外参/去畸变被忽略。请删除不用的那份以免坐标系混淆");
+        if (_scales.Contains(stationId) &&
+            (_polynomials.Contains(stationId) || _extrinsics.Contains(stationId)))
+            AddQualityWarning($"工位 {stationId} 同时存在比例与外参/多项式档案：管线优先使用外参/多项式（机器人系坐标），比例档案仅用于测量显示");
+    }
+
+    // ---- 保存：写回目录 + 立即热加载（无需重启）----
+
+    public void SaveExtrinsic(ExtrinsicProfile profile)
+    {
+        RequireFolder();
+        _extrinsics.Save(profile, AddQualityWarning, ProfileFile, WriteJson);
+        WarnIfDualMapping(profile.StationId);
+    }
+
+    public void SaveRotationCenter(RotationCenterProfile profile)
+    {
+        RequireFolder();
+        _rotationCenters.Save(profile, AddQualityWarning, ProfileFile, WriteJson);
+    }
+
+    public void SavePolynomial(PolynomialProfile profile)
+    {
+        RequireFolder();
+        _polynomials.Save(profile, AddQualityWarning, ProfileFile, WriteJson);
+        WarnIfDualMapping(profile.StationId);
+    }
+
+    public void SaveScale(ScaleProfile profile)
+    {
+        RequireFolder();
+        _scales.Save(profile, AddQualityWarning, ProfileFile, WriteJson);
+        WarnIfDualMapping(profile.StationId);
+    }
+
+    // ---- 删除（文件 + 缓存）----
+
+    public bool DeleteExtrinsic(string stationId) => _extrinsics.Delete(stationId, DeleteProfileFile);
+
+    public bool DeleteRotationCenter(string stationId) => _rotationCenters.Delete(stationId, DeleteProfileFile);
+
+    public bool DeletePolynomial(string stationId) => _polynomials.Delete(stationId, DeleteProfileFile);
+
+    public bool DeleteScale(string stationId) => _scales.Delete(stationId, DeleteProfileFile);
+
+    // ---- 值域校验 / 质量评估：规则已下沉到各档案种类描述符，此处保留 public 门面 ----
+
+    /// <summary>外参档案值域校验。规则见 <see cref="ExtrinsicKind"/>。</summary>
+    public static void ValidateExtrinsic(ExtrinsicProfile profile) => ExtrinsicKind.Instance.Validate(profile);
+
+    /// <summary>旋转中心档案值域校验。规则见 <see cref="RotationCenterKind"/>。</summary>
+    public static void ValidateRotationCenter(RotationCenterProfile profile) => RotationCenterKind.Instance.Validate(profile);
+
+    /// <summary>多项式档案值域校验。规则见 <see cref="PolynomialKind"/>。</summary>
+    public static void ValidatePolynomial(PolynomialProfile profile) => PolynomialKind.Instance.Validate(profile);
+
+    /// <summary>比例档案值域校验。规则见 <see cref="ScaleKind"/>。</summary>
+    public static void ValidateScale(ScaleProfile profile) => ScaleKind.Instance.Validate(profile);
+
+    public static CalibrationQuality AssessExtrinsic(ExtrinsicProfile p) => ExtrinsicKind.Instance.Assess(p);
+
+    public static CalibrationQuality AssessRotation(RotationCenterProfile p) => RotationCenterKind.Instance.Assess(p);
+
+    public static CalibrationQuality AssessPolynomial(PolynomialProfile p) => PolynomialKind.Instance.Assess(p);
+
+    // ---- 内参：含 OpenCV 映射表与非托管内存，生命周期与纯 JSON 档案不同，单独实现 ----
 
     public void LoadIntrinsic(IntrinsicProfile profile)
     {
@@ -439,12 +486,30 @@ public sealed class CalibrationManager : IDisposable
             AddQualityWarning($"内参 {profile.CameraId} 质量超标: RMS {profile.Rms:0.000}px（>{IntrinsicRmsFair:0.0} 可用上限），建议重新标定");
     }
 
-    /// <summary>质量警告入队，超过保留上限时丢弃最旧条目（固定容量，避免无限累积）。</summary>
-    private void AddQualityWarning(string message)
+    public void SaveIntrinsic(IntrinsicProfile profile)
     {
-        _qualityWarnings.Enqueue(message);
-        while (_qualityWarnings.Count > MaxQualityWarnings)
-            _qualityWarnings.TryDequeue(out _);
+        RequireFolder();
+        ValidateIntrinsic(profile);
+        WriteJson(ProfileFile("intrinsic", profile.CameraId), profile);
+        LoadIntrinsic(profile);
+    }
+
+    public bool DeleteIntrinsic(string cameraId)
+    {
+        _intrinsicLock.EnterWriteLock();
+        try
+        {
+            if (_intrinsics.TryRemove(cameraId, out var old))
+            {
+                old.MapX.Dispose();
+                old.MapY.Dispose();
+            }
+        }
+        finally
+        {
+            _intrinsicLock.ExitWriteLock();
+        }
+        return DeleteProfileFile(cameraId, "intrinsic");
     }
 
     /// <summary>内参字段校验（CameraMatrix 9 元素 / 数值合理 / 分辨率 / 畸变系数长度）。
@@ -477,201 +542,81 @@ public sealed class CalibrationManager : IDisposable
             throw new VisionException(VisionErrorCode.InternalError, $"内参畸变系数长度非法: {profile.DistCoeffs.Length}");
     }
 
-    /// <summary>
-    /// 外参档案值域校验：Affine 必须为 6 元素且全部有限、Rms/MaxResidual 非负且有限。
-    /// 损坏档案在加载时即拒绝（1099 InternalError），避免仿射映射产生 NaN 坐标被误当真实位姿（安全问题）。
-    /// </summary>
-    public static void ValidateExtrinsic(ExtrinsicProfile profile)
+    public static CalibrationQuality AssessIntrinsic(IntrinsicProfile p) =>
+        p.Rms <= IntrinsicRmsGood ? CalibrationQuality.Good
+        : p.Rms <= IntrinsicRmsFair ? CalibrationQuality.Fair
+        : CalibrationQuality.Poor;
+
+    /// <summary>标定前置检查：外参/旋转中心标定前该相机必须先完成内参标定（一致性铁律）。</summary>
+    public void RequireIntrinsic(string cameraId)
     {
-        if (string.IsNullOrWhiteSpace(profile.StationId))
-            throw new VisionException(VisionErrorCode.InternalError, "外参 StationId 为空（空串 Id 会导致档案互相覆盖）");
-        if (string.IsNullOrWhiteSpace(profile.CameraId))
-            throw new VisionException(VisionErrorCode.InternalError, $"外参 {profile.StationId} 的 CameraId 为空");
-        if (profile.Affine is not { Length: 6 } || profile.Affine.Any(v => !double.IsFinite(v)))
-            throw new VisionException(VisionErrorCode.InternalError,
-                $"外参 {profile.StationId} 的 Affine 必须为 6 个有限数值，当前 {profile.Affine?.Length ?? 0}");
-        if (!double.IsFinite(profile.Rms) || profile.Rms < 0)
-            throw new VisionException(VisionErrorCode.InternalError, $"外参 {profile.StationId} 的 Rms 非法: {profile.Rms}");
-        if (!double.IsFinite(profile.MaxResidual) || profile.MaxResidual < 0)
-            throw new VisionException(VisionErrorCode.InternalError, $"外参 {profile.StationId} 的 MaxResidual 非法: {profile.MaxResidual}");
-        if (!CameraMountType.IsValid(profile.MountType))
-            throw new VisionException(VisionErrorCode.InternalError,
-                $"外参 {profile.StationId} 的 MountType 非法: {profile.MountType}（仅支持 Fixed/OnArm）");
-        if (!PoseComposeMode.IsValid(profile.ComposeMode))
-            throw new VisionException(VisionErrorCode.InternalError,
-                $"外参 {profile.StationId} 的 ComposeMode 非法: {profile.ComposeMode}（仅 Check/Translate）");
-        if (!double.IsFinite(profile.TeachTcpX) || !double.IsFinite(profile.TeachTcpY) ||
-            !double.IsFinite(profile.TeachRzDeg) || !double.IsFinite(profile.CalibrationPlaneZ))
-            throw new VisionException(VisionErrorCode.InternalError, $"外参 {profile.StationId} 的拍照位姿/标定平面字段含非有限值");
+        if (!_intrinsics.ContainsKey(cameraId))
+            throw new VisionException(VisionErrorCode.NotCalibrated,
+                $"相机未做内参标定: {cameraId}（外参/旋转中心标定前必须先完成内参标定）");
     }
 
-    /// <summary>旋转中心档案值域校验：Cx/Cy/RadiusPx/Rms 必须有限，Rms 非负。损坏档案拒绝加载（1099 InternalError）。</summary>
-    public static void ValidateRotationCenter(RotationCenterProfile profile)
+    public bool IsCalibrated(string cameraId) => _intrinsics.ContainsKey(cameraId);
+
+    /// <summary>内参去畸变。读锁内执行，与热加载（写锁）互斥，防止 Remap 使用已释放的 Map。</summary>
+    public VisionImage Undistort(string cameraId, VisionImage src)
     {
-        if (string.IsNullOrWhiteSpace(profile.StationId))
-            throw new VisionException(VisionErrorCode.InternalError, "旋转中心 StationId 为空（空串 Id 会导致档案互相覆盖）");
-        if (string.IsNullOrWhiteSpace(profile.CameraId))
-            throw new VisionException(VisionErrorCode.InternalError, $"旋转中心 {profile.StationId} 的 CameraId 为空");
-        if (!double.IsFinite(profile.Cx) || !double.IsFinite(profile.Cy) ||
-            !double.IsFinite(profile.RadiusPx) || !double.IsFinite(profile.AxisRatio))
-            throw new VisionException(VisionErrorCode.InternalError, $"旋转中心 {profile.StationId} 的数值非法（非有限值）");
-        if (!double.IsFinite(profile.Rms) || profile.Rms < 0)
-            throw new VisionException(VisionErrorCode.InternalError, $"旋转中心 {profile.StationId} 的 Rms 非法: {profile.Rms}");
-        if (profile.AxisRatio < 0)
-            throw new VisionException(VisionErrorCode.InternalError, $"旋转中心 {profile.StationId} 的 AxisRatio 非法: {profile.AxisRatio}");
-        if (!double.IsFinite(profile.ToolOffsetDeg))
-            throw new VisionException(VisionErrorCode.InternalError, $"旋转中心 {profile.StationId} 的 ToolOffsetDeg 非法: {profile.ToolOffsetDeg}");
+        using var mat = VisionImageCv.AsMat(src);
+        return VisionImageCv.FromMat(Undistort(cameraId, mat), ownsMat: true);
     }
 
-    /// <summary>留一交叉验证最大误差告警阈值（机器人单位）：超过说明可能存在抄错/误点
-    /// （单个坏点对整体拟合被均摊，残差好看但留一误差急剧放大）。</summary>
-    public const double LeaveOneOutWarnLimit = 1.0;
-
-    public void LoadExtrinsic(ExtrinsicProfile profile)
+    /// <summary>内参去畸变（Mat 重载，标定工具与内部映射用）。</summary>
+    public Mat Undistort(string cameraId, Mat src)
     {
-        ValidateExtrinsic(profile);
-        _extrinsics[profile.StationId] = profile;
-        if (AssessExtrinsic(profile) == CalibrationQuality.Poor)
-            AddQualityWarning($"外参 {profile.StationId} 质量超标: 最大残差 {profile.MaxResidual:0.000}（>{ExtrinsicResidualFair:0.0} 可用上限），建议重新标定");
-        if (profile.LeaveOneOutMax > LeaveOneOutWarnLimit)
-            AddQualityWarning($"外参 {profile.StationId} 留一最大误差 {profile.LeaveOneOutMax:0.000} 偏大（>{LeaveOneOutWarnLimit:0.0}），疑似存在抄错/误点，请核对点对");
-        WarnIfDualMapping(profile.StationId);
+        _intrinsicLock.EnterReadLock();
+        try
+        {
+            if (!_intrinsics.TryGetValue(cameraId, out var state))
+                throw new VisionException(VisionErrorCode.NotCalibrated, $"相机未做内参标定: {cameraId}");
+
+            if (src.Width != state.Profile.Width || src.Height != state.Profile.Height)
+                throw new VisionException(
+                    VisionErrorCode.NotCalibrated,
+                    $"图像分辨率 {src.Width}x{src.Height} 与内参档案 {state.Profile.Width}x{state.Profile.Height} 不一致，请重新标定");
+
+            var dst = new Mat();
+            Cv2.Remap(src, dst, state.MapX, state.MapY, InterpolationFlags.Linear);
+            return dst;
+        }
+        finally
+        {
+            _intrinsicLock.ExitReadLock();
+        }
     }
 
-    public void LoadRotationCenter(RotationCenterProfile profile)
-    {
-        ValidateRotationCenter(profile);
-        _rotationCenters[profile.StationId] = profile;
-        if (AssessRotation(profile) == CalibrationQuality.Poor)
-            AddQualityWarning($"旋转中心 {profile.StationId} 质量超标: RMS {profile.Rms:0.000}px"
-                + (profile.PointCount >= 5 && profile.AxisRatio > RotationAxisRatioLimit
-                    ? $"，长短轴比 {profile.AxisRatio:0.00}"
-                    : "")
-                + "，建议重新标定");
-    }
+    // ---- 坐标映射与位姿校验（跨档案种类的编排职责）----
 
-    /// <summary>多项式档案校验：Id/相机、阶数 2~3、系数个数与阶数匹配且全有限、分辨率、残差非负。
-    /// 系数损坏（个数不符/NaN）会让 Evaluate 输出垃圾坐标，加载时拒绝。</summary>
-    public static void ValidatePolynomial(PolynomialProfile profile)
+    /// <summary>质量警告入队，超过保留上限时丢弃最旧条目（固定容量，避免无限累积）。</summary>
+    private void AddQualityWarning(string message)
     {
-        if (string.IsNullOrWhiteSpace(profile.StationId))
-            throw new VisionException(VisionErrorCode.InternalError, "多项式档案 StationId 为空（空串 Id 会导致档案互相覆盖）");
-        if (string.IsNullOrWhiteSpace(profile.CameraId))
-            throw new VisionException(VisionErrorCode.InternalError, $"多项式档案 {profile.StationId} 的 CameraId 为空");
-        if (profile.Order is not (2 or 3))
-            throw new VisionException(VisionErrorCode.InternalError, $"多项式档案 {profile.StationId} 的阶数非法: {profile.Order}（仅 2/3）");
-        var expected = (profile.Order + 1) * (profile.Order + 2) / 2;
-        if (profile.CoefX.Length != expected || profile.CoefY.Length != expected)
-            throw new VisionException(VisionErrorCode.InternalError,
-                $"多项式档案 {profile.StationId} 的系数个数非法: X {profile.CoefX.Length} / Y {profile.CoefY.Length}（{profile.Order} 阶应为 {expected}）");
-        if (profile.CoefX.Concat(profile.CoefY).Any(v => !double.IsFinite(v)))
-            throw new VisionException(VisionErrorCode.InternalError, $"多项式档案 {profile.StationId} 的系数含非有限值，档案已损坏");
-        if (profile.Width <= 0 || profile.Height <= 0)
-            throw new VisionException(VisionErrorCode.InternalError, $"多项式档案 {profile.StationId} 的分辨率非法: {profile.Width}x{profile.Height}");
-        if (!double.IsFinite(profile.Rms) || profile.Rms < 0 || !double.IsFinite(profile.MaxResidual) || profile.MaxResidual < 0)
-            throw new VisionException(VisionErrorCode.InternalError, $"多项式档案 {profile.StationId} 的残差指标非法");
-        if (!CameraMountType.IsValid(profile.MountType))
-            throw new VisionException(VisionErrorCode.InternalError,
-                $"多项式档案 {profile.StationId} 的 MountType 非法: {profile.MountType}（仅 Fixed/OnArm）");
-        if (!PolynomialCoordinateSpace.IsValid(profile.CoordinateSpace))
-            throw new VisionException(VisionErrorCode.InternalError,
-                $"多项式档案 {profile.StationId} 的 CoordinateSpace 非法: {profile.CoordinateSpace}（仅 Robot/Image）");
-        if (!PoseComposeMode.IsValid(profile.ComposeMode))
-            throw new VisionException(VisionErrorCode.InternalError,
-                $"多项式档案 {profile.StationId} 的 ComposeMode 非法: {profile.ComposeMode}（仅 Check/Translate）");
-        if (!double.IsFinite(profile.TeachTcpX) || !double.IsFinite(profile.TeachTcpY) ||
-            !double.IsFinite(profile.TeachRzDeg) || !double.IsFinite(profile.CalibrationPlaneZ))
-            throw new VisionException(VisionErrorCode.InternalError, $"多项式档案 {profile.StationId} 的位姿/平面字段含非有限值");
-    }
-
-    public void LoadPolynomial(PolynomialProfile profile)
-    {
-        ValidatePolynomial(profile);
-        _polynomials[profile.StationId] = profile;
-        if (profile.MaxResidual > ExtrinsicResidualFair)
-            AddQualityWarning($"多项式标定 {profile.StationId} 质量超标: 最大残差 {profile.MaxResidual:0.000}（>{ExtrinsicResidualFair:0.0} 可用上限），建议重新标定");
-        WarnIfDualMapping(profile.StationId);
-    }
-
-    /// <summary>同一工位映射档案并存警告：多项式+外参 → 管线只走多项式；
-    /// (多项式|外参)+比例 → 比例不参与管线（仅测量显示）。必须警告，否则操作员以为被忽略的那份仍生效。</summary>
-    private void WarnIfDualMapping(string stationId)
-    {
-        if (_polynomials.ContainsKey(stationId) && _extrinsics.ContainsKey(stationId))
-            AddQualityWarning($"工位 {stationId} 同时存在多项式与外参档案：生产优先使用多项式（原图+多项式映射），外参/去畸变被忽略。请删除不用的那份以免坐标系混淆");
-        if (_scales.ContainsKey(stationId) &&
-            (_polynomials.ContainsKey(stationId) || _extrinsics.ContainsKey(stationId)))
-            AddQualityWarning($"工位 {stationId} 同时存在比例与外参/多项式档案：管线优先使用外参/多项式（机器人系坐标），比例档案仅用于测量显示");
-    }
-
-    public void SavePolynomial(PolynomialProfile profile)
-    {
-        RequireFolder();
-        ValidatePolynomial(profile);
-        WriteJson(ProfileFile("polynomial", profile.StationId), profile);
-        LoadPolynomial(profile);
-    }
-
-    public bool DeletePolynomial(string stationId)
-    {
-        _polynomials.TryRemove(stationId, out _);
-        return DeleteProfileFile(stationId, "polynomial");
-    }
-
-    /// <summary>比例 X/Y 各向异性告警阈值：|kx/ky − 1| 超过 2% 说明存在旋转/透视/畸变，
-    /// 线性比例只能近似，建议改用多项式标定。</summary>
-    public const double ScaleAnisotropyWarnLimit = 0.02;
-
-    /// <summary>比例档案校验：Id/相机非空，比例 > 0 且有限（0 或负数无物理意义；非有限值 = 档案损坏），
-    /// 分辨率 ≥ 0（0 = 未记录，跳过一致性校验）。手动录入无法验证数值真伪，只能挡住明显笔误。</summary>
-    public static void ValidateScale(ScaleProfile profile)
-    {
-        if (string.IsNullOrWhiteSpace(profile.StationId))
-            throw new VisionException(VisionErrorCode.InternalError, "比例档案 StationId 为空（空串 Id 会导致档案互相覆盖）");
-        if (string.IsNullOrWhiteSpace(profile.CameraId))
-            throw new VisionException(VisionErrorCode.InternalError, $"比例档案 {profile.StationId} 的 CameraId 为空");
-        if (!double.IsFinite(profile.ScaleX) || profile.ScaleX <= 0 ||
-            !double.IsFinite(profile.ScaleY) || profile.ScaleY <= 0)
-            throw new VisionException(VisionErrorCode.InternalError,
-                $"比例档案 {profile.StationId} 的比例非法: {profile.ScaleX} / {profile.ScaleY} mm/px（须为正数）");
-        if (profile.Width < 0 || profile.Height < 0)
-            throw new VisionException(VisionErrorCode.InternalError,
-                $"比例档案 {profile.StationId} 的分辨率非法: {profile.Width}x{profile.Height}");
-    }
-
-    public void LoadScale(ScaleProfile profile)
-    {
-        ValidateScale(profile);
-        _scales[profile.StationId] = profile;
-        var ratio = Math.Max(profile.ScaleX, profile.ScaleY) / Math.Min(profile.ScaleX, profile.ScaleY) - 1;
-        if (ratio > ScaleAnisotropyWarnLimit)
-            AddQualityWarning($"比例标定 {profile.StationId} X/Y 各向异性 {ratio * 100:0.0}%（>{ScaleAnisotropyWarnLimit * 100:0}%）："
-                + "疑似存在旋转/透视/畸变，线性比例仅为近似值，建议改用多项式标定");
-        WarnIfDualMapping(profile.StationId);
-    }
-
-    public void SaveScale(ScaleProfile profile)
-    {
-        RequireFolder();
-        ValidateScale(profile);
-        WriteJson(ProfileFile("scale", profile.StationId), profile);
-        LoadScale(profile);
-    }
-
-    public bool DeleteScale(string stationId)
-    {
-        _scales.TryRemove(stationId, out _);
-        return DeleteProfileFile(stationId, "scale");
+        _qualityWarnings.Enqueue(message);
+        while (_qualityWarnings.Count > MaxQualityWarnings)
+            _qualityWarnings.TryDequeue(out _);
     }
 
     /// <summary>多项式工位的推理图像分辨率校验：换分辨率后归一化坐标错位，映射整体失效。</summary>
     public void VerifyPolynomialResolution(string stationId, int width, int height)
     {
-        if (!_polynomials.TryGetValue(stationId, out var profile))
-            throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未做多项式标定: {stationId}");
+        var profile = _polynomials.Get(stationId)
+            ?? throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未做多项式标定: {stationId}");
         if (profile.Width != width || profile.Height != height)
             throw new VisionException(VisionErrorCode.NotCalibrated,
                 $"图像分辨率 {width}x{height} 与多项式标定档案 {profile.Width}x{profile.Height} 不一致，请重新标定");
+    }
+
+    /// <summary>比例工位的推理图像分辨率校验：比例以像素为基准，换分辨率后 mm/px 整体失效。
+    /// 档案未记录分辨率（Width=0，旧档/手填遗漏）时跳过（无从比对）。</summary>
+    public void VerifyScaleResolution(string stationId, int width, int height)
+    {
+        var profile = _scales.Get(stationId)
+            ?? throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未录入比例标定: {stationId}");
+        if (profile.Width > 0 && (profile.Width != width || profile.Height != height))
+            throw new VisionException(VisionErrorCode.NotCalibrated,
+                $"图像分辨率 {width}x{height} 与比例标定档案 {profile.Width}x{profile.Height} 不一致，请重新录入比例");
     }
 
     /// <summary>多项式工位的 TRIGGER 位姿前置校验（取图前拦截）：
@@ -682,7 +627,7 @@ public sealed class CalibrationManager : IDisposable
     {
         if (!PoseCheckEnabled || pose is null || string.IsNullOrEmpty(stationId))
             return;
-        if (!_polynomials.TryGetValue(stationId, out var profile))
+        if (_polynomials.Get(stationId) is not { } profile)
             return;
         if (string.Equals(profile.CoordinateSpace, PolynomialCoordinateSpace.Image, StringComparison.OrdinalIgnoreCase))
             return; // Image 毫米系：不锚定机器人系，位姿校验/合成均不适用
@@ -716,7 +661,7 @@ public sealed class CalibrationManager : IDisposable
     /// </summary>
     public RobotPose PixelToRobotPolynomial(string stationId, PixelPose pose, string? cameraId = null, TcpClientPose? clientPose = null)
     {
-        if (!_polynomials.TryGetValue(stationId, out var profile))
+        if (_polynomials.Get(stationId) is not { } profile)
             throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未做多项式标定: {stationId}");
 
         if (!string.IsNullOrEmpty(cameraId) &&
@@ -756,7 +701,7 @@ public sealed class CalibrationManager : IDisposable
     /// </summary>
     public RobotPose PixelToRobotScale(string stationId, PixelPose pose, string? cameraId = null)
     {
-        if (!_scales.TryGetValue(stationId, out var profile))
+        if (_scales.Get(stationId) is not { } profile)
             throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未录入比例标定: {stationId}");
 
         if (!string.IsNullOrEmpty(cameraId) &&
@@ -771,107 +716,6 @@ public sealed class CalibrationManager : IDisposable
         var angleDeg = Math.Atan2(profile.ScaleY * Math.Sin(rad), profile.ScaleX * Math.Cos(rad)) * 180.0 / Math.PI;
 
         return new RobotPose(x, y, AngleGeometry.NormalizeSignedDeg(angleDeg));
-    }
-
-    /// <summary>比例工位的推理图像分辨率校验：比例以像素为基准，换分辨率后 mm/px 整体失效。
-    /// 档案未记录分辨率（Width=0，旧档/手填遗漏）时跳过（无从比对）。</summary>
-    public void VerifyScaleResolution(string stationId, int width, int height)
-    {
-        if (!_scales.TryGetValue(stationId, out var profile))
-            throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未录入比例标定: {stationId}");
-        if (profile.Width > 0 && (profile.Width != width || profile.Height != height))
-            throw new VisionException(VisionErrorCode.NotCalibrated,
-                $"图像分辨率 {width}x{height} 与比例标定档案 {profile.Width}x{profile.Height} 不一致，请重新录入比例");
-    }
-
-    // ---- 保存：写回目录 + 立即热加载（无需重启）----
-
-    public void SaveIntrinsic(IntrinsicProfile profile)
-    {
-        RequireFolder();
-        ValidateIntrinsic(profile);
-        WriteJson(ProfileFile("intrinsic", profile.CameraId), profile);
-        LoadIntrinsic(profile);
-    }
-
-    public void SaveExtrinsic(ExtrinsicProfile profile)
-    {
-        RequireFolder();
-        WriteJson(ProfileFile("extrinsic", profile.StationId), profile);
-        LoadExtrinsic(profile);
-    }
-
-    public void SaveRotationCenter(RotationCenterProfile profile)
-    {
-        RequireFolder();
-        WriteJson(ProfileFile("rotation", profile.StationId), profile);
-        LoadRotationCenter(profile);
-    }
-
-    // ---- 删除（文件 + 缓存）----
-
-    public bool DeleteIntrinsic(string cameraId)
-    {
-        _intrinsicLock.EnterWriteLock();
-        try
-        {
-            if (_intrinsics.TryRemove(cameraId, out var old))
-            {
-                old.MapX.Dispose();
-                old.MapY.Dispose();
-            }
-        }
-        finally
-        {
-            _intrinsicLock.ExitWriteLock();
-        }
-        return DeleteProfileFile(cameraId, "intrinsic");
-    }
-
-    public bool DeleteExtrinsic(string stationId)
-    {
-        _extrinsics.TryRemove(stationId, out _);
-        return DeleteProfileFile(stationId, "extrinsic");
-    }
-
-    public bool DeleteRotationCenter(string stationId)
-    {
-        _rotationCenters.TryRemove(stationId, out _);
-        return DeleteProfileFile(stationId, "rotation");
-    }
-
-    // ---- 质量评估（与 README 验收参考对齐，供 UI/工具展示）----
-
-    public static CalibrationQuality AssessIntrinsic(IntrinsicProfile p) =>
-        p.Rms <= IntrinsicRmsGood ? CalibrationQuality.Good
-        : p.Rms <= IntrinsicRmsFair ? CalibrationQuality.Fair
-        : CalibrationQuality.Poor;
-
-    public static CalibrationQuality AssessExtrinsic(ExtrinsicProfile p) =>
-        p.MaxResidual <= ExtrinsicResidualGood ? CalibrationQuality.Good
-        : p.MaxResidual <= ExtrinsicResidualFair ? CalibrationQuality.Fair
-        : CalibrationQuality.Poor;
-
-    public static CalibrationQuality AssessPolynomial(PolynomialProfile p) =>
-        p.MaxResidual <= ExtrinsicResidualGood ? CalibrationQuality.Good
-        : p.MaxResidual <= ExtrinsicResidualFair ? CalibrationQuality.Fair
-        : CalibrationQuality.Poor;
-
-    public static CalibrationQuality AssessRotation(RotationCenterProfile p)
-    {
-        if (p.Rms > RotationRmsFair)
-            return CalibrationQuality.Poor;
-        if (p.PointCount >= 5 && p.AxisRatio > RotationAxisRatioLimit)
-            return CalibrationQuality.Poor;
-        return p.Rms <= RotationRmsGood ? CalibrationQuality.Good : CalibrationQuality.Fair;
-    }
-
-    /// <summary>标定前置检查：外参/旋转中心标定前该相机必须先完成内参标定（一致性铁律）。</summary>
-    public void RequireIntrinsic(string cameraId)
-    {
-        if (!_intrinsics.ContainsKey(cameraId))
-            throw new VisionException(VisionErrorCode.NotCalibrated,
-                $"相机未做内参标定: {cameraId}（外参/旋转中心标定前必须先完成内参标定）");
     }
 
     /// <summary>
@@ -897,10 +741,10 @@ public sealed class CalibrationManager : IDisposable
     /// </summary>
     private (Func<double, double, double> MapX, Func<double, double, double> MapY, string CameraId)? GetMapping(string stationId)
     {
-        if (_polynomials.TryGetValue(stationId, out var poly))
+        if (_polynomials.Get(stationId) is { } poly)
             return ((x, y) => poly.Evaluate(x, y).X, (x, y) => poly.Evaluate(x, y).Y, poly.CameraId);
 
-        if (_extrinsics.TryGetValue(stationId, out var ext))
+        if (_extrinsics.Get(stationId) is { } ext)
         {
             var a = ext.Affine;
             return ((x, y) => a[0] * x + a[1] * y + a[2], (x, y) => a[3] * x + a[4] * y + a[5], ext.CameraId);
@@ -916,7 +760,7 @@ public sealed class CalibrationManager : IDisposable
     /// </summary>
     public Point2d RotationCenterRobot(string stationId)
     {
-        if (!_rotationCenters.TryGetValue(stationId, out var rc))
+        if (_rotationCenters.Get(stationId) is not { } rc)
             throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未做旋转中心标定: {stationId}");
 
         var mapping = GetMapping(stationId)
@@ -928,17 +772,17 @@ public sealed class CalibrationManager : IDisposable
 
         // 分辨率一致性：外参链路校验外参与旋转中心 vs 内参（去畸变坐标系）；
         // 多项式链路校验旋转中心 vs 多项式档案（原图坐标系，无内参概念）
-        if (_extrinsics.TryGetValue(stationId, out var ext))
+        if (_extrinsics.Get(stationId) is { } ext)
         {
             VerifyResolutionConsistency(ext.CameraId, ext.Width, ext.Height, "外参");
             VerifyResolutionConsistency(rc.CameraId, rc.Width, rc.Height, "旋转中心");
         }
-        else if (_polynomials.TryGetValue(stationId, out var poly) &&
-                 (rc.Width != poly.Width || rc.Height != poly.Height))
+        else if (_polynomials.Get(stationId) is { } poly &&
+                 (rc.Width != poly.Width || rc.Height != poly.Height) &&
+                 rc.Width > 0 && rc.Height > 0)
         {
-            if (rc.Width > 0 && rc.Height > 0)
-                throw new VisionException(VisionErrorCode.NotCalibrated,
-                    $"旋转中心标定分辨率 {rc.Width}x{rc.Height} 与多项式档案 {poly.Width}x{poly.Height} 不一致（须在同一原图坐标系下标定）");
+            throw new VisionException(VisionErrorCode.NotCalibrated,
+                $"旋转中心标定分辨率 {rc.Width}x{rc.Height} 与多项式档案 {poly.Width}x{poly.Height} 不一致（须在同一原图坐标系下标定）");
         }
 
         return new Point2d(mapping.MapX(rc.Cx, rc.Cy), mapping.MapY(rc.Cx, rc.Cy));
@@ -955,7 +799,8 @@ public sealed class CalibrationManager : IDisposable
             return pose;
 
         var center = RotationCenterRobot(stationId);
-        var toolOffset = _rotationCenters[stationId].ToolOffsetDeg;
+        var toolOffset = (_rotationCenters.Get(stationId)
+            ?? throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未做旋转中心标定: {stationId}")).ToolOffsetDeg;
         return RotationCenterCompensation.Apply(pose, center.X, center.Y, toolOffset);
     }
 
@@ -1053,14 +898,14 @@ public sealed class CalibrationManager : IDisposable
     {
         if (!PoseCheckEnabled || string.IsNullOrEmpty(stationId))
             return false;
-        if (_polynomials.TryGetValue(stationId, out var poly))
+        if (_polynomials.Get(stationId) is { } poly)
         {
             if (string.Equals(poly.CoordinateSpace, PolynomialCoordinateSpace.Image, StringComparison.OrdinalIgnoreCase))
                 return false;
             return string.Equals(poly.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase)
                    && poly.HasTeachPose;
         }
-        if (_extrinsics.TryGetValue(stationId, out var ext))
+        if (_extrinsics.Get(stationId) is { } ext)
             return string.Equals(ext.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase)
                    && ext.HasTeachPose;
         return false;
@@ -1086,7 +931,7 @@ public sealed class CalibrationManager : IDisposable
     {
         if (!PoseCheckEnabled || string.IsNullOrEmpty(stationId))
             return;
-        if (!_extrinsics.TryGetValue(stationId, out var ext))
+        if (_extrinsics.Get(stationId) is not { } ext)
             return; // 无外参：外参缺失由 PixelToRobot 统一报 1004
         if (!string.Equals(ext.MountType, CameraMountType.OnArm, StringComparison.OrdinalIgnoreCase))
             return; // Fixed 档案与拍照位姿无关
@@ -1162,39 +1007,6 @@ public sealed class CalibrationManager : IDisposable
         return (mean, spread);
     }
 
-    public bool IsCalibrated(string cameraId) => _intrinsics.ContainsKey(cameraId);
-
-    /// <summary>内参去畸变。读锁内执行，与热加载（写锁）互斥，防止 Remap 使用已释放的 Map。</summary>
-    public VisionImage Undistort(string cameraId, VisionImage src)
-    {
-        using var mat = VisionImageCv.AsMat(src);
-        return VisionImageCv.FromMat(Undistort(cameraId, mat), ownsMat: true);
-    }
-
-    /// <summary>内参去畸变（Mat 重载，标定工具与内部映射用）。</summary>
-    public Mat Undistort(string cameraId, Mat src)
-    {
-        _intrinsicLock.EnterReadLock();
-        try
-        {
-            if (!_intrinsics.TryGetValue(cameraId, out var state))
-                throw new VisionException(VisionErrorCode.NotCalibrated, $"相机未做内参标定: {cameraId}");
-
-            if (src.Width != state.Profile.Width || src.Height != state.Profile.Height)
-                throw new VisionException(
-                    VisionErrorCode.NotCalibrated,
-                    $"图像分辨率 {src.Width}x{src.Height} 与内参档案 {state.Profile.Width}x{state.Profile.Height} 不一致，请重新标定");
-
-            var dst = new Mat();
-            Cv2.Remap(src, dst, state.MapX, state.MapY, InterpolationFlags.Linear);
-            return dst;
-        }
-        finally
-        {
-            _intrinsicLock.ExitReadLock();
-        }
-    }
-
     /// <summary>
     /// 像素位姿转机器人位姿。
     /// stationId 为空时抛 NotCalibrated——防止像素坐标被误当成机器人坐标。
@@ -1207,7 +1019,7 @@ public sealed class CalibrationManager : IDisposable
         if (string.IsNullOrEmpty(stationId))
             throw new VisionException(VisionErrorCode.NotCalibrated, "配方未设置 stationId");
 
-        if (!_extrinsics.TryGetValue(stationId, out var profile))
+        if (_extrinsics.Get(stationId) is not { } profile)
             throw new VisionException(VisionErrorCode.NotCalibrated, $"工位未做外参标定: {stationId}");
 
         if (!string.IsNullOrEmpty(cameraId) &&
@@ -1248,6 +1060,8 @@ public sealed class CalibrationManager : IDisposable
         return new RobotPose(x, y, AngleGeometry.NormalizeSignedDeg(angleDeg));
     }
 
+    // ---- 落盘基础设施 ----
+
     private string ProfileFile(string kind, string id)
     {
         ValidateProfileId(id);
@@ -1267,33 +1081,9 @@ public sealed class CalibrationManager : IDisposable
     private void WriteJson(string path, object profile)
     {
         Directory.CreateDirectory(_folder!);
-        AtomicWriteAllText(path, JsonSerializer.Serialize(profile, JsonOptions));
-    }
-
-    /// <summary>
-    /// 原子落盘（临时文件 + File.Replace）：标定档案是产线关键资产，
-    /// 直接 Write halfway 崩溃/断电会留下截断 JSON 且无备份，重启后档案不可用。
-    /// 与 RobotVision.Hosting.JsonAtomicWrite 同思路（该类为 Hosting internal，此处独立实现）。
-    /// </summary>
-    public static void AtomicWriteAllText(string path, string content)
-    {
-        var full = Path.GetFullPath(path);
-        var dir = Path.GetDirectoryName(full)!;
-        Directory.CreateDirectory(dir);
-        var tmp = Path.Combine(dir, $".{Path.GetFileName(full)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            File.WriteAllText(tmp, content);
-            if (File.Exists(full))
-                File.Replace(tmp, full, null);
-            else
-                File.Move(tmp, full);
-        }
-        finally
-        {
-            try { File.Delete(tmp); }
-            catch (IOException) { }
-        }
+        // 原子落盘统一走 Core/IO/AtomicFile（原本类自带一份 public static 实现，
+        // 已删除——工具方法不该挂在管理器上，跨层调用方改用 AtomicFile）
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(profile, JsonOptions));
     }
 
     private bool DeleteProfileFile(string id, string kind)

@@ -99,6 +99,36 @@ public static class MaskTemplateMatcher
     }
 
     /// <summary>
+    /// 不转正：按轮廓轴对齐包围盒外扩裁剪。WarpAngleDeg=0，匹配须把示教模板转到现场粗角。
+    /// 匹配峰用 <see cref="MapUprightToSource"/> 映回原图（此时为平移）。
+    /// </summary>
+    public static UprightCropResult AxisAlignedCrop(
+        Mat src, IReadOnlyList<Point2f> contour, double marginRatio)
+    {
+        if (contour.Count < 1)
+            throw new InvalidOperationException("转正裁剪区域为空（目标超出图像边界）");
+        var pts = contour as Point2f[] ?? [.. contour];
+        var box = Cv2.BoundingRect(pts);
+        var mx = (int)Math.Ceiling(box.Width * marginRatio);
+        var my = (int)Math.Ceiling(box.Height * marginRatio);
+        var x = box.X - mx;
+        var y = box.Y - my;
+        var cropW = box.Width + 2 * mx;
+        var cropH = box.Height + 2 * my;
+
+        x = Math.Clamp(x, 0, Math.Max(0, src.Width - 1));
+        y = Math.Clamp(y, 0, Math.Max(0, src.Height - 1));
+        cropW = Math.Min(cropW, src.Width - x);
+        cropH = Math.Min(cropH, src.Height - y);
+        if (cropW <= 0 || cropH <= 0)
+            throw new InvalidOperationException("转正裁剪区域为空（目标超出图像边界）");
+
+        var center = new Point2f((float)(x + cropW / 2.0), (float)(y + cropH / 2.0));
+        return new UprightCropResult(
+            src[new Rect(x, y, cropW, cropH)].Clone(), 0, center, x, y);
+    }
+
+    /// <summary>
     /// 把转正裁剪图上的点映回源图坐标：先加裁剪原点（得到旋转整图坐标），再 Invert
     /// 与 UprightCrop 相同的绕矩形中心旋转 -θ。
     /// </summary>
@@ -208,56 +238,60 @@ public static class MaskTemplateMatcher
     }
 
     /// <summary>
-    /// 在转正图上做带旋转搜索的模板匹配：
-    /// 先在 0°±range 与 180°±range 上按 2° 粗搜，再在两支各自峰附近 ±1° 按 1° 精搜，
+    /// 在搜索图上做带旋转搜索的模板匹配：
+    /// 先在 origin±range 与 origin+180°±range 上按 2° 粗搜，再在两支各自峰附近 ±1° 按 1° 精搜，
     /// 用匹配窗（模板大小）的暗区极性消 180° 歧义，抛物线插值得到亚度。
+    /// 转正窗时 origin=0；不转正时 origin=壳体粗角（旋转模板而非画面）。
     /// 不得用整幅转正图做极性：分割裁剪是整机+边距，暗区质心几乎在中心，极性常为 null，
     /// NCC 在近对称件（OSDP 凸起）上两支分数接近，会随机翻面。
+    /// origin 非 0 时关闭极性（匹配窗未转正，上下半区与示教对不上）。
     /// <paramref name="rotated"/> 为配方加载时生成的缓存；缺角仍现场 WarpAffine。
-    /// <paramref name="orientationBranchDeg"/> 非空时只搜该头尾支（测试/调用方强制）。
+    /// <paramref name="orientationBranchDeg"/> 非空时只搜该头尾支（相对 origin，测试/调用方强制）。
     /// <paramref name="useMatchedPolarity"/> 为 false 时按 NCC 最高分选支（边缘图极性不可靠）。
     /// 返回 null = 全部候选低于 minScore。
     /// </summary>
     public static MaskTemplateMatchResult? MatchBest(
         Mat upright, Mat template, double refineRangeDeg, double minScore,
         RotatedTemplateBank? rotated = null, double? orientationBranchDeg = null,
-        bool useMatchedPolarity = true)
+        bool useMatchedPolarity = true, double searchOriginDeg = 0)
     {
         LastDebug = default;
+        if (Math.Abs(NormalizeSigned(searchOriginDeg)) >= 1.0)
+            useMatchedPolarity = false;
         var searchZero = orientationBranchDeg is null
-            || Math.Abs(NormalizeSigned(orientationBranchDeg.Value)) < 90;
+            || Math.Abs(NormalizeSigned(orientationBranchDeg.Value - searchOriginDeg)) < 90;
         var search180 = orientationBranchDeg is null
-            || Math.Abs(NormalizeSigned(orientationBranchDeg.Value)) >= 90;
+            || Math.Abs(NormalizeSigned(orientationBranchDeg.Value - searchOriginDeg)) >= 90;
 
         var rotations = new List<AngleSample>(32);
         if (searchZero)
-            SampleAngleBand(upright, template, rotated, rotations, centerDeg: 0.0,
+            SampleAngleBand(upright, template, rotated, rotations, centerDeg: searchOriginDeg,
                 rangeDeg: refineRangeDeg, step: SearchCoarseStep);
         if (search180)
-            SampleAngleBand(upright, template, rotated, rotations, centerDeg: 180.0,
+            SampleAngleBand(upright, template, rotated, rotations, centerDeg: searchOriginDeg + 180.0,
                 rangeDeg: refineRangeDeg, step: SearchCoarseStep);
         if (rotations.Count == 0)
             return null;
 
         if (searchZero)
         {
-            var coarse0 = BestInBand(rotations, zeroBand: true);
+            var coarse0 = BestInBand(rotations, zeroBand: true, searchOriginDeg);
             if (coarse0 is not null)
                 SampleAngleBand(upright, template, rotated, rotations, coarse0.Value.Deg,
                     SearchFineHalfWidth, SearchFineStep);
         }
         if (search180)
         {
-            var coarse180 = BestInBand(rotations, zeroBand: false);
+            var coarse180 = BestInBand(rotations, zeroBand: false, searchOriginDeg);
             if (coarse180 is not null)
                 SampleAngleBand(upright, template, rotated, rotations, coarse180.Value.Deg,
                     SearchFineHalfWidth, SearchFineStep);
         }
 
-        var best0 = BestInBand(rotations, zeroBand: true);
-        var best180 = BestInBand(rotations, zeroBand: false);
+        var best0 = BestInBand(rotations, zeroBand: true, searchOriginDeg);
+        var best180 = BestInBand(rotations, zeroBand: false, searchOriginDeg);
         var best = PickOrientation(upright, template, best0, best180, useMatchedPolarity);
-        LastDebug = LastDebug with { PeakSharpness = MeasurePeakSharpness(rotations, best) };
+        LastDebug = LastDebug with { PeakSharpness = MeasurePeakSharpness(rotations, best, searchOriginDeg) };
         if (best.Score < minScore)
             return null;
 
@@ -337,17 +371,29 @@ public static class MaskTemplateMatcher
         return mat;
     }
 
-    /// <summary>灰度图 → 三通道 Canny 边缘图（与 Matcher 复用同管线：轻降噪 + 中高阈值）。</summary>
-    public static Mat ToEdgeMap(Mat src)
+    /// <summary>单通道 Canny（形状匹配 / 边缘 NCC 共用）。</summary>
+    public static Mat ToCanny8u(Mat src)
     {
         using var gray = new Mat();
-        Cv2.CvtColor(src, gray, ColorConversionCodes.BGR2GRAY);
+        if (src.Channels() == 1)
+            src.CopyTo(gray);
+        else
+            Cv2.CvtColor(src, gray, src.Channels() == 4
+                ? ColorConversionCodes.BGRA2GRAY
+                : ColorConversionCodes.BGR2GRAY);
         using var blurred = new Mat();
         Cv2.GaussianBlur(gray, blurred, new Size(3, 3), 0);
-        using var edges = new Mat();
+        var edges = new Mat();
         var (low, high) = AdaptiveCannyThresholds(blurred);
         Cv2.Canny(blurred, edges, low, high);
         TightenOrLoosenEdges(blurred, edges, low, high);
+        return edges;
+    }
+
+    /// <summary>灰度图 → 三通道 Canny 边缘图（与 Matcher 复用同管线：轻降噪 + 中高阈值）。</summary>
+    public static Mat ToEdgeMap(Mat src)
+    {
+        using var edges = ToCanny8u(src);
         var bgr = new Mat();
         Cv2.CvtColor(edges, bgr, ColorConversionCodes.GRAY2BGR);
         return bgr;
@@ -467,12 +513,12 @@ public static class MaskTemplateMatcher
         return true;
     }
 
-    private static AngleSample? BestInBand(List<AngleSample> samples, bool zeroBand)
+    private static AngleSample? BestInBand(List<AngleSample> samples, bool zeroBand, double originDeg = 0)
     {
         AngleSample? best = null;
         foreach (var s in samples)
         {
-            var isZero = Math.Abs(NormalizeSigned(s.Deg)) < 90;
+            var isZero = Math.Abs(NormalizeSigned(s.Deg - originDeg)) < 90;
             if (isZero != zeroBand)
                 continue;
             if (best is null || s.Score > best.Value.Score)
@@ -482,16 +528,16 @@ public static class MaskTemplateMatcher
     }
 
     /// <summary>同头尾支上，距主峰 ≥2.5° 的次高峰缺口 (best−second)/best。钝峰趋近 0。</summary>
-    private static double MeasurePeakSharpness(List<AngleSample> samples, AngleSample best)
+    private static double MeasurePeakSharpness(List<AngleSample> samples, AngleSample best, double originDeg = 0)
     {
         if (best.Score <= 1e-9)
             return 0;
-        var bestZero = Math.Abs(NormalizeSigned(best.Deg)) < 90;
+        var bestZero = Math.Abs(NormalizeSigned(best.Deg - originDeg)) < 90;
         var second = 0.0;
         var found = false;
         foreach (var s in samples)
         {
-            var sZero = Math.Abs(NormalizeSigned(s.Deg)) < 90;
+            var sZero = Math.Abs(NormalizeSigned(s.Deg - originDeg)) < 90;
             if (sZero != bestZero)
                 continue;
             if (Math.Abs(NormalizeSigned(s.Deg - best.Deg)) < 2.5)
@@ -597,14 +643,14 @@ public static class MaskTemplateMatcher
     public static MaskTemplateMatchResult? MatchBestHybrid(
         Mat uprightGray, Mat templateGray, double refineRangeDeg, double minScore,
         RotatedTemplateBank? grayRotated = null, RotatedTemplateBank? edgeRotated = null,
-        double? orientationBranchDeg = null)
+        double? orientationBranchDeg = null, double searchOriginDeg = 0)
     {
         using var uprightEdges = ToEdgeMap(uprightGray);
         using var templateEdges = edgeRotated is null ? ToEdgeMap(templateGray) : null;
         var edgeTemplate = edgeRotated?.Source ?? templateEdges!;
         // 边缘图不做暗区极性（Otsu 不可靠）；头尾交给灰度匹配窗
         var edgeMatch = MatchBest(uprightEdges, edgeTemplate, refineRangeDeg, minScore,
-            edgeRotated, orientationBranchDeg, useMatchedPolarity: false);
+            edgeRotated, orientationBranchDeg, useMatchedPolarity: false, searchOriginDeg);
         if (edgeMatch is null)
             return null;
 
@@ -621,8 +667,10 @@ public static class MaskTemplateMatcher
         var a = SingleMatch(uprightGray, templateGray, degA, grayRotated);
         var b = SingleMatch(uprightGray, templateGray, degB, grayRotated);
 
-        var picked = PickHybridByGrayPolarity(uprightGray, templateGray, a, b)
-                     ?? SelectHybridOrientation(edgeMatch, a, b);
+        var picked = Math.Abs(NormalizeSigned(searchOriginDeg)) < 1.0
+            ? PickHybridByGrayPolarity(uprightGray, templateGray, a, b)
+              ?? SelectHybridOrientation(edgeMatch, a, b)
+            : SelectHybridOrientation(edgeMatch, a, b);
         return new MaskTemplateMatchResult(edgeMatch.Score, picked.RotationDeg, picked.CenterInUpright);
     }
 
@@ -714,7 +762,17 @@ public static class MaskTemplateMatcher
     public static (double AngleDeg, Point2d Center, bool Fitted) RefineByLineFit(
         IReadOnlyList<Point2f> contour, double coarseAngleDeg)
     {
-        var ptsSrc = MaskHousing.StripProtrusion(contour);
+        var horizontal = RefineByLineFitBands(contour, coarseAngleDeg, horizontalBands: true);
+        if (horizontal.Fitted)
+            return horizontal;
+        return RefineByLineFitBands(contour, coarseAngleDeg, horizontalBands: false);
+    }
+
+    /// <summary>直线拟合：horizontalBands=true 取上下长边；false 取左右长边（齿列/缺口在上下时更稳）。</summary>
+    internal static (double AngleDeg, Point2d Center, bool Fitted) RefineByLineFitBands(
+        IReadOnlyList<Point2f> contour, double coarseAngleDeg, bool horizontalBands)
+    {
+        var ptsSrc = MaskHousing.CorePoints(contour);
         var cx = ptsSrc.Average(p => p.X);
         var cy = ptsSrc.Average(p => p.Y);
 
@@ -745,15 +803,29 @@ public static class MaskTemplateMatcher
             return (coarseAngleDeg, new(cx, cy), false);
 
         var yCut = yMin + 0.35 * h;
+        var xCut = xMin + 0.35 * w;
         var xLo = xMin + 0.15 * w;
         var xHi = xMax - 0.15 * w;
-        var top = pts.Where(p => p.Y <= yCut && p.X >= xLo && p.X <= xHi).ToArray();
-        var bottom = pts.Where(p => p.Y >= yMax - 0.35 * h && p.X >= xLo && p.X <= xHi).ToArray();
-        if (top.Length < 8 || bottom.Length < 8)
+        var yLo = yMin + 0.15 * h;
+        var yHi = yMax - 0.15 * h;
+        Point2f[] bandA;
+        Point2f[] bandB;
+        if (horizontalBands)
+        {
+            bandA = pts.Where(p => p.Y <= yCut && p.X >= xLo && p.X <= xHi).ToArray();
+            bandB = pts.Where(p => p.Y >= yMax - 0.35 * h && p.X >= xLo && p.X <= xHi).ToArray();
+        }
+        else
+        {
+            bandA = pts.Where(p => p.X <= xCut && p.Y >= yLo && p.Y <= yHi).ToArray();
+            bandB = pts.Where(p => p.X >= xMax - 0.35 * w && p.Y >= yLo && p.Y <= yHi).ToArray();
+        }
+
+        if (bandA.Length < 8 || bandB.Length < 8)
             return (coarseAngleDeg, new(cx, cy), false);
 
-        var aTop = FitLineAngleDeg(top);
-        var aBottom = FitLineAngleDeg(bottom);
+        var aTop = FitLineAngleDeg(bandA);
+        var aBottom = FitLineAngleDeg(bandB);
         if (double.IsNaN(aTop) || double.IsNaN(aBottom))
             return (coarseAngleDeg, new(cx, cy), false);
 

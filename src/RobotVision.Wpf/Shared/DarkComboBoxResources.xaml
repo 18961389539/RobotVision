@@ -1,0 +1,20 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- 在 WPF-UI DefaultComboBox 上只改前景底板，保留 Fluent 模板与下拉样式"-->
+  <Style x:Key="DarkComboBoxItem" TargetType="ComboBoxItem"
+         BasedOn="{StaticResource DefaultComboBoxItemStyle}">
+    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+  </Style>
+
+  <Style x:Key="DarkComboBox" TargetType="ComboBox"
+         BasedOn="{StaticResource DefaultComboBoxStyle}">
+    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+    <Setter Property="ItemContainerStyle" Value="{StaticResource DarkComboBoxItem}" />
+  </Style>
+
+  <Style TargetType="ComboBox" BasedOn="{StaticResource DarkComboBox}" />
+
+</ResourceDictionary>

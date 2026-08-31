@@ -82,6 +82,8 @@ public sealed class ResultLogStore : IDisposable
 
     public SqliteResultStore Sqlite => _sqlite;
 
+    public string Folder => _folder;
+
     /// <summary>保存配置后热应用开关与保留天数（目录/库路径启动时锚定，不热切换）。</summary>
     public void ApplyConfig(ResultLogConfig cfg)
     {

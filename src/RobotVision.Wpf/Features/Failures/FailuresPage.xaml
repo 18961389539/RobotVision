@@ -20,7 +20,7 @@
             <ivc:ImageViewer ImageSource="{Binding PreviewImage}" />
         </Border>
 
-        <!-- 选中项元数据角标（左上角） -->
+        <!-- 选中项元数据角标（左上角）-->
         <Border Background="#66000000" CornerRadius="3" Padding="8,4" Margin="10"
                 HorizontalAlignment="Left" VerticalAlignment="Top" Panel.ZIndex="30"
                 Visibility="{Binding Selected, Converter={StaticResource NullToCollapsedConverter}}">
@@ -34,7 +34,7 @@
                 Panel.ZIndex="30"
                 Command="{Binding ToggleListPanelCommand}">
             <Button.Style>
-                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsListPanelVisible}" Value="True">
                             <Setter Property="Visibility" Value="Collapsed" />
@@ -44,7 +44,7 @@
             </Button.Style>
         </Button>
 
-        <!-- 左：失败现场列表浮动面板（可折叠） -->
+        <!-- 左：失败现场列表浮动面板（可折叠"-->
         <Border Width="300" HorizontalAlignment="Left" VerticalAlignment="Top"
                 MaxHeight="640" Margin="12" Panel.ZIndex="20"
                 Background="#F01E2836"
@@ -52,6 +52,13 @@
                 BorderThickness="1" CornerRadius="8"
                 Visibility="{Binding IsListPanelVisible,
                     Converter={StaticResource BoolToVisibilityConverter}}">
+            <Border.Resources>
+                <ResourceDictionary>
+                    <ResourceDictionary.MergedDictionaries>
+                        <ResourceDictionary Source="/Shared/OverlayPanelResources.xaml" />
+                    </ResourceDictionary.MergedDictionaries>
+                </ResourceDictionary>
+            </Border.Resources>
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -67,7 +74,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <ui:TextBlock Text="失败现场" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                    <ui:TextBlock Text="失败现场" FontTypography="BodyStrong" Foreground="{DynamicResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
                     <ui:Button Grid.Column="1" Content="刷新" Padding="8,3" FontSize="11"
                                ToolTip="F5" Command="{Binding RefreshCommand}" />
                     <Button Grid.Column="2" Content="收起" Padding="10,4" FontSize="12" Margin="6,0,0,0"
@@ -76,9 +83,9 @@
 
                 <TextBlock Grid.Row="1" Text="{Binding Message}" Margin="10,0,10,6"
                            FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding Message}"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                           Foreground="#FFD0D8E4" />
 
-                <!-- 筛选：按配方 / 错误码 -->
+                <!-- 筛选：按配方 / 错误"-->
                 <Grid Grid.Row="2" Margin="10,0,10,8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -90,7 +97,7 @@
                     <ComboBox Grid.Column="1" ItemsSource="{Binding RecipeFilters}"
                               SelectedItem="{Binding RecipeFilter}" Margin="6,0,8,0"
                               FontSize="11" />
-                    <TextBlock Grid.Column="2" Text="错误码" VerticalAlignment="Center" FontSize="11" />
+                    <TextBlock Grid.Column="2" Text="错误" VerticalAlignment="Center" FontSize="11" />
                     <ComboBox Grid.Column="3" ItemsSource="{Binding ErrorCodeFilters}"
                               SelectedItem="{Binding ErrorCodeFilter}" Margin="6,0,0,0"
                               FontSize="11" />
@@ -111,7 +118,7 @@
                                     <Image Source="{Binding Thumb}" Stretch="Uniform" Height="82" />
                                 </Border>
                                 <TextBlock Text="{Binding DisplayName}" FontSize="10"
-                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           Foreground="#FFB8C0CC"
                                            TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
                             </StackPanel>
                         </DataTemplate>
@@ -121,7 +128,7 @@
                 <StackPanel Grid.Row="4" Margin="10,4,10,10">
                     <TextBlock Text="{Binding FilterSummary}" FontSize="10" TextWrapping="Wrap"
                                Margin="0,0,0,6"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                               Foreground="#FFB8C0CC" />
                     <WrapPanel Margin="0,0,0,6">
                         <ui:Button Content="打开目录" Padding="8,4" FontSize="11"
                                    Command="{Binding OpenFolderCommand}" />

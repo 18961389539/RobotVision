@@ -185,14 +185,21 @@ namespace ImageViewer.Controls
         private void OnCoronalClick(object sender, RoutedEventArgs e) => SetMprMode(AdaptiveDisplayMode.Coronal);
         private void OnSagittalClick(object sender, RoutedEventArgs e) => SetMprMode(AdaptiveDisplayMode.Sagittal);
 
-        private async void OnQualityClick(object sender, RoutedEventArgs e)
+        private void OnQualityClick(object sender, RoutedEventArgs e)
         {
+            // 不用 async void：事件处理器保持 void，async 主体挪到返回 Task 的方法
+            // （内部 try/catch/finally 已全捕获，异常不会再直冲同步上下文且不可观察）。
             if (_volume == null)
             {
                 statusText.Text = "Load a volume before quality analysis.";
                 return;
             }
 
+            _ = RunQualityAnalysisAsync();
+        }
+
+        private async Task RunQualityAnalysisAsync()
+        {
             // 修复：BeginOperation 返回本次操作专属取消源，EndOperation 用它判断是否仍是当前
             // 操作，避免新操作期间旧操作结束把新取消源误 Dispose。
             CancellationTokenSource operationCancellation = BeginOperation("Analyzing volume quality...");

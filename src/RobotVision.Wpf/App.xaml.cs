@@ -23,6 +23,7 @@ using RobotVision.WpfHost.Features.Models;
 using RobotVision.WpfHost.Features.Monitor;
 using RobotVision.WpfHost.Features.Recipe;
 using RobotVision.WpfHost.Features.Settings;
+using RobotVision.WpfHost.Shared;
 using SystemPage = RobotVision.WpfHost.Features.SystemInfo.SystemPage;
 using SystemViewModel = RobotVision.WpfHost.Features.SystemInfo.SystemViewModel;
 
@@ -43,10 +44,11 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // 注册强调色资源（SystemAccentColorPrimary 等）：ThemesDictionary 只含主题字典，
-        // Badge 等控件模板以 StaticResource 引用强调色，未 Apply 时导航到相关页面会抛 XamlParseException
-        Wpf.Ui.Appearance.ApplicationThemeManager.Apply(
-            Wpf.Ui.Appearance.ApplicationTheme.Dark);
+        var bootstrapCfg = new ConfigurationBuilder()
+            .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true)
+            .Build()
+            .Get<AppConfig>() ?? new AppConfig();
+        AppThemeManager.Apply(bootstrapCfg.UiTheme);
 
         // 离屏快照模式：渲染主窗口到 PNG 后退出（不启动 TCP，避免与运行实例抢端口）
         if (e.Args.Contains("--snapshot", StringComparer.OrdinalIgnoreCase))
@@ -92,6 +94,7 @@ public partial class App : Application
             Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true, reloadOnChange: false);
 
         var cfg = builder.Configuration.Get<AppConfig>() ?? new AppConfig();
+        DataRootBinder.Apply(cfg);
         builder.Logging.AddRobotVisionFileLogging(cfg);
         builder.Services.AddRobotVision(cfg);
         builder.Services.AddHostedService<TcpHostedService>();
@@ -203,6 +206,7 @@ public partial class App : Application
             Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true, reloadOnChange: false);
         var cfg = builder.Configuration.Get<AppConfig>() ?? new AppConfig();
         cfg.Chat.AutoStart = false;
+        DataRootBinder.Apply(cfg);
         builder.Services.AddRobotVision(cfg);
         builder.Services.AddSingleton<LogSink>();
         builder.Services.AddSingleton<ILoggerProvider>(sp => sp.GetRequiredService<LogSink>());
