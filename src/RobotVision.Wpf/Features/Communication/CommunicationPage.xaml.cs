@@ -1,16 +1,14 @@
-using Microsoft.Extensions.DependencyInjection;
 using System.Windows.Controls;
-using RobotVision.WpfHost;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Communication;
 
 public partial class CommunicationPage : Page
 {
-    public CommunicationPage()
+    public CommunicationPage(CommunicationViewModel viewModel)
     {
+        ViewModelPageLifetime.Attach(this, viewModel, onUnloading: () => viewModel.StopTimer());
         InitializeComponent();
-        DataContext = App.Services.GetRequiredService(typeof(CommunicationViewModel));
-        Loaded += (_, _) => (DataContext as CommunicationViewModel)?.StartTimer();
-        Unloaded += (_, _) => (DataContext as CommunicationViewModel)?.StopTimer();
+        Loaded += (_, _) => viewModel.StartTimer();
     }
 }

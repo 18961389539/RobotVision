@@ -4,7 +4,6 @@ using RobotVision.Core.Recipe;
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
 /// <summary>
-/// 按配方的 AngleMode 创建对应策略（策略无状态，实例复用）。
 /// 从 <see cref="AngleStrategyTypeRegistry"/> 查询工厂创建——新增角度模式 =
 /// 实现 IAngleStrategyFactory 并 Register，本类与分支代码不再需要改动。
 /// </summary>

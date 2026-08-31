@@ -145,7 +145,7 @@ public sealed class FailureImageStore
         catch (Exception ex)
         {
             // 克隆/入队阶段异常同样尽力而为
-            _log.LogWarning(ex, "提交失败现场图像留存时出错（不影响产线管线）");
+            FailureImageStoreLog.EnqueueFailed(_log, ex);
         }
     }
 
@@ -174,13 +174,12 @@ public sealed class FailureImageStore
                 if (RetainedCount > 0 || RetainedDays > 0)
                     Cleanup();
 
-                _log.LogInformation("已留存失败现场: {File}（{Code} {Message}）",
-                    png, meta.ErrorCode, meta.Message);
+                FailureImageStoreLog.Saved(_log, png, meta.ErrorCode, meta.Message);
             }
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "留存失败现场图像时出错（不影响产线管线）");
+            FailureImageStoreLog.SaveFailed(_log, ex);
         }
         finally
         {
@@ -241,7 +240,7 @@ public sealed class FailureImageStore
     private static bool TryParseFileTimestamp(string png, out DateTime savedAt)
     {
         var name = Path.GetFileNameWithoutExtension(png);
-        var firstUnderscore = name.IndexOf('_');
+        var firstUnderscore = name.IndexOf('_', StringComparison.Ordinal);
         var secondUnderscore = firstUnderscore > 0 ? name.IndexOf('_', firstUnderscore + 1) : -1;
         if (secondUnderscore <= 0)
         {
@@ -254,7 +253,7 @@ public sealed class FailureImageStore
             System.Globalization.DateTimeStyles.None, out savedAt);
     }
 
-    private bool IsNoTargetFile(string png) =>
+    private static bool IsNoTargetFile(string png) =>
         Path.GetFileName(png).EndsWith("_1007.png", StringComparison.OrdinalIgnoreCase);
 
     private void TryDelete(string path)
@@ -265,7 +264,7 @@ public sealed class FailureImageStore
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "清理失败现场文件出错: {Path}", path);
+            FailureImageStoreLog.CleanupFailed(_log, ex, path);
         }
     }
 

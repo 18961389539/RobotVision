@@ -4,7 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
-using RobotVision.Infrastructure.Cameras;
+using RobotVision.Hosting;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
@@ -12,13 +12,21 @@ namespace RobotVision.WpfHost.Features.Recipe;
 public sealed partial class RecipeRoiEditor : ObservableObject
 {
     private readonly IRecipeWorkspace _host;
-    private readonly CameraManager _cameras;
+    private readonly ICameraRuntime _cameras;
+    private readonly ICalibrationRuntime _calibration;
+    private readonly ILightingRuntime _lighting;
     private string? _roiFrameCameraId;
 
-    internal RecipeRoiEditor(IRecipeWorkspace host, CameraManager cameras)
+    internal RecipeRoiEditor(
+        IRecipeWorkspace host,
+        ICameraRuntime cameras,
+        ICalibrationRuntime calibration,
+        ILightingRuntime lighting)
     {
         _host = host;
         _cameras = cameras;
+        _calibration = calibration;
+        _lighting = lighting;
     }
 
     private RecipeConfig Editor => _host.Editor;
@@ -243,8 +251,10 @@ public sealed partial class RecipeRoiEditor : ObservableObject
 
     /// <summary>
     /// 用当前结果图当框选底板，不再 Grab。文件夹相机会进下一张，看起来像换图。
+    /// <paramref name="keepCurrentPreview"/> 为 true 时不改 PreviewImage，避免切到 ROI 预览页。
     /// </summary>
-    public bool TryAdoptDisplayedImage(ImageSource? source, string? cameraId, string reason)
+    public bool TryAdoptDisplayedImage(
+        ImageSource? source, string? cameraId, string reason, bool keepCurrentPreview = false)
     {
         if (source is not BitmapSource bmp || bmp.PixelWidth < 8 || bmp.PixelHeight < 8)
             return false;
@@ -252,7 +262,7 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         _roiFrameCameraId = string.IsNullOrWhiteSpace(cameraId) ? Editor.CameraId : cameraId;
         RoiRefWidth = bmp.PixelWidth;
         RoiRefHeight = bmp.PixelHeight;
-        if (!ReferenceEquals(PreviewImage, bmp))
+        if (!keepCurrentPreview && !ReferenceEquals(PreviewImage, bmp))
             PreviewImage = bmp;
         EnsureFeatureRoiDrawable();
         _host.Message = $"{reason} {RoiRefWidth}×{RoiRefHeight}px，可直接框选（未重新取图）";
@@ -279,6 +289,16 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         RoiRefHeight = 0;
     }
 
+    /// <summary>换配方时仅在与参考帧相机不一致时清空，避免同相机重复取预览。</summary>
+    public void MaybeClearReferenceFrameForCamera(string? cameraId)
+    {
+        if (_roiFrameCameraId is null)
+            return;
+        if (string.IsNullOrWhiteSpace(cameraId) ||
+            !string.Equals(_roiFrameCameraId, cameraId, StringComparison.OrdinalIgnoreCase))
+            ClearReferenceFrame();
+    }
+
     public void NotifyFromEditor()
     {
         OnPropertyChanged(nameof(UseRoi));
@@ -300,9 +320,15 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         OnPropertyChanged(nameof(TemplateRoiPxHeight));
     }
 
-    [RelayCommand]
+    public void NotifyCanExecuteChanged() => PreviewRoiCommand.NotifyCanExecuteChanged();
+
+    private bool CanPreviewRoi => !_host.IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanPreviewRoi))]
     private async Task PreviewRoiAsync()
     {
+        if (_host.IsBusy)
+            return;
         _host.CommitEdits();
         var cameraId = Editor.CameraId;
         if (string.IsNullOrWhiteSpace(cameraId))
@@ -315,20 +341,16 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         try
         {
             var roi = Editor.Roi;
-            _host.Message = $"ROI 预览取图中 · {cameraId} …";
-            var (frame, width, height) = await Task.Run(() =>
-            {
-                using var grabbed = _cameras.Grab(cameraId);
-                return (Frame: ImageConverter.ToBitmapSource(grabbed.Image),
-                    grabbed.Image.Width, grabbed.Image.Height);
-            });
+            _host.Message = $"ROI 预览取图中 · {cameraId} …（推理图像空间：光源+去畸变/工位映射）";
+            var (frame, width, height) = await RecipeEditorFrame.GrabPreviewAsync(
+                _cameras, _calibration, _lighting, Editor);
             _roiFrameCameraId = cameraId;
             RoiRefWidth = width;
             RoiRefHeight = height;
             PreviewImage = frame;
             _host.Message = roi is null
-                ? $"ROI 预览（{cameraId}）：当前为全图推理，可直接框选区域"
-                : $"ROI 预览（{cameraId}）：({roi.X * width:0},{roi.Y * height:0}) ~ " +
+                ? $"ROI 预览（{cameraId}）{width}×{height}px：当前为全图推理，可直接框选区域"
+                : $"ROI 预览（{cameraId}）{width}×{height}px：({roi.X * width:0},{roi.Y * height:0}) ~ " +
                   $"({(roi.X + roi.Width) * width:0},{(roi.Y + roi.Height) * height:0}) px · " +
                   $"{roi.Width * width:0}×{roi.Height * height:0}px（存储比例 {roi.X:0.000},{roi.Y:0.000},{roi.Width:0.000},{roi.Height:0.000}）";
         }

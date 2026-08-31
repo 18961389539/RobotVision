@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
 using Xunit;
 
@@ -20,19 +20,19 @@ public class FileLoggingTests
             using (var factory = LoggerFactory.Create(b => b.AddRobotVisionFileLogging(folder, retainedDays: 7)))
             {
                 var logger = factory.CreateLogger("RobotVision.Tests");
-                logger.LogInformation("标记消息 {Value}", 42);
-                logger.LogError(new InvalidOperationException("演示异常"), "错误条目");
+                FileLoggingTestsLog.MarkerMessage(logger, 42);
+                FileLoggingTestsLog.ErrorEntry(logger, new InvalidOperationException("演示异常"));
             } // dispose → 刷新并关闭文件
 
             var files = Directory.GetFiles(folder, "*.log");
             Assert.Single(files);
 
             var content = File.ReadAllText(files[0]);
-            Assert.Contains("标记消息 42", content);
-            Assert.Contains("错误条目", content);
-            Assert.Contains("RobotVision.Tests", content);
-            Assert.Contains("InvalidOperationException", content);
-            Assert.Contains("演示异常", content);
+            Assert.Contains("标记消息 42", content, StringComparison.Ordinal);
+            Assert.Contains("错误条目", content, StringComparison.Ordinal);
+            Assert.Contains("RobotVision.Tests", content, StringComparison.Ordinal);
+            Assert.Contains("InvalidOperationException", content, StringComparison.Ordinal);
+            Assert.Contains("演示异常", content, StringComparison.Ordinal);
         }
         finally
         {
@@ -53,7 +53,7 @@ public class FileLoggingTests
             Parallel.For(0, 20, i =>
             {
                 var logger = factory.CreateLogger($"Worker-{i}");
-                logger.LogInformation("并发条目 {Index}", i);
+                FileLoggingTestsLog.ConcurrentEntry(logger, i);
             });
 
             factory.Dispose();
@@ -62,7 +62,7 @@ public class FileLoggingTests
             Assert.Single(files);
             var content = File.ReadAllText(files[0]);
             for (var i = 0; i < 20; i++)
-                Assert.Contains($"并发条目 {i}", content);
+                Assert.Contains($"并发条目 {i}", content, StringComparison.Ordinal);
         }
         finally
         {

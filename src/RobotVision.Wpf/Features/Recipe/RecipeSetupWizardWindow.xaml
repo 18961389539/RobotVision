@@ -3,16 +3,18 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:recipe="clr-namespace:RobotVision.WpfHost.Features.Recipe"
-        Title="配方向导"
-        Width="980" Height="680"
-        MinWidth="840" MinHeight="560"
+        xmlns:ivc="clr-namespace:ImageViewer.Controls;assembly=ImageViewerControl"
+        xmlns:vm="clr-namespace:RobotVision.WpfHost.Shared"
+        Title="配方配置工作台"
+        Width="1040" Height="720"
+        MinWidth="900" MinHeight="600"
         WindowStartupLocation="CenterOwner"
         ExtendsContentIntoTitleBar="True">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
     </Window.Resources>
     <DockPanel>
-        <ui:TitleBar DockPanel.Dock="Top" Title="配方向导" />
+        <ui:TitleBar DockPanel.Dock="Top" Title="配方配置工作台" />
 
         <Border DockPanel.Dock="Bottom"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
@@ -35,7 +37,8 @@
                            Visibility="{Binding ShowNext, Converter={StaticResource BoolToVisibilityConverter}}" />
                 <ui:Button Grid.Column="3" Content="{Binding ApplyLabel}" Appearance="Primary" Margin="0,0,8,0"
                            Command="{Binding ApplyCommand}"
-                           ToolTip="写入当前编辑器：角度模式、精修、极性、件数、阈值。需要示教时关闭后自动打开示教。不改产线 TRIGGER。" />
+                           Visibility="{Binding ShowApply, Converter={StaticResource BoolToVisibilityConverter}}"
+                           ToolTip="写入当前编辑器：角度模式、精修、极性、件数、阈值与示教结果。不改产线 TRIGGER；保存配方仍须在主页面。" />
                 <ui:Button Grid.Column="4" Content="取消" Command="{Binding CancelCommand}" />
             </Grid>
         </Border>
@@ -95,25 +98,57 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <TextBlock Grid.Row="0" Text="{Binding StepCaption}" Margin="20,16,20,8" Opacity="0.65" FontSize="12" />
-                <Border x:Name="PreviewHost" Grid.Row="1" Margin="20,0,20,8" Height="240" Background="#0A0F16" CornerRadius="4" ClipToBounds="True"
+                <Border x:Name="PreviewHost" Grid.Row="1" Margin="20,0,20,8" MinHeight="280" Height="320" Background="#0A0F16" CornerRadius="4" ClipToBounds="True"
                         SizeChanged="OnPreviewHostSizeChanged"
                         Visibility="{Binding ShowPreviewPane, Converter={StaticResource BoolToVisibilityConverter}}">
                     <Grid>
-                        <Image x:Name="PreviewImage" Source="{Binding Preview}" Stretch="Uniform"
-                               SizeChanged="OnPreviewHostSizeChanged" />
-                        <Rectangle x:Name="FeatureOverlay" Stroke="#FFD700" StrokeThickness="2"
-                                   Fill="#28FFD700" HorizontalAlignment="Left" VerticalAlignment="Top"
-                                   IsHitTestVisible="False" Visibility="Collapsed" />
-                        <TextBlock Text="分析后在此显示取景。点下方训练区域时画面保持这一帧，只换金色特征框。"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   Foreground="#FFB8C0CC" TextWrapping="Wrap" Margin="16" TextAlignment="Center">
+                        <ivc:ImageViewer x:Name="WizardViewer"
+                                         ImageSource="{Binding ViewerImage}"
+                                         ShowEmptyStatePanel="False"
+                                         IsToolbarVisible="False"
+                                         ShowCaliperScores="False"
+                                         ShowInfoPanel="False"
+                                         ShowHistogram="False"
+                                         ShowProfile="False"
+                                         ShowRoiList="False"
+                                         ShowCrosshair="False"
+                                         ShowScaleBar="False"
+                                         Visibility="{Binding ShowInteractiveViewer, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Grid Visibility="{Binding ShowStaticPreview, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <Image x:Name="PreviewImage" Source="{Binding Preview}" Stretch="Uniform"
+                                   SizeChanged="OnPreviewHostSizeChanged" />
+                            <Rectangle x:Name="FeatureOverlay" Stroke="#FFD700" StrokeThickness="2"
+                                       Fill="#28FFD700" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                       IsHitTestVisible="False" Visibility="Collapsed" />
+                            <TextBlock Text="分析后在此显示取景。点下方训练区域时画面保持这一帧，只换金色特征框。"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="#FFB8C0CC" TextWrapping="Wrap" Margin="16" TextAlignment="Center">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Preview}" Value="{x:Null}">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="#FFB8C0CC" TextWrapping="Wrap" Margin="16" TextAlignment="Center"
+                                   Text="点「取一帧」后在此拖拽绿色检测框；示教步骤试触发后显示叠加结果。">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <Setter Property="Visibility" Value="Collapsed" />
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding Preview}" Value="{x:Null}">
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding ShowInteractiveViewer}" Value="True" />
+                                                <Condition Binding="{Binding ViewerImage}" Value="{x:Null}" />
+                                            </MultiDataTrigger.Conditions>
                                             <Setter Property="Visibility" Value="Visible" />
-                                        </DataTrigger>
+                                        </MultiDataTrigger>
                                     </Style.Triggers>
                                 </Style>
                             </TextBlock.Style>
@@ -127,7 +162,10 @@
                     <StackPanel Visibility="{Binding IsWelcome, Converter={StaticResource BoolToVisibilityConverter}}">
                         <ui:TextBlock Text="按场景选配方，而不是只比精修分数" FontTypography="Subtitle" />
                         <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" LineHeight="22"
-                                   Text="这个向导把推荐拆成四步：任务要什么 → 分析当前件长什么样 → 给出角度模式（不只是六种精修）→ 写入编辑器。产线 TRIGGER 仍用你保存后的配方；这里只改编辑器。" />
+                                   Text="一站式工作台把取景、分析、建议、示教与试触发串成六步，不必在向导与配方页之间来回切换。产线 TRIGGER 仍用你保存后的配方；这里只改编辑器。" />
+                        <TextBlock Margin="0,14,0,6" FontWeight="SemiBold" Text="流程" />
+                        <TextBlock TextWrapping="Wrap" LineHeight="20"
+                                   Text="1 欢迎 → 2 任务约束 → 3 取帧与检测 ROI → 4 画面分析 → 5 角度/精修建议 → 6 示教模板与试触发" />
                         <TextBlock Margin="0,14,0,6" FontWeight="SemiBold" Text="会考虑" />
                         <TextBlock TextWrapping="Wrap" LineHeight="20"
                                    Text="• 要不要头尾（有向角）&#x0a;• 能不能示教、外观会不会变&#x0a;• 两个定位特征 / 无模型双 BLOB&#x0a;• 壳体孔槽、凸起、剪影、丝印、近圆&#x0a;• 文件夹整夹赛马：过门率 × 均分 × 角度稳定性（角σ）" />
@@ -160,6 +198,28 @@
                         <TextBlock Margin="0,8,0,0" FontSize="12" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                    Text="期望件数写入「分割+精修」配方。0 = 不检查件数（不会改成 1）。" />
+                    </StackPanel>
+
+                    <!-- 取景与 ROI -->
+                    <StackPanel Visibility="{Binding IsCaptureRoi, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <ui:TextBlock Text="取景与检测 ROI" FontTypography="Subtitle" />
+                        <TextBlock Margin="0,8,0,8" Text="{Binding CameraHint}" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,0,0,12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="{Binding CaptureRoiHint}" />
+                        <WrapPanel Margin="0,0,0,8">
+                            <ui:Button Content="取一帧" Appearance="Primary" Margin="0,0,8,8"
+                                       Command="{Binding GrabFrameCommand}"
+                                       ToolTip="当前相机取一帧，作为 ROI 参考与后续分析画面" />
+                            <ui:Button Content="框选检测区" Margin="0,0,8,8"
+                                       Command="{Binding DrawDetectionRoiCommand}"
+                                       ToolTip="在上方图像拖拽绿色「检测」框；无参考帧时先自动取一帧" />
+                        </WrapPanel>
+                        <CheckBox Content="启用检测 ROI（缺省全图）" Margin="0,0,0,8"
+                                  IsChecked="{Binding Roi.UseRoi}" />
+                        <TextBlock FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="双 BLOB 或全图推理时可不画 ROI。取帧后可直接拖框，或与配方页一样改像素/比例数值（写入共享编辑器）。" />
                     </StackPanel>
 
                     <!-- 分析 -->
@@ -275,7 +335,39 @@
                                    Command="{Binding AnalyzeCommand}" />
                         <TextBlock Margin="0,8,0,0" FontSize="12" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   Text="预览：绿框=检测 ROI，金框=建议特征，绿轮廓=置信最高件，青轮廓=其余件，青线=卡尺探针，品红=拟合边。点「采用并关闭」只写编辑器；需要示教时会接着打开「示教模板」。请再「测试触发」确认，保存后才上产线。" />
+                                   Text="预览：绿框=检测 ROI，金框=建议特征，绿轮廓=置信最高件。下一步进入「示教与验证」在同一窗口完成模板示教与试触发。" />
+                    </StackPanel>
+
+                    <!-- 示教与验证 -->
+                    <StackPanel Visibility="{Binding IsTeachVerify, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <ui:TextBlock Text="示教与验证" FontTypography="Subtitle" />
+                        <TextBlock Margin="0,8,0,12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="{Binding TeachVerifyHint}" />
+                        <WrapPanel Margin="0,0,0,8">
+                            <ui:Button Content="示教模板" Appearance="Primary" Margin="0,0,8,8"
+                                       Command="{Binding Test.TeachTemplateCommand}"
+                                       Visibility="{Binding ShowTeachActions, Converter={StaticResource BoolToVisibilityConverter}}"
+                                       ToolTip="用当前画面（或分割转正）生成模板图" />
+                            <ui:Button Content="框选特征" Margin="0,0,8,8"
+                                       Command="{Binding DrawFeatureRoiCommand}"
+                                       Visibility="{Binding ShowFeatureDraw, Converter={StaticResource BoolToVisibilityConverter}}"
+                                       ToolTip="NCC / 形状匹配：在图上拖橙色特征框" />
+                            <ui:Button Content="试触发" Margin="0,0,8,8"
+                                       Command="{Binding Test.TestTriggerCommand}"
+                                       ToolTip="{Binding TestTriggerButtonToolTip}" />
+                            <ui:Button Content="再取一帧" Margin="0,0,8,8"
+                                       Command="{Binding GrabFrameCommand}"
+                                       ToolTip="重新取图（会清掉试触发叠加，改画面后请再试触发）" />
+                        </WrapPanel>
+                        <TextBlock FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                   Text="{Binding TestTriggerBlockHint, Mode=OneWay}"
+                                   Visibility="{Binding ShowTestTriggerBlockHint,
+                                       Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <TextBlock FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="满意后点底部「完成并写入编辑器」关闭向导。配方保存、产线 TRIGGER 仍在主页面操作。" />
                     </StackPanel>
                     </Grid>
                 </StackPanel>

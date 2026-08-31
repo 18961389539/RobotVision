@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
@@ -14,6 +15,10 @@ namespace RobotVision.WpfHost.Shared;
 internal static class MatLabelDrawer
 {
     private const int Pad = 3;
+
+    private static readonly ConcurrentDictionary<LabelCacheKey, RenderedLabel> LabelCache = new();
+
+    private readonly record struct LabelCacheKey(string Text, int FontSizeQ, byte R, byte G, byte B);
 
     public static bool ContainsNonAscii(string text)
     {
@@ -39,18 +44,39 @@ internal static class MatLabelDrawer
 
     private static RenderedLabel RenderLabel(string text, float fontSizePx, Color foreground)
     {
+        var key = new LabelCacheKey(
+            text,
+            QuantizeFontSize(fontSizePx),
+            foreground.R,
+            foreground.G,
+            foreground.B);
+        if (LabelCache.TryGetValue(key, out var cached))
+            return cached;
+
+        var rendered = WpfOffscreenRender.Invoke(() => RenderLabelCore(text, fontSizePx, foreground));
+        LabelCache[key] = rendered;
+        return rendered;
+    }
+
+    private static int QuantizeFontSize(float fontSizePx) =>
+        (int)Math.Round(fontSizePx * 4, MidpointRounding.AwayFromZero);
+
+    private static RenderedLabel RenderLabelCore(string text, float fontSizePx, Color foreground)
+    {
         var typeface = new Typeface(
             new FontFamily("Microsoft YaHei UI, Segoe UI"),
             FontStyles.Normal,
             FontWeights.Bold,
             FontStretches.Normal);
+        var foregroundBrush = new SolidColorBrush(foreground);
+        foregroundBrush.Freeze();
         var formatted = new FormattedText(
             text,
             CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
             typeface,
             fontSizePx,
-            new SolidColorBrush(foreground),
+            foregroundBrush,
             1.0);
 
         var w = (int)Math.Ceiling(formatted.Width) + Pad * 2;
@@ -59,15 +85,18 @@ internal static class MatLabelDrawer
         h = Math.Max(1, h);
         var baselineY = Pad + (int)Math.Ceiling(formatted.Baseline);
 
+        var backgroundBrush = new SolidColorBrush(Color.FromRgb(24, 24, 24));
+        backgroundBrush.Freeze();
         var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
         var dv = new DrawingVisual();
         using (var dc = dv.RenderOpen())
         {
-            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(24, 24, 24)), null, new WpfRect(0, 0, w, h));
+            dc.DrawRectangle(backgroundBrush, null, new WpfRect(0, 0, w, h));
             dc.DrawText(formatted, new WpfPoint(Pad, Pad));
         }
 
         rtb.Render(dv);
+        rtb.Freeze();
         var stride = w * 4;
         var pixels = new byte[stride * h];
         rtb.CopyPixels(pixels, stride, 0);

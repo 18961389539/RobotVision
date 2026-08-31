@@ -1,11 +1,12 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
-using System.Windows;
 using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Failures;
 
@@ -17,11 +18,13 @@ public sealed record FailureItem(
 /// 失败现场画廊：浏览留存 PNG 与元数据，支持删除/清空（文件 OnLoad 解码，不锁定磁盘）。
 /// 支持按配方/错误码筛选（选项从当前留存的元数据中动态收集）。
 /// </summary>
-public partial class FailuresViewModel : ObservableObject
+public partial class FailuresViewModel : ObservableObject, IDisposable
 {
     private const string AllFilter = "全部";
 
     private readonly FailureImageStore _store;
+    private readonly IDialogService _dialogs;
+    private readonly ILogger<FailuresViewModel> _log;
     private readonly List<FailureItem> _allItems = [];
 
     public ObservableCollection<FailureItem> Items { get; } = [];
@@ -59,11 +62,15 @@ public partial class FailuresViewModel : ObservableObject
     public string DeleteAllButtonText =>
         RecipeFilter != AllFilter || ErrorCodeFilter != AllFilter ? "清空筛选结果" : "清空全部";
 
-    public FailuresViewModel(FailureImageStore store)
+    public FailuresViewModel(FailureImageStore store, IDialogService dialogs, ILogger<FailuresViewModel> log)
     {
         _store = store;
-        _ = RefreshAsync();
+        _dialogs = dialogs;
+        _log = log;
+        ScheduleRefresh();
     }
+
+    public void ScheduleRefresh() => UiFireAndForget.Run(RefreshAsync, _log);
 
     [RelayCommand]
     public async Task RefreshAsync()
@@ -173,13 +180,12 @@ public partial class FailuresViewModel : ObservableObject
         if (Selected is null)
             return;
 
-        if (MessageBox.Show($"删除 {Selected.DisplayName}？（不可恢复）", "删除失败现场",
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (!_dialogs.ConfirmYesNo($"删除 {Selected.DisplayName}？（不可恢复）", "删除失败现场"))
             return;
 
         TryDelete(Selected.PngPath);
         TryDelete(Selected.JsonPath);
-        _ = RefreshAsync();
+        ScheduleRefresh();
     }
 
     [RelayCommand]
@@ -194,8 +200,7 @@ public partial class FailuresViewModel : ObservableObject
             ? $"将清空当前筛选结果 {Items.Count} 条（其余 {_allItems.Count - Items.Count} 条保留）？（不可恢复）"
             : $"清空全部 {_allItems.Count} 条失败现场？（不可恢复）";
 
-        if (MessageBox.Show(prompt, "清空失败现场",
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (!_dialogs.ConfirmYesNo(prompt, "清空失败现场"))
             return;
 
         foreach (var item in Items)
@@ -203,7 +208,7 @@ public partial class FailuresViewModel : ObservableObject
             TryDelete(item.PngPath);
             TryDelete(item.JsonPath);
         }
-        _ = RefreshAsync();
+        ScheduleRefresh();
     }
 
     [RelayCommand]
@@ -221,7 +226,7 @@ public partial class FailuresViewModel : ObservableObject
         var path = value.PngPath;
         _previewCts?.Cancel();
         var cts = _previewCts = new CancellationTokenSource();
-        _ = LoadPreviewAsync(path, cts);
+        UiFireAndForget.Run(() => LoadPreviewAsync(path, cts), _log);
     }
 
     private async Task LoadPreviewAsync(string path, CancellationTokenSource cts)
@@ -237,8 +242,9 @@ public partial class FailuresViewModel : ObservableObject
         catch (OperationCanceledException)
         {
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            WpfUiLog.FailurePreviewFailed(_log, ex, path);
             if (!cts.IsCancellationRequested)
                 PreviewImage = null;
         }
@@ -315,5 +321,15 @@ public partial class FailuresViewModel : ObservableObject
         try { File.Delete(path); }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    public void Dispose()
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+        _previewCts?.Cancel();
+        _previewCts?.Dispose();
+        _previewCts = null;
     }
 }

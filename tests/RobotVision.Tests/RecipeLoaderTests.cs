@@ -6,6 +6,8 @@ namespace RobotVision.Tests;
 
 public sealed class RecipeLoaderTests : IDisposable
 {
+    private static readonly string[] RenamedRecipeName = ["A01b"];
+
     private readonly string _folder = Path.Combine(Path.GetTempPath(), "rv_recipes_" + Guid.NewGuid().ToString("N"));
 
     public RecipeLoaderTests() => Directory.CreateDirectory(_folder);
@@ -180,7 +182,7 @@ public sealed class RecipeLoaderTests : IDisposable
         };
 
         var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
-        Assert.Contains("stationId", ex.Message);
+        Assert.Contains("stationId", ex.Message, StringComparison.Ordinal);
     }
 
     // ---- 改进项 3：缓存按 LastWriteTime 失效（外部改动可感知） ----
@@ -291,7 +293,7 @@ public sealed class RecipeLoaderTests : IDisposable
         };
 
         var ex = Assert.Throws<InvalidRecipeException>(() => loader.Get("R03"));
-        Assert.Contains("相机未注册", ex.Message);
+        Assert.Contains("相机未注册", ex.Message, StringComparison.Ordinal);
         Assert.Equal(VisionErrorCode.CameraNotRegistered, ex.ErrorCode);
     }
 
@@ -387,7 +389,7 @@ public sealed class RecipeLoaderTests : IDisposable
         recipe.SerialNumber = 1;
 
         var ex = Assert.Throws<InvalidRecipeException>(() => loader.Save(recipe));
-        Assert.Contains("serialNumber 1", ex.Message);
+        Assert.Contains("serialNumber 1", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -421,7 +423,7 @@ public sealed class RecipeLoaderTests : IDisposable
 
         Assert.False(File.Exists(Path.Combine(_folder, "A01.json")));
         Assert.True(File.Exists(Path.Combine(_folder, "A01b.json")));
-        Assert.Equal(new[] { "A01b" }, loader.ListNames());
+        Assert.Equal(RenamedRecipeName, loader.ListNames());
         Assert.Equal("cam", loader.Get("A01b", forceReload: true).CameraId);
     }
 

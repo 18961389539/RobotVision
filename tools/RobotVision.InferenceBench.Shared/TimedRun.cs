@@ -14,7 +14,7 @@ public static class TimedRun
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
     }
 
-    public static double[] Single(Action infer, int warmup, int iters)
+    public static double[] RunOne(Action infer, int warmup, int iters)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(warmup);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(iters);

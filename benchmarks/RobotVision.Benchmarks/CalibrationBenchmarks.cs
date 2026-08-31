@@ -7,7 +7,7 @@ using RobotVision.Infrastructure.Calibration;
 namespace RobotVision.Benchmarks;
 
 [MemoryDiagnoser]
-public class CalibrationBenchmarks
+public class CalibrationBenchmarks : IDisposable
 {
     private CalibrationManager _calibration = new();
     private PixelPose _pixel = new(320.5, 240.5, 30.0, 0.95);
@@ -44,4 +44,6 @@ public class CalibrationBenchmarks
     [Benchmark]
     public RobotPose RotationCenterCompensate_Apply() =>
         RotationCenterCompensation.Apply(new RobotPose(100, 200, 30), 640, 480, 5);
+
+    public void Dispose() => _calibration.Dispose();
 }

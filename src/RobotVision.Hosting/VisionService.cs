@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using RobotVision.Core;
@@ -136,7 +137,7 @@ public sealed class VisionService(
         EnsureHealthRestored();
         _metrics.ResetConsecutive(recipe);
         try { health?.PersistState(_metrics); }
-        catch (Exception ex) { log.LogWarning(ex, "解除联锁后落盘失败"); }
+        catch (Exception ex) { VisionServiceLog.ClearInhibitPersistFailed(log, ex); }
     }
 
     /// <summary>
@@ -224,6 +225,8 @@ public sealed class VisionService(
     private static ProcessCoreOutcome Core(VisionResult result, PreviewRunOutcome? preview = null) =>
         new(result, preview);
 
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "PreviewRunOutcome takes ownership of undistorted VisionImage.")]
     private static PreviewRunOutcome? TryHandoffPreview(
         bool preview, RecipeConfig recipe, ref VisionImage? undistorted, IReadOnlyList<PixelPose> poses)
     {
@@ -234,6 +237,8 @@ public sealed class VisionService(
         return new PreviewRunOutcome(image, poses, RecipeDisplayHints.ForRecipeTest(recipe));
     }
 
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "PreviewRunOutcome in ProcessCoreOutcome is disposed by caller.")]
     private async Task<ProcessCoreOutcome> ProcessCoreInnerAsync(
         string recipeName, TcpClientPose? pose, CancellationToken ct,
         RecipeConfig? overlay = null, bool preview = false)
@@ -382,8 +387,7 @@ public sealed class VisionService(
                 var miss = VisionResult.Fail(recipeName, missCode, missMessage, missElapsed);
                 if (!preview)
                     failureImages.Save(recipeName, undistorted, miss, failureCtx);
-                log.LogInformation("配方 {Recipe}: {Message}，总耗时 {Elapsed:0}ms（{Stages}）",
-                    recipeName, missMessage, missElapsed, Stages(missElapsed));
+                VisionServiceLog.ProcessMessage(log, recipeName, missMessage, missElapsed, Stages(missElapsed));
                 return Core(miss, TryHandoffPreview(preview, recipe, ref undistorted, pixelPoses));
             }
 
@@ -406,9 +410,7 @@ public sealed class VisionService(
             var confidences = usablePoses.Select(p => p.Score).ToList();
 
             var elapsed = stopwatch.Elapsed.TotalMilliseconds;
-            log.LogInformation("配方 {Recipe}: 检出 {Count} 个目标，总耗时 {Elapsed:0}ms（{Stages}）",
-                recipeName, robotPoses.Count, elapsed,
-                Stages(elapsed));
+            VisionServiceLog.ProcessDetections(log, recipeName, robotPoses.Count, elapsed, Stages(elapsed));
 
             var success = VisionResult.Success(recipeName, robotPoses,
                 stopwatch.Elapsed.TotalMilliseconds, confidences);
@@ -446,7 +448,7 @@ public sealed class VisionService(
         }
         catch (Exception ex)
         {
-            log.LogError(ex, "配方 {Recipe} 处理异常", recipeName);
+            VisionServiceLog.ProcessFailed(log, ex, recipeName);
             var fail = VisionResult.Fail(recipeName, VisionErrorCode.InternalError, ex.Message,
                 stopwatch.Elapsed.TotalMilliseconds);
             if (undistorted is not null && !preview)
@@ -541,7 +543,7 @@ public sealed class VisionService(
             }
             catch (Exception ex)
             {
-                log.LogWarning(ex, "快照克隆失败");
+                VisionServiceLog.SnapshotCloneFailed(log, ex);
                 continue;
             }
 
@@ -554,7 +556,7 @@ public sealed class VisionService(
                 }
                 catch (Exception ex)
                 {
-                    log.LogWarning(ex, "FrameProcessed 订阅者处理快照异常");
+                    VisionServiceLog.FrameProcessedHandlerFailed(log, ex);
                     try { snapshot.UndistortedImage.Dispose(); } catch { /* 尽力而为 */ }
                 }
             });

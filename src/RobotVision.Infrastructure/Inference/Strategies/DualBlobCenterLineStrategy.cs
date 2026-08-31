@@ -26,7 +26,7 @@ public sealed class DualBlobCenterLineStrategy : IAngleStrategy
         return ComputeCore(mat, recipe, ct);
     }
 
-    private List<PixelPose> ComputeCore(Mat undistorted, RecipeConfig recipe, CancellationToken ct)
+    private static List<PixelPose> ComputeCore(Mat undistorted, RecipeConfig recipe, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var opt = recipe.Blob;

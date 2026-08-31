@@ -25,7 +25,7 @@ public sealed class ChatAgentTests
             events.Add(ev);
 
         Assert.Contains(events, e => e is ChatToolNotice n && n.Name == "station_overview");
-        Assert.Contains(events, e => e is ChatTextDelta t && t.Text.Contains("2"));
+        Assert.Contains(events, e => e is ChatTextDelta t && t.Text.Contains("2", StringComparison.Ordinal));
         Assert.Equal(2, client.Rounds);
     }
 
@@ -46,7 +46,7 @@ public sealed class ChatAgentTests
             events.Add(ev);
 
         var text = string.Concat(events.OfType<ChatTextDelta>().Select(d => d.Text));
-        Assert.Contains("工具调用上限", text);
+        Assert.Contains("工具调用上限", text, StringComparison.Ordinal);
     }
 
     private sealed class AlwaysToolClient : ILocalChatClient

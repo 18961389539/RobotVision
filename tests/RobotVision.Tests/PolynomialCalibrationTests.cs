@@ -134,7 +134,7 @@ public class PolynomialCalibrationTests
             GridPoint(pixels, pattern, 0, 0), GridPoint(robots, pattern, 0, 0),
             GridPoint(pixels, pattern, 8, 0), wrongRobot2,
             W, H, 2));
-        Assert.Contains("间距与棋盘规格不符", ex.Message);
+        Assert.Contains("间距与棋盘规格不符", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public class PolynomialCalibrationTests
             GridPoint(pixels, pattern, 0, 0), GridPoint(robots, pattern, 0, 0),
             GridPoint(pixels, pattern, 0, 2), GridPoint(robots, pattern, 0, 2),
             W, H, 2));
-        Assert.Contains("同一棋盘行", ex.Message);
+        Assert.Contains("同一棋盘行", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -292,7 +292,7 @@ public class PolynomialCalibrationTests
     {
         var poly = ValidPoly() with { CoefX = [1, 2, 3] }; // 个数不符
         var ex = Assert.Throws<VisionException>(() => CalibrationManager.ValidatePolynomial(poly));
-        Assert.Contains("系数个数非法", ex.Message);
+        Assert.Contains("系数个数非法", ex.Message, StringComparison.Ordinal);
 
         var nan = ValidPoly();
         var bad = nan.CoefX.ToArray();

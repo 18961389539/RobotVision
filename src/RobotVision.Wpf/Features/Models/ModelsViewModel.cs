@@ -1,16 +1,20 @@
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Inference;
+using RobotVision.WpfHost.Shared;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace RobotVision.WpfHost.Features.Models;
 
@@ -27,7 +31,7 @@ public sealed record TaskOption(InferenceTask Value, string Label);
 /// 避免另开引擎抢核显；探测任务类型仍用工厂短加载。
 /// 测试参数（模型/任务/阈值/图片目录）持久化到 exe 旁 model-test.prefs.json。
 /// </summary>
-public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
+public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
     /// <summary>测试参数持久化文件（exe 旁，随部署目录走）。</summary>
     private static readonly string PrefsPath =
@@ -48,8 +52,10 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
 
     public Action? FlushPendingEdits { get; set; }
 
-    private readonly ModelManager _models;
+    private readonly IModelRuntime _models;
     private readonly IInferenceEngineFactory _engineFactory;
+    private readonly IDialogService _dialogs;
+    private readonly ILogger<ModelsViewModel> _log;
 
     public ObservableCollection<ModelFileItem> Files { get; } = [];
 
@@ -67,8 +73,6 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
     [NotifyPropertyChangedFor(nameof(IsDetectionTask))]
     [NotifyPropertyChangedFor(nameof(IsSegmentationTask))]
     [NotifyPropertyChangedFor(nameof(IsPoseTask))]
-    [NotifyPropertyChangedFor(nameof(ShowConfidence))]
-    [NotifyPropertyChangedFor(nameof(ShowIou))]
     [NotifyPropertyChangedFor(nameof(ShowPixelConfidence))]
     [NotifyPropertyChangedFor(nameof(TaskParamsHint))]
     private InferenceTask _selectedTask = InferenceTask.ObjectDetection;
@@ -130,8 +134,6 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
     public bool IsSegmentationTask => SelectedTask == InferenceTask.Segmentation;
     public bool IsPoseTask => SelectedTask == InferenceTask.PoseEstimation;
 
-    public bool ShowConfidence => true;
-    public bool ShowIou => true;
     public bool ShowPixelConfidence => IsSegmentationTask;
 
     public string TaskParamsHint => SelectedTask switch
@@ -169,7 +171,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
     {
         if (value is null)
             return;
-        _ = ApplyAutoTaskForSelectedModelAsync();
+        UiFireAndForget.Run(ApplyAutoTaskForSelectedModelAsync, _log);
     }
 
     /// <summary>选中模型后自动匹配推理任务（已缓存会话 → 文件名启发式 → ONNX 元数据）。</summary>
@@ -249,10 +251,16 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
         }
     }
 
-    public ModelsViewModel(ModelManager models, IInferenceEngineFactory engineFactory)
+    public ModelsViewModel(
+        IModelRuntime models,
+        IInferenceEngineFactory engineFactory,
+        IDialogService dialogs,
+        ILogger<ModelsViewModel> log)
     {
         _models = models;
         _engineFactory = engineFactory;
+        _dialogs = dialogs;
+        _log = log;
         LoadPrefs();
         Refresh();
         // 恢复上次选择的模型（不存在时保持 Refresh 选中的第一个）
@@ -290,15 +298,13 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
                 Files.Add(new ModelFileItem(
                     file.Name,
                     $"{file.Length / 1024.0 / 1024.0:0.0} MB",
-                    file.LastWriteTime.ToString("yyyy-MM-dd HH:mm"),
+                    file.LastWriteTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
                     loadedText,
                     loaded.ContainsKey(file.FullName)));
             }
         }
 
-        SelectedFile = string.IsNullOrWhiteSpace(selectedName)
-            ? Files.FirstOrDefault()
-            : Files.FirstOrDefault(f => string.Equals(f.Name, selectedName, StringComparison.OrdinalIgnoreCase));
+        SelectedFile = ListSelection.Restore(Files, selectedName, f => f.Name);
 
         // 同一文件被多个任务打开时各占一份会话内存（缓存键含任务），提示用户代价
         var multiTask = groups.Count(g => g.Count() > 1);
@@ -341,20 +347,18 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
     [RelayCommand]
     private void BrowseTestImageFolder()
     {
-        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择测试图片目录" };
         var resolved = ResolveTestFolder();
-        if (Directory.Exists(resolved))
-            dialog.InitialDirectory = resolved;
-        else if (Directory.Exists(_models.ModelsFolder))
-            dialog.InitialDirectory = _models.ModelsFolder;
-        if (dialog.ShowDialog() == true)
-        {
-            TestImageFolder = dialog.FolderName;
-            _folderResults = [];
-            FolderResultIndex = 0;
-            ResultImage = null;
-            SavePrefs();
-        }
+        string? initial = Directory.Exists(resolved) ? resolved
+            : Directory.Exists(_models.ModelsFolder) ? _models.ModelsFolder
+            : null;
+        var picked = _dialogs.PickFolder("选择测试图片目录", initial);
+        if (picked is null)
+            return;
+        TestImageFolder = picked;
+        _folderResults = [];
+        FolderResultIndex = 0;
+        ResultImage = null;
+        SavePrefs();
     }
 
     [RelayCommand(CanExecute = nameof(CanShowPrevFolderResult))]
@@ -563,7 +567,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
     private string ResolveTestFolder() =>
         AppConfigExtensions.ResolveFolder(TestImageFolder.Trim());
 
-    private static IReadOnlyList<string> ListTestImages(string folder) =>
+    private static List<string> ListTestImages(string folder) =>
         !Directory.Exists(folder)
             ? []
             : Directory.EnumerateFiles(folder)
@@ -571,7 +575,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-    private static ImageSource? TryLoadPreviewImage(string path)
+    private static BitmapSource? TryLoadPreviewImage(string path)
     {
         try
         {
@@ -643,4 +647,14 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits
         InferenceTask.PoseEstimation => "关键点",
         _ => task.ToString(),
     };
+
+    public void Dispose()
+    {
+        _testCts?.Cancel();
+        _testCts?.Dispose();
+        _testCts = null;
+        _taskDetectCts?.Cancel();
+        _taskDetectCts?.Dispose();
+        _taskDetectCts = null;
+    }
 }

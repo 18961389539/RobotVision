@@ -15,7 +15,7 @@ public class AnalysisViewModelTests
     {
         using var dir = new TestInfra.TempDir("rv_analysis_empty");
         using var db = OpenDb(dir);
-        var vm = new AnalysisViewModel(db);
+        var vm = new AnalysisViewModel(db, TestLog.Null<AnalysisViewModel>());
         vm.Range = AnalysisViewModel.RangeAll;
         await vm.RefreshAsync();
 
@@ -36,7 +36,7 @@ public class AnalysisViewModelTests
         Insert(db, "A01", now.AddSeconds(1), 30, 40, 2.5, 0);
         Insert(db, "B02", now.AddSeconds(2), null, null, null, 1007);
 
-        var vm = new AnalysisViewModel(db) { Clock = () => now.AddMinutes(1) };
+        var vm = new AnalysisViewModel(db, TestLog.Null<AnalysisViewModel>()) { Clock = () => now.AddMinutes(1) };
         vm.Range = AnalysisViewModel.RangeAll;
         await vm.RefreshAsync();
 
@@ -78,7 +78,7 @@ public class AnalysisViewModelTests
         Insert(db, "A01", now, 1, 1, 0, 0);
         Insert(db, "B02", now.AddSeconds(1), null, null, null, 1007);
 
-        var vm = new AnalysisViewModel(db) { Clock = () => now.AddMinutes(1) };
+        var vm = new AnalysisViewModel(db, TestLog.Null<AnalysisViewModel>()) { Clock = () => now.AddMinutes(1) };
         vm.Range = AnalysisViewModel.RangeAll;
         await vm.RefreshAsync();
         vm.RecipeFilter = "B02";
@@ -98,7 +98,7 @@ public class AnalysisViewModelTests
         Insert(db, "A01", now, 1, 1, 0, 0);
         Insert(db, "A01", now.AddSeconds(1), null, null, null, 1007);
 
-        var vm = new AnalysisViewModel(db) { Clock = () => now.AddMinutes(1) };
+        var vm = new AnalysisViewModel(db, TestLog.Null<AnalysisViewModel>()) { Clock = () => now.AddMinutes(1) };
         vm.Range = AnalysisViewModel.RangeAll;
         vm.Outcome = AnalysisViewModel.OutcomeFail;
         await vm.RefreshAsync();
@@ -117,7 +117,7 @@ public class AnalysisViewModelTests
         Insert(db, "A01", now, 1, 1, 0, 0, station: "S1");
         Insert(db, "A01", now.AddSeconds(1), 2, 2, 1, 0, station: "S2");
 
-        var vm = new AnalysisViewModel(db) { Clock = () => now.AddMinutes(1) };
+        var vm = new AnalysisViewModel(db, TestLog.Null<AnalysisViewModel>()) { Clock = () => now.AddMinutes(1) };
         vm.Range = AnalysisViewModel.RangeAll;
         await vm.RefreshAsync();
         vm.StationFilter = "S2";
@@ -137,7 +137,7 @@ public class AnalysisViewModelTests
         Insert(db, "A01", now, null, null, null, 1007, message: "未检出目标");
         Insert(db, "A01", now.AddSeconds(1), null, null, null, 1003, message: "取图失败");
 
-        var vm = new AnalysisViewModel(db) { Clock = () => now.AddMinutes(1) };
+        var vm = new AnalysisViewModel(db, TestLog.Null<AnalysisViewModel>()) { Clock = () => now.AddMinutes(1) };
         vm.Range = AnalysisViewModel.RangeAll;
         vm.Keyword = "取图";
         await vm.RefreshAsync();
@@ -155,7 +155,7 @@ public class AnalysisViewModelTests
         Insert(db, "OLD", today.AddDays(-1), 1, 1, 0, 0);
         Insert(db, "NEW", today, 2, 2, 1, 0);
 
-        var vm = new AnalysisViewModel(db) { Clock = () => today.AddHours(1) };
+        var vm = new AnalysisViewModel(db, TestLog.Null<AnalysisViewModel>()) { Clock = () => today.AddHours(1) };
         vm.Range = AnalysisViewModel.RangeToday;
         await vm.RefreshAsync();
 
@@ -192,7 +192,7 @@ public class AnalysisViewModelTests
             new ResultLogConfig { Folder = db.Folder, Sqlite = false, Jsonl = false },
             NullLogger<ResultLogStore>.Instance,
             db);
-        var vm = new AnalysisViewModel(db, results) { Clock = () => now.AddMinutes(1) };
+        var vm = new AnalysisViewModel(db, TestLog.Null<AnalysisViewModel>(), results) { Clock = () => now.AddMinutes(1) };
         vm.Range = AnalysisViewModel.RangeAll;
         await vm.RefreshAsync();
 
@@ -211,7 +211,7 @@ public class AnalysisViewModelTests
         for (var i = 0; i < 5; i++)
             Insert(db, "A01", now.AddSeconds(20 + i), 1, 1, 0, 0);
 
-        var vm = new AnalysisViewModel(db) { Clock = () => now.AddMinutes(1) };
+        var vm = new AnalysisViewModel(db, TestLog.Null<AnalysisViewModel>()) { Clock = () => now.AddMinutes(1) };
         vm.Range = AnalysisViewModel.RangeAll;
         await vm.RefreshAsync();
 

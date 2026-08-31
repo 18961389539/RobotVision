@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
@@ -74,6 +75,8 @@ public sealed class VirtualCamera : ICamera
         _boardRows = Math.Max(2, height / chessCellPx / 2);
     }
 
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "VisionImage ownership transfers to CameraFrame.")]
     public CameraFrame Grab(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -87,28 +90,38 @@ public sealed class VirtualCamera : ICamera
                 ct.ThrowIfCancellationRequested();
             }
 
-            var frame = _pattern switch
+            Mat? frame = null;
+            try
             {
-                VirtualPattern.Chessboard => DrawChessboard(_frameIndex),
-                VirtualPattern.Shapes => DrawShapes(_frameIndex),
-                _ => DrawBars(),
-            };
-            _frameIndex++;
+                frame = _pattern switch
+                {
+                    VirtualPattern.Chessboard => DrawChessboard(_frameIndex),
+                    VirtualPattern.Shapes => DrawShapes(_frameIndex),
+                    _ => DrawBars(),
+                };
+                _frameIndex++;
 
-            if (_noiseSigma > 0)
-            {
-                // 8U 上的 Randn 会把负值截断为 0（单极性），白/黑条纹会整体饱和；
-                // 经 16S 有符号中间量相加再饱和回 8U，得到真实传感器的双极性噪声。
-                // 中间 Mat 按字段复用，减少每帧大块分配。
-                _noiseBuffer ??= new Mat(frame.Size(), MatType.CV_16SC3);
-                _conversionBuffer ??= new Mat();
-                Cv2.Randn(_noiseBuffer, Scalar.All(0), Scalar.All(_noiseSigma));
-                frame.ConvertTo(_conversionBuffer, MatType.CV_16SC3);
-                Cv2.Add(_conversionBuffer, _noiseBuffer, _conversionBuffer);
-                _conversionBuffer.ConvertTo(frame, MatType.CV_8UC3);
+                if (_noiseSigma > 0)
+                {
+                    // 8U 上的 Randn 会把负值截断为 0（单极性），白/黑条纹会整体饱和；
+                    // 经 16S 有符号中间量相加再饱和回 8U，得到真实传感器的双极性噪声。
+                    // 中间 Mat 按字段复用，减少每帧大块分配。
+                    _noiseBuffer ??= new Mat(frame.Size(), MatType.CV_16SC3);
+                    _conversionBuffer ??= new Mat();
+                    Cv2.Randn(_noiseBuffer, Scalar.All(0), Scalar.All(_noiseSigma));
+                    frame.ConvertTo(_conversionBuffer, MatType.CV_16SC3);
+                    Cv2.Add(_conversionBuffer, _noiseBuffer, _conversionBuffer);
+                    _conversionBuffer.ConvertTo(frame, MatType.CV_8UC3);
+                }
+
+                var image = VisionImageCv.Adopt(frame);
+                frame = null;
+                return new CameraFrame(image, DateTime.UtcNow);
             }
-
-            return new CameraFrame(VisionImageCv.FromMat(frame, ownsMat: true), DateTime.UtcNow);
+            finally
+            {
+                frame?.Dispose();
+            }
         }
     }
 

@@ -6,7 +6,7 @@ namespace ImageViewer.Controls
     internal sealed class ImageViewerViewCommandController
     {
         private readonly IImageViewerViewCommandHost _host;
-        private readonly IReadOnlyDictionary<ImageViewerViewCommand, Action> _actions;
+        private readonly Dictionary<ImageViewerViewCommand, Action> _actions;
 
         public ImageViewerViewCommandController(IImageViewerViewCommandHost host)
         {

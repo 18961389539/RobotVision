@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
 using ImageViewer.Abstractions;
+using ImageViewer.Logging;
 
 namespace ImageViewer.Plugins
 {
@@ -81,20 +82,21 @@ namespace ImageViewer.Plugins
             IImageViewerLogger? logger)
         {
             var beforeKeys = new HashSet<string>(registry.RegisteredTypeKeys, StringComparer.OrdinalIgnoreCase);
+            var moduleName = moduleType.FullName ?? moduleType.Name;
             try
             {
                 var module = (IRoiPluginModule)Activator.CreateInstance(moduleType)!;
-                logger?.LogInfo(CreateLogMessage(moduleType, "Register", "Started"));
+                ImageViewerLoggerSupport.PluginRegisterStarted(logger, moduleName);
                 module.Register(registry);
                 ApplyPluginFilters(registry, options, beforeKeys);
-                logger?.LogInfo(CreateLogMessage(moduleType, "Register", "Succeeded"));
+                ImageViewerLoggerSupport.PluginRegisterSucceeded(logger, moduleName);
                 return null;
             }
             catch (Exception ex)
             {
                 RemoveNewRegistrations(registry, beforeKeys);
-                logger?.LogError(CreateLogMessage(moduleType, "Register", "Failed"), ex);
-                return new RoiPluginDiscoveryFailure(moduleType.FullName ?? moduleType.Name, ex);
+                ImageViewerLoggerSupport.PluginRegisterFailed(logger, moduleName, ex);
+                return new RoiPluginDiscoveryFailure(moduleName, ex);
             }
         }
 
@@ -106,12 +108,6 @@ namespace ImageViewer.Plugins
             {
                 registry.Unregister(typeKey);
             }
-        }
-
-        private static string CreateLogMessage(Type moduleType, string stage, string result)
-        {
-            string moduleName = moduleType.FullName ?? moduleType.Name;
-            return $"PluginDiscovery module={moduleName} stage={stage} result={result}";
         }
 
         private static void ApplyPluginFilters(RoiPluginRegistry registry, RoiPluginDiscoveryOptions options, HashSet<string>? registeredBeforeModule)
@@ -168,7 +164,7 @@ namespace ImageViewer.Plugins
                 }
                 catch (Exception ex)
                 {
-                    logger?.LogWarning($"Skipping non-.NET assembly '{filePath}': {ex.Message}");
+                    ImageViewerLoggerSupport.PluginAssemblySkipped(logger, filePath, ex.Message);
                     continue;
                 }
 
@@ -197,7 +193,7 @@ namespace ImageViewer.Plugins
                 }
                 catch (Exception ex)
                 {
-                    logger?.LogError($"Failed to load plugin assembly '{filePath}'.", ex);
+                    ImageViewerLoggerSupport.PluginAssemblyLoadFailed(logger, filePath, ex);
                 }
 
                 if (assembly != null)

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
@@ -5,8 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using ImageViewer.Controls;
 using ImageViewer.Models;
-using Microsoft.Extensions.DependencyInjection;
-using RobotVision.WpfHost;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.CalibrationWizard;
 
@@ -18,37 +18,33 @@ namespace RobotVision.WpfHost.Features.CalibrationWizard;
 /// </summary>
 public partial class CalibrationWizardPage : Page
 {
+    private readonly CalibrationWizardViewModel _vm;
     private readonly NotifyCollectionChangedEventHandler _pointsChanged;
-    private CalibrationWizardViewModel? _vm;
 
-    public CalibrationWizardPage()
+    public CalibrationWizardPage(CalibrationWizardViewModel viewModel)
     {
-        InitializeComponent();
-        DataContext = App.Services.GetRequiredService(typeof(CalibrationWizardViewModel));
-        _vm = DataContext as CalibrationWizardViewModel;
-        NumberBoxCommit.Bind(this, _vm);
-
+        _vm = viewModel;
         _pointsChanged = (_, _) => SyncPointMarkers();
+        ViewModelPageLifetime.Attach(this, viewModel, onUnloading: () =>
+        {
+            _vm.Points.CollectionChanged -= _pointsChanged;
+            Viewer.ViewerState.PointAnnotationRois.Clear();
+            _vm.ResetSession();
+        });
+        InitializeComponent();
+        NumberBoxCommit.Bind(this, _vm);
 
         Loaded += (_, _) =>
         {
-            _vm?.RefreshCameras();
-            if (_vm is not null)
-                _vm.Points.CollectionChanged += _pointsChanged;
+            _vm.RefreshCameras();
+            _vm.Points.CollectionChanged += _pointsChanged;
             SyncPointMarkers();
-        };
-        Unloaded += (_, _) =>
-        {
-            if (_vm is not null)
-                _vm.Points.CollectionChanged -= _pointsChanged;
-            Viewer.ViewerState.PointAnnotationRois.Clear();
-            _vm?.ResetSession();
         };
     }
 
     private void OnViewerMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (_vm is null || !_vm.Clickable)
+        if (!_vm.Clickable)
             return;
         if (!Viewer.TryHitImage(e, out var imagePoint))
             return;
@@ -61,15 +57,13 @@ public partial class CalibrationWizardPage : Page
     {
         var rois = Viewer.ViewerState.PointAnnotationRois;
         rois.Clear();
-        if (_vm is null)
-            return;
 
         foreach (var p in _vm.Points)
         {
             rois.Add(new PointAnnotationRoi
             {
                 Position = new Point(p.PixelX, p.PixelY),
-                Label = p.Index.ToString(),
+                Label = p.Index.ToString(CultureInfo.InvariantCulture),
                 StrokeColor = Colors.Orange,
                 IsLocked = true,
             });

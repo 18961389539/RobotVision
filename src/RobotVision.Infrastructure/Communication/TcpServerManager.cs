@@ -18,13 +18,15 @@ namespace RobotVision.Infrastructure.Communication;
 ///   请求: STATUS             应答: OK,ready|busy,队列深度,队列上限,最近耗时ms,连续失败,联锁0|1
 ///   请求: CLEARINHIBIT 或 CLEARINHIBIT,键（键=配方名或序列号）  应答: OK,CLEARED
 ///   出错: ERR,错误码,消息
+/// PlcAlwaysOkMode=true 时写出前将 ERR 改写为 OK（视觉仍执行；见 CoerceAlwaysOkReply）。
+/// 该开关仅会话内生效，启动不从磁盘恢复。
 /// 错误消息契约：业务错误保留 Sanitize 后的可读消息；InternalError 固定为
 /// INTERNAL_ERROR（详情只进日志）；未知命令/缺参数/参数格式错误用固定 ASCII 模板。
 /// 坐标三元组紧跟 OK，PLC 可顺序读取；配方名与目标数在耗时前，便于从尾部校验。
 /// 也为将来"0 目标返回空 OK（count=0）"预留了非破坏性扩展（当前 0 目标仍返回 ERR 1007）。
 /// 分帧：遇到 \n / \r\n / \r 立即切帧；无结束符时静默 TcpLineFramer.QuietMs 后提交。
 /// </summary>
-public sealed class TcpServerManager : IDisposable
+public sealed partial class TcpServerManager : IDisposable
 {
     /// <summary>STATUS 命令状态快照（由组装层从 VisionService 注入）。
     /// ConsecutiveFails / Inhibited 为附加字段（协议向后兼容：旧 PLC 只读前 5 段）。</summary>
@@ -122,6 +124,18 @@ public sealed class TcpServerManager : IDisposable
     /// </summary>
     public IReadOnlyList<string> IpWhitelist { get; set; } = [];
 
+    /// <summary>
+    /// PLC 调试模式：向客户端发送的应答不含 ERR（视觉仍照常执行；产线务必关闭）。
+    /// 触发改写为 <see cref="PlcDebugDefaultX"/> 等默认坐标的单目标 OK。
+    /// </summary>
+    public bool PlcAlwaysOkMode { get; set; }
+
+    public double PlcDebugDefaultX { get; set; }
+
+    public double PlcDebugDefaultY { get; set; }
+
+    public double PlcDebugDefaultRz { get; set; }
+
     /// <summary>监听是否处于运行状态（UI 启停控制用）。</summary>
     public bool IsRunning => _listener is not null;
 
@@ -205,12 +219,12 @@ public sealed class TcpServerManager : IDisposable
             try
             {
                 StartCore();
-                _log.LogInformation("TCP 监听已热重启: {Old} → {New}", oldEnd, $"{newAddress}:{port}");
+                TcpServerManagerLog.HotRestartSucceeded(_log, oldEnd, $"{newAddress}:{port}");
                 return true;
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "监听热重启失败，回滚到 {Old}", oldEnd);
+                TcpServerManagerLog.HotRestartFailed(_log, ex, oldEnd);
                 StopCore();
                 _address = oldAddress;
                 _port = oldPort;
@@ -220,7 +234,7 @@ public sealed class TcpServerManager : IDisposable
                 }
                 catch (Exception rollbackEx)
                 {
-                    _log.LogError(rollbackEx, "回滚监听也失败，服务保持停止状态");
+                    TcpServerManagerLog.HotRestartRollbackFailed(_log, rollbackEx);
                     return false;
                 }
                 return false;
@@ -240,7 +254,7 @@ public sealed class TcpServerManager : IDisposable
         // WPF 在 Dispatcher 上 Host.Start()，此处若直接 AcceptLoopAsync，await 会回到 UI 线程，
         // 收包后的取图/推理会卡死界面。必须丢到线程池且不再捕获 SynchronizationContext。
         StartUncaptured(() => AcceptLoopAsync(listener, _cts.Token));
-        _log.LogInformation("TCP 服务已启动: {Address}:{Port}", _address, _port);
+        TcpServerManagerLog.ServiceStarted(_log, _address, _port);
     }
 
     private static void StartUncaptured(Func<Task> work) => _ = Task.Run(work);
@@ -256,6 +270,8 @@ public sealed class TcpServerManager : IDisposable
         if (listener is not null)
         {
             try { listener.Stop(); }
+            catch { /* 关闭阶段忽略 */ }
+            try { listener.Dispose(); }
             catch { /* 关闭阶段忽略 */ }
         }
 
@@ -308,7 +324,7 @@ public sealed class TcpServerManager : IDisposable
                 if (!IsAddressAllowed(remoteIp))
                 {
                     Interlocked.Increment(ref _rejectedConnections);
-                    _log.LogWarning("连接被拒绝（IP 不在白名单）: {Remote}", RemoteText(client));
+                    TcpServerManagerLog.ConnectionRejectedByWhitelist(_log, RemoteText(client));
                     try { client.Close(); } catch { /* 关闭阶段忽略 */ }
                     continue;
                 }
@@ -316,7 +332,7 @@ public sealed class TcpServerManager : IDisposable
                 if (MaxConnections > 0 && _clients.Count >= MaxConnections)
                 {
                     Interlocked.Increment(ref _rejectedConnections);
-                    _log.LogWarning("连接被拒绝（达到连接上限 {Limit}）: {Remote}", MaxConnections, RemoteText(client));
+                    TcpServerManagerLog.ConnectionRejectedByLimit(_log, MaxConnections, RemoteText(client));
                     try { client.Close(); } catch { /* 关闭阶段忽略 */ }
                     continue;
                 }
@@ -330,8 +346,7 @@ public sealed class TcpServerManager : IDisposable
                 _clients[id] = client;
                 _sessions[id] = session;
                 Interlocked.Increment(ref _totalConnections);
-                _log.LogInformation("客户端 #{Id} 接入: {Remote}，当前连接数 {Count}",
-                    id, session.Remote, _clients.Count);
+                TcpServerManagerLog.ClientConnected(_log, id, session.Remote, _clients.Count);
                 RaiseClientEvent(ClientConnected, session);
                 StartUncaptured(() => HandleClientAsync(id, session, client, ct));
             }
@@ -348,7 +363,7 @@ public sealed class TcpServerManager : IDisposable
         {
             // 意外异常兜底：AcceptLoop 静默死亡会让服务"看似运行实则无监听"，
             // 必须记录关键日志并尝试重启监听
-            _log.LogCritical(ex, "TCP 监听循环异常退出，尝试重启监听");
+            TcpServerManagerLog.AcceptLoopCrashed(_log, ex);
             try { listener.Stop(); }
             catch { /* 关闭阶段忽略 */ }
             if (ct.IsCancellationRequested)
@@ -371,7 +386,7 @@ public sealed class TcpServerManager : IDisposable
                 }
                 catch (Exception restartEx)
                 {
-                    _log.LogCritical(restartEx, "TCP 监听重启失败");
+                    TcpServerManagerLog.AcceptLoopRestartFailed(_log, restartEx);
                 }
             }
         }
@@ -405,30 +420,6 @@ public sealed class TcpServerManager : IDisposable
             }
         }
         return false;
-    }
-
-    /// <summary>
-    /// 白名单条目校验（与 <see cref="IsAddressAllowed"/> 的匹配语义严格一致）：
-    /// 精确 IP（IPv4/IPv6）或以合法 IP 段结尾的 * 通配（如 192.168.* / 192.168.1.*）。
-    /// 拒绝：中间通配（192.168.*.10）、非法 IP（999.1.1.1 / abc）、
-    /// 四段前缀（192.168.1.5*，会按前缀误放行整个网段）。
-    /// </summary>
-    public static bool TryParseWhitelistEntry(string entry)
-    {
-        var e = entry.Trim();
-        if (e.Length == 0)
-            return false;
-
-        if (e.EndsWith('*'))
-        {
-            var prefix = e[..^1].TrimEnd('.');
-            var parts = prefix.Split('.');
-            if (parts.Length is < 1 or > 3)
-                return false;
-            return parts.All(p => byte.TryParse(p, out _));
-        }
-
-        return IPAddress.TryParse(e, out _);
     }
 
     private async Task HandleClientAsync(long id, TcpSession session, TcpClient client, CancellationToken ct)
@@ -529,7 +520,7 @@ public sealed class TcpServerManager : IDisposable
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
-                    _log.LogWarning("客户端 #{Id} 读空闲超时（{Timeout}ms 无数据），断开", id, idleMs);
+                    TcpServerManagerLog.ClientReadIdleTimeout(_log, id, idleMs);
                     break;
                 }
                 catch (IOException)
@@ -546,7 +537,7 @@ public sealed class TcpServerManager : IDisposable
                     var startedAt = DateTime.Now;
                     var bytesIn = Encoding.ASCII.GetByteCount(line) + 1;
                     session.NoteIncoming(line);
-                    _log.LogInformation("客户端 #{Id} 收到: {Line}", id, line);
+                    TcpServerManagerLog.ClientLineReceived(_log, id, line);
                     RaiseRequestStarted(new TcpRequestRecord(
                         startedAt, session.Id, session.Remote, line, "",
                         false, 0, bytesIn, 0));
@@ -554,6 +545,15 @@ public sealed class TcpServerManager : IDisposable
                     var stopwatch = Stopwatch.StartNew();
                     var reply = await ProcessRequestAsync(line, ct).ConfigureAwait(false);
                     stopwatch.Stop();
+
+                    if (PlcAlwaysOkMode && reply.StartsWith("ERR", StringComparison.Ordinal))
+                    {
+                        var coerced = CoerceAlwaysOkReply(
+                            reply, line, stopwatch.Elapsed.TotalMilliseconds,
+                            PlcDebugDefaultX, PlcDebugDefaultY, PlcDebugDefaultRz);
+                        TcpServerManagerLog.PlcDebugModeCoercedReply(_log, reply, coerced, line);
+                        reply = coerced;
+                    }
 
                     // 统计与事件在写出应答前完成：客户端收到应答时记录必然已可见
                     var bytesOut = Encoding.ASCII.GetByteCount(reply) + 1;
@@ -581,28 +581,28 @@ public sealed class TcpServerManager : IDisposable
         catch (OperationCanceledException)
         {
             // 写应答超时（客户端不读、TCP 窗口满）或服务停止：断开，避免挂起占用连接
-            _log.LogInformation("客户端 #{Id} 写应答超时/取消，断开", id);
+            TcpServerManagerLog.ClientWriteTimeout(_log, id);
         }
         catch (Exception ex)
         {
             if (session.ManualClose)
-                _log.LogInformation("客户端 #{Id} 被手动断开", id);
+                TcpServerManagerLog.ClientManuallyDisconnected(_log, id);
             else
-                _log.LogWarning(ex, "客户端 #{Id} 连接异常", id);
+                TcpServerManagerLog.ClientConnectionFault(_log, ex, id);
         }
         finally
         {
             _clients.TryRemove(id, out _);
             _sessions.TryRemove(id, out var removed);
             client.Dispose();
-            _log.LogInformation("客户端 #{Id} 断开，当前连接数 {Count}", id, _clients.Count);
+            TcpServerManagerLog.ClientDisconnected(_log, id, _clients.Count);
             if (removed is not null)
                 RaiseClientEvent(ClientDisconnected, removed);
         }
     }
 
     /// <summary>逐个回调并吞掉订阅方异常，保证通信线程不受 UI 订阅者影响。</summary>
-    private void RaiseClientEvent(Action<TcpClientSnapshot>? handlers, TcpSession session)
+    private static void RaiseClientEvent(Action<TcpClientSnapshot>? handlers, TcpSession session)
     {
         if (handlers is null)
             return;
@@ -653,25 +653,24 @@ public sealed class TcpServerManager : IDisposable
             return "PONG";
 
         if (string.Equals(line, "STATUS", StringComparison.OrdinalIgnoreCase))
-            return FormatStatus(StateProvider?.Invoke());
+            return TcpProtocol.FormatStatus(StateProvider?.Invoke());
 
-        if (IsClearInhibitCommand(line))
+        if (TcpProtocol.IsClearInhibitCommand(line))
         {
             if (ClearInhibitHandler is null)
-                return FormatReply(VisionResult.Fail("", VisionErrorCode.UnknownCommand, "UNKNOWN_COMMAND", 0));
-            var recipe = ParseClearInhibitRecipe(line);
+                return TcpProtocol.FormatReply(VisionResult.Fail("", VisionErrorCode.UnknownCommand, "UNKNOWN_COMMAND", 0));
+            var recipe = TcpProtocol.ParseClearInhibitRecipe(line);
             return ClearInhibitHandler(recipe);
         }
 
         var trimmed = line.Trim();
         if (trimmed.Length == 0)
-            return FormatReply(VisionResult.Fail("", VisionErrorCode.UnknownRecipe, "MISSING_RECIPE", 0));
+            return TcpProtocol.FormatReply(VisionResult.Fail("", VisionErrorCode.UnknownRecipe, "MISSING_RECIPE", 0));
 
-        var (recipeKey, pose, formatError) = ParseTriggerLine(trimmed);
+        var (recipeKey, pose, formatError) = TcpProtocol.ParseTriggerLine(trimmed);
         if (formatError is not null)
             return $"ERR,{(int)VisionErrorCode.InvalidTriggerArgument},{formatError}";
 
-        // 超时只保证尽快回复错误；正在执行的推理不会中断（串行管线由信号量保护）
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeoutMs);
 
@@ -682,155 +681,47 @@ public sealed class TcpServerManager : IDisposable
             work = _handler(recipeKey, pose, timeoutCts.Token);
             var result = await work.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
 
-            // 内部错误详情（异常原文/路径等）只进日志，不上协议线
             if (!result.Ok && result.ErrorCode == VisionErrorCode.InternalError)
-                _log.LogWarning("内部错误应答（详情仅日志）: 配方 {Recipe} · {Message}",
-                    result.RecipeName, result.Message);
+                TcpServerManagerLog.InternalErrorReply(_log, result.RecipeName, result.Message);
 
-            return FormatReply(result);
+            return TcpProtocol.FormatReply(result);
         }
         catch (OperationCanceledException)
         {
-            // 竞态窗口：VisionService 可能已把排队超时(1010)写入结果——此时优先返回该结果，
-            // 避免排队超时被本层统一覆盖成处理超时(1008)
             if (work is { IsCompletedSuccessfully: true })
-                return FormatReply(await work.ConfigureAwait(false));
-            return FormatReply(VisionResult.Fail(
+                return TcpProtocol.FormatReply(await work.ConfigureAwait(false));
+            return TcpProtocol.FormatReply(VisionResult.Fail(
                 recipeKey, VisionErrorCode.Timeout, $"处理超时 >{TimeoutMs}ms", stopwatch.Elapsed.TotalMilliseconds));
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "处理请求异常: {Line}", line);
-            return FormatReply(VisionResult.Fail(
+            TcpServerManagerLog.RequestProcessingFailed(_log, ex, line);
+            return TcpProtocol.FormatReply(VisionResult.Fail(
                 recipeKey, VisionErrorCode.InternalError, ex.Message, stopwatch.Elapsed.TotalMilliseconds));
         }
     }
 
-    /// <summary>
-    /// 触发行解析（纯函数，可单测）：
-    /// - 1 段（配方名或序列号）→ pose = null；
-    /// - 4 段（键,X,Y,RZ）→ 带拍照位姿（OnArm 工位一致性校验用）；
-    /// - 其他段数 / 数值非有限 → formatError（ERR,1013 模板）。
-    /// 序列号允许 <c>#3</c> 前缀；数值按 InvariantCulture 解析。
-    /// </summary>
-    public static (string RecipeKey, TcpClientPose? Pose, string? FormatError) ParseTriggerLine(string line)
-    {
-        line = line.Trim();
-        if (line.Length == 0)
-            return ("", null, "MISSING_RECIPE");
+    public static (string RecipeKey, TcpClientPose? Pose, string? FormatError) ParseTriggerLine(string line) =>
+        TcpProtocol.ParseTriggerLine(line);
 
-        var parts = line.Split(',');
-        if (parts.Length == 1)
-            return (NormalizeTriggerKey(parts[0]), null, null);
-
-        if (parts.Length != 4)
-            return ("", null, "TRIGGER_ARGUMENT_COUNT");
-
-        var key = NormalizeTriggerKey(parts[0]);
-        if (key.Length == 0)
-            return ("", null, "MISSING_RECIPE");
-
-        if (!TryParseFinite(parts[1], out var x) ||
-            !TryParseFinite(parts[2], out var y) ||
-            !TryParseFinite(parts[3], out var rz))
-            return ("", null, "INVALID_POSE_NUMBER");
-
-        return (key, new TcpClientPose(x, y, rz), null);
-    }
-
-    /// <summary>兼容旧测试名；解析触发行首段之后的参数段（已弃用，请用 <see cref="ParseTriggerLine"/>）。</summary>
     [Obsolete("Use ParseTriggerLine")]
-    public static (string RecipeName, TcpClientPose? Pose, string? FormatError) ParseTriggerArgument(string argument)
-    {
-        if (argument.Trim().Length == 0)
-            return ("", null, "MISSING_RECIPE");
-        return ParseTriggerLine(argument);
-    }
+    public static (string RecipeName, TcpClientPose? Pose, string? FormatError) ParseTriggerArgument(string argument) =>
+        TcpProtocol.ParseTriggerArgument(argument);
 
-    private static string NormalizeTriggerKey(string key)
-    {
-        key = key.Trim();
-        if (key.StartsWith('#') && key.Length > 1)
-            key = key[1..].Trim();
-        return key;
-    }
+    public static string FormatStatus(TcpServerState? state) => TcpProtocol.FormatStatus(state);
 
-    /// <summary>有限数字解析（拒绝 NaN/Infinity：会污染位姿比对）。</summary>
-    private static bool TryParseFinite(string text, out double value)
-    {
-        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
-            double.IsFinite(value))
-            return true;
-        value = 0;
-        return false;
-    }
+    public static bool IsClearInhibitCommand(string line) => TcpProtocol.IsClearInhibitCommand(line);
 
-    /// <summary>STATUS 应答：OK,ready|busy,队列深度,队列上限,最近耗时ms,连续失败,联锁(0/1)。
-    /// 前 5 段与历史版本一致；后 2 段为过程能力扩展，旧 PLC 可忽略。</summary>
-    public static string FormatStatus(TcpServerState? state)
-    {
-        if (state is null)
-            return "OK,ready,0,0,0";
-        var inhibited = state.Inhibited != 0 ? 1 : 0;
-        return $"OK,{(state.Ready ? "ready" : "busy")},{state.QueueDepth},{state.MaxQueueDepth},{state.LastElapsedMs:0},{state.ConsecutiveFails},{inhibited}";
-    }
+    public static string? ParseClearInhibitRecipe(string line) => TcpProtocol.ParseClearInhibitRecipe(line);
 
-    /// <summary>
-    /// CLEARINHIBIT 或 CLEARINHIBIT,键（键=配方名或序列号）。
-    /// 前缀粘连（CLEARINHIBITED）不当作本命令，以免误解除全部联锁。
-    /// </summary>
-    public static bool IsClearInhibitCommand(string line)
-    {
-        var trimmed = line.Trim();
-        if (string.Equals(trimmed, "CLEARINHIBIT", StringComparison.OrdinalIgnoreCase))
-            return true;
-        return trimmed.StartsWith("CLEARINHIBIT,", StringComparison.OrdinalIgnoreCase);
-    }
+    public static string FormatReply(VisionResult result) => TcpProtocol.FormatReply(result);
 
-    /// <summary>CLEARINHIBIT 或 CLEARINHIBIT,配方名 → 配方名或 null（全部）。</summary>
-    public static string? ParseClearInhibitRecipe(string line)
-    {
-        var trimmed = line.Trim();
-        var comma = trimmed.IndexOf(',');
-        if (comma < 0)
-            return null;
-        var recipe = trimmed[(comma + 1)..].Trim();
-        var next = recipe.IndexOf(',');
-        if (next >= 0)
-            recipe = recipe[..next].Trim();
-        return recipe.Length == 0 ? null : recipe;
-    }
+    public static string CoerceAlwaysOkReply(
+        string reply, string requestLine, double elapsedMs,
+        double defaultX = 0, double defaultY = 0, double defaultRz = 0) =>
+        TcpProtocol.CoerceAlwaysOkReply(reply, requestLine, elapsedMs, defaultX, defaultY, defaultRz);
 
-    public static string FormatReply(VisionResult result)
-    {
-        if (!result.Ok)
-        {
-            // 内部错误不暴露异常原文（可能含路径/堆栈/中文），固定 ASCII 令牌；详情进日志
-            var message = result.ErrorCode == VisionErrorCode.InternalError
-                ? "INTERNAL_ERROR"
-                : Sanitize(result.Message);
-            return $"ERR,{(int)result.ErrorCode},{message}";
-        }
-
-        var builder = new StringBuilder("OK");
-        foreach (var pose in result.Poses)
-        {
-            // NaN/Infinity 防御：推理异常产生的非有限值直接转 ERR，避免 PLC 浮点解析失败
-            if (!double.IsFinite(pose.X) || !double.IsFinite(pose.Y) || !double.IsFinite(pose.AngleDeg))
-                return $"ERR,{(int)VisionErrorCode.InternalError},INVALID_POSE";
-            builder.Append(CultureInfo.InvariantCulture, $",{pose.X:0.000},{pose.Y:0.000},{pose.AngleDeg:0.000}");
-        }
-        builder.Append(',').Append(result.RecipeName)
-            .Append(CultureInfo.InvariantCulture, $",{result.Poses.Count},{result.ElapsedMs:0}");
-        return builder.ToString();
-    }
-
-    /// <summary>错误消息中不允许出现逗号/换行或非 ASCII，避免破坏行协议。</summary>
-    private static string Sanitize(string message)
-    {
-        var cleaned = message.Replace(',', ' ').Replace('\n', ' ').Replace('\r', ' ');
-        return new string(cleaned.Where(static c => c < 128).ToArray());
-    }
+    public static bool TryParseWhitelistEntry(string entry) => TcpProtocol.TryParseWhitelistEntry(entry);
 
     public void Dispose() => Stop();
 }

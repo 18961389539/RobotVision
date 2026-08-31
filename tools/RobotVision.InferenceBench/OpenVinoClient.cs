@@ -231,5 +231,5 @@ internal static class OpenVinoClient
         _ => "single",
     };
 
-    private static string Quote(string path) => $"\"{path.Replace("\"", "\\\"")}\"";
+    private static string Quote(string path) => $"\"{path.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
 }

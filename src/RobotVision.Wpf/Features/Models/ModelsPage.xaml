@@ -252,16 +252,12 @@
                                                    Margin="0,0,0,8"
                                                    Foreground="#FFB8C0CC" />
                                         <WrapPanel>
-                                            <StackPanel Margin="0,0,10,8" Width="148"
-                                                        Visibility="{Binding ShowConfidence,
-                                                            Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <StackPanel Margin="0,0,10,8" Width="148">
                                                 <TextBlock Text="置信度阈值" Margin="0,0,0,4" />
                                                 <ui:NumberBox Value="{Binding Confidence}" Minimum="0.01" Maximum="0.99"
                                                               SmallChange="0.05" SpinButtonPlacementMode="Compact" />
                                             </StackPanel>
-                                            <StackPanel Margin="0,0,10,8" Width="148"
-                                                        Visibility="{Binding ShowIou,
-                                                            Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <StackPanel Margin="0,0,10,8" Width="148">
                                                 <TextBlock Text="IoU 阈值" Margin="0,0,0,4" />
                                                 <ui:NumberBox Value="{Binding Iou}" Minimum="0.01" Maximum="0.99"
                                                               SmallChange="0.05" SpinButtonPlacementMode="Compact" />

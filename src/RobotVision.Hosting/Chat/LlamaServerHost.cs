@@ -156,7 +156,8 @@ public sealed class LlamaServerHost : IHostedService, IDisposable
         process.BeginErrorReadLine();
         _process = process;
         _startedByUs = true;
-        _log?.LogInformation("已启动 llama-server {Pid} {Args}", process.Id, psi.Arguments);
+        if (_log is { } log)
+            LlamaServerHostLog.Started(log, process.Id, psi.Arguments);
     }
 
     private async Task WaitUntilHealthyAsync(CancellationToken cancellationToken)
@@ -179,7 +180,8 @@ public sealed class LlamaServerHost : IHostedService, IDisposable
     private InvalidOperationException Fail(string message)
     {
         LastError = message;
-        _log?.LogWarning("{Message}", message);
+        if (_log is { } log)
+            LlamaServerHostLog.Warning(log, message);
         return new InvalidOperationException(message);
     }
 

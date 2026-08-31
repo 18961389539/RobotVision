@@ -1,6 +1,7 @@
 using RobotVision.Hosting;
 using RobotVision.Hosting.Chat;
 using RobotVision.WpfHost.Features.Chat;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.Wpf.Tests;
 
@@ -10,10 +11,10 @@ public sealed class ChatViewModelTests
     public async Task Probe_WhenServerDown_KeepsPageUsable()
     {
         var client = new StubChatClient { ProbeResult = false };
-        var vm = new ChatViewModel(client, new ChatConfig());
+        var vm = new ChatViewModel(client, new ChatConfig(), new NullHtmlPreviewService(), TestLog.Null<ChatViewModel>());
         await vm.ProbeAsync();
         Assert.False(vm.IsReady);
-        Assert.Contains("llama-server", vm.Status);
+        Assert.Contains("llama-server", vm.Status, StringComparison.Ordinal);
         Assert.Empty(vm.Messages);
     }
 
@@ -21,7 +22,7 @@ public sealed class ChatViewModelTests
     public async Task Probe_WhenReady_ShowsProfessionalStatus()
     {
         var client = new StubChatClient { ProbeResult = true };
-        var vm = new ChatViewModel(client, new ChatConfig());
+        var vm = new ChatViewModel(client, new ChatConfig(), new NullHtmlPreviewService(), TestLog.Null<ChatViewModel>());
         await vm.ProbeAsync();
         Assert.True(vm.IsReady);
         Assert.Equal(ChatViewModel.ReadyStatus, vm.Status);
@@ -31,7 +32,7 @@ public sealed class ChatViewModelTests
     public async Task Send_AppendsUserAndStreamedAssistant()
     {
         var client = new StubChatClient { Chunks = ["Hello", " world"] };
-        var vm = new ChatViewModel(client, new ChatConfig());
+        var vm = new ChatViewModel(client, new ChatConfig(), new NullHtmlPreviewService(), TestLog.Null<ChatViewModel>());
         vm.Draft = "hi";
         await vm.SendCommand.ExecuteAsync(null);
         Assert.Equal(2, vm.Messages.Count);

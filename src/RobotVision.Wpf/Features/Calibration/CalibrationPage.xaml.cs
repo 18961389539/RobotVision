@@ -1,18 +1,15 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using System.Windows.Controls;
-using RobotVision.WpfHost;
+﻿using System.Windows.Controls;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Calibration;
 
 public partial class CalibrationPage : Page
 {
-    public CalibrationPage()
+    public CalibrationPage(CalibrationViewModel viewModel)
     {
+        ViewModelPageLifetime.Attach(this, viewModel);
         InitializeComponent();
-        DataContext = App.Services.GetRequiredService(typeof(CalibrationViewModel));
-        NumberBoxCommit.Bind(this, DataContext as CalibrationViewModel);
-        // 向导保存新档案后回到本页时刷新
-        Loaded += (_, _) => (DataContext as CalibrationViewModel)?.Refresh();
+        NumberBoxCommit.Bind(this, viewModel);
+        Loaded += (_, _) => viewModel.Refresh();
     }
 }
-

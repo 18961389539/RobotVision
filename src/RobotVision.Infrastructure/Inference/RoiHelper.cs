@@ -42,8 +42,17 @@ public static class RoiHelper
         }
 
         using var mat = VisionImageCv.AsMat(source);
-        var cropped = Crop(mat, roi, out offsetX, out offsetY);
-        return VisionImageCv.FromMat(cropped, ownsMat: true);
+        Mat? cropped = Crop(mat, roi, out offsetX, out offsetY);
+        try
+        {
+            var image = VisionImageCv.Adopt(cropped);
+            cropped = null;
+            return image;
+        }
+        finally
+        {
+            cropped?.Dispose();
+        }
     }
 
     /// <summary>按相对比例裁剪（边界 clamp），返回 Mat 视图（共享数据）。</summary>

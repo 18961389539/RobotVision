@@ -1,4 +1,4 @@
-﻿<Page x:Class="RobotVision.WpfHost.Features.Settings.SettingsPage"
+<Page x:Class="RobotVision.WpfHost.Features.Settings.SettingsPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -97,7 +97,7 @@
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="运行参数" VerticalAlignment="Center" />
                             <Border Style="{StaticResource HotBadge}">
-                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
                             </Border>
                         </StackPanel>
                     </ui:CardExpander.Header>
@@ -184,7 +184,7 @@
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="拍照位姿校验（OnArm）" VerticalAlignment="Center" />
                             <Border Style="{StaticResource HotBadge}">
-                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
                             </Border>
                         </StackPanel>
                     </ui:CardExpander.Header>
@@ -227,13 +227,54 @@
                     </StackPanel>
                 </ui:CardExpander>
 
+                <!-- PLC TCP 调试应答 -->
+                <ui:CardExpander IsExpanded="False" Margin="0,0,0,8" Padding="12">
+                    <ui:CardExpander.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="PLC TCP 调试" VerticalAlignment="Center" />
+                            <Border Style="{StaticResource HotBadge}">
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
+                            </Border>
+                        </StackPanel>
+                    </ui:CardExpander.Header>
+                    <StackPanel Margin="0,10,0,0">
+                        <ui:ToggleSwitch Content="启用 PLC 调试模式（TCP 不向 PLC 返回 ERR）"
+                                         IsChecked="{Binding PlcDebugAlwaysOk}" />
+                        <ui:TextBlock FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                      TextWrapping="Wrap" Margin="0,8,0,0"
+                                      Text="开启后视觉仍照常采图推理，仅把 ERR 改写为 OK。通信监控页也有快捷开关；此处保存会写入 appsettings.json。正式产线务必关闭。" />
+                        <StackPanel Margin="0,8,0,0"
+                                    Visibility="{Binding ShowPlcDebugFields,
+                                        Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock Text="伪装成功时的默认坐标（单目标）" Margin="0,0,0,4" />
+                            <UniformGrid Columns="3">
+                                <StackPanel Margin="0,0,10,0">
+                                    <TextBlock Text="X（mm）" Margin="0,0,0,4" />
+                                    <ui:NumberBox Value="{Binding PlcDebugDefaultX}" Minimum="-10000" Maximum="10000"
+                                                  SmallChange="1" SpinButtonPlacementMode="Inline" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,10,0">
+                                    <TextBlock Text="Y（mm）" Margin="0,0,0,4" />
+                                    <ui:NumberBox Value="{Binding PlcDebugDefaultY}" Minimum="-10000" Maximum="10000"
+                                                  SmallChange="1" SpinButtonPlacementMode="Inline" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="RZ（°）" Margin="0,0,0,4" />
+                                    <ui:NumberBox Value="{Binding PlcDebugDefaultRz}" Minimum="-180" Maximum="180"
+                                                  SmallChange="1" SpinButtonPlacementMode="Inline" />
+                                </StackPanel>
+                            </UniformGrid>
+                        </StackPanel>
+                    </StackPanel>
+                </ui:CardExpander>
+
                 <!-- 失败现场留存 -->
                 <ui:CardExpander IsExpanded="True" Margin="0,0,0,8" Padding="12">
                     <ui:CardExpander.Header>
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="失败现场留存" VerticalAlignment="Center" />
                             <Border Style="{StaticResource HotBadge}">
-                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
                             </Border>
                         </StackPanel>
                     </ui:CardExpander.Header>
@@ -273,7 +314,7 @@
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="成功现场留存" VerticalAlignment="Center" />
                             <Border Style="{StaticResource HotBadge}">
-                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
                             </Border>
                         </StackPanel>
                     </ui:CardExpander.Header>
@@ -310,7 +351,7 @@
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="结果留档（结果分析）" VerticalAlignment="Center" />
                             <Border Style="{StaticResource HotBadge}">
-                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
                             </Border>
                         </StackPanel>
                     </ui:CardExpander.Header>
@@ -344,7 +385,7 @@
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="运行日志（文件）" VerticalAlignment="Center" />
                             <Border Style="{StaticResource HotBadge}">
-                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
                             </Border>
                         </StackPanel>
                     </ui:CardExpander.Header>
@@ -376,7 +417,7 @@
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="过程能力 / 连续失败联锁" VerticalAlignment="Center" />
                             <Border Style="{StaticResource HotBadge}">
-                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
                             </Border>
                         </StackPanel>
                     </ui:CardExpander.Header>
@@ -421,7 +462,7 @@
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="IP 白名单" VerticalAlignment="Center" />
                             <Border Style="{StaticResource HotBadge}">
-                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
                             </Border>
                         </StackPanel>
                     </ui:CardExpander.Header>
@@ -444,7 +485,7 @@
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBlock FontTypography="Subtitle" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="网络端点" VerticalAlignment="Center" />
                             <Border Style="{StaticResource HotBadge}">
-                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="#0D1117" />
+                                <TextBlock Text="保存后生效" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AppBadgeText}" />
                             </Border>
                         </StackPanel>
                     </ui:CardExpander.Header>

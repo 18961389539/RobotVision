@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using RobotVision.Core;
 using RobotVision.Core.Models;
@@ -29,13 +30,21 @@ public sealed class YoloDotNetEngineFactory(
 
     public bool GpuUnavailable => Volatile.Read(ref _gpuFailed) != 0;
 
+    public InferenceTask? DetectTask(string modelPath) =>
+        InferenceTaskDetector.Detect(this, modelPath);
+
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "Yolo ownership transfers to YoloDotNetEngine.")]
     public IInferenceEngine Create(string modelPath)
     {
+        Yolo? yolo = null;
         try
         {
             var skipGpu = GpuUnavailable;
-            var yolo = CreateYolo(modelPath, Provider, log, skipGpu, OnGpuFallback, OnDevice);
-            return new YoloDotNetEngine(yolo);
+            yolo = CreateYolo(modelPath, Provider, log, skipGpu, OnGpuFallback, OnDevice);
+            var engine = new YoloDotNetEngine(yolo);
+            yolo = null;
+            return engine;
         }
         catch (VisionException)
         {
@@ -45,6 +54,10 @@ public sealed class YoloDotNetEngineFactory(
         {
             throw new VisionException(VisionErrorCode.ModelNotAvailable,
                 $"模型加载失败: {Path.GetFileName(modelPath)}: {ex.Message}", ex);
+        }
+        finally
+        {
+            yolo?.Dispose();
         }
     }
 
@@ -86,9 +99,8 @@ public sealed class YoloDotNetEngineFactory(
                 var cpu = CreateOnDevice(modelPath, "CPU");
                 onGpuFallback?.Invoke();
                 onDevice?.Invoke("CPU");
-                log?.LogWarning(ex,
-                    "OpenVINO GPU 不可用（{Reason}），模型 {Model} 已回退 OpenVINO CPU；后续模型将跳过 GPU",
-                    ex.Message, file);
+                if (log is { } logger)
+                    YoloDotNetEngineFactoryLog.GpuFallback(logger, ex, ex.Message, file);
                 if (log is null)
                 {
                     Console.Error.WriteLine(

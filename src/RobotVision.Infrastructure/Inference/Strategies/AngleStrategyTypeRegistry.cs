@@ -5,8 +5,7 @@ using RobotVision.Core.Recipe;
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
 /// <summary>
-/// 角度策略工厂注册表：AngleMode → 工厂的映射。
-/// 静态 <see cref="Default"/> 预注册内置五种策略（MaskMinAreaRect/DualCenterLine/KeyPointLine/MaskTemplate/DualBlobCenterLine），
+/// 角度策略工厂注册表。
 /// 新增角度模式时在启动早期调用 <c>AngleStrategyTypeRegistry.Default.Register(new XxxStrategyFactory())</c>
 /// 一行接入——服务注册、UI 角度模式下拉、配方引用校验均从本表查询，
 /// 加新模式不再改任何分支代码。与 CameraTypeRegistry 同构。

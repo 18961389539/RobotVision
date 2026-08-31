@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Basler.Pylon;
 using Microsoft.Extensions.Logging;
 using OpenCvSharp;
@@ -145,13 +146,13 @@ public sealed class BaslerCamera : ICamera, IExposureControl
                 {
                     _lastFailureReason = vex.Message;
                     ReleaseDevice();
-                    _log?.LogWarning("Basler 相机 {Id} 采集失败（{Message}），尝试自动重连", Id, vex.Message);
+                    if (_log is { } log) BaslerCameraLog.GrabFailedRetry(log, Id, vex.Message);
                 }
                 catch (Exception ex) when (attempt == 0)
                 {
                     _lastFailureReason = ex.Message;
                     ReleaseDevice();
-                    _log?.LogWarning(ex, "Basler 相机 {Id} 采集异常，尝试自动重连", Id);
+                    if (_log is { } log) BaslerCameraLog.GrabExceptionRetry(log, ex, Id);
                 }
                 catch (VisionException vex) when (attempt == 1)
                 {
@@ -201,14 +202,14 @@ public sealed class BaslerCamera : ICamera, IExposureControl
 
             _connected = true;
             _lastFailureReason = "";
-            _log?.LogInformation("Basler 相机 {Id} 已连接: SN={Sn} Name={Name}", Id, _serialNumber, _friendlyName);
+            if (_log is { } log) BaslerCameraLog.Connected(log, Id, _serialNumber, _friendlyName);
             return true;
         }
         catch (Exception ex)
         {
             _lastFailureReason = ex.Message;
             ReleaseDevice();
-            _log?.LogWarning(ex, "Basler 相机 {Id} 连接失败", Id);
+            if (_log is { } log) BaslerCameraLog.ConnectFailed(log, ex, Id);
             return false;
         }
     }
@@ -240,7 +241,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             }
             catch (Exception ex)
             {
-                _log?.LogWarning(ex, "Basler 相机 {Id} 按 {Key} 打开失败", Id, key);
+                if (_log is { } log) BaslerCameraLog.OpenByKeyFailed(log, ex, Id, key);
             }
         }
 
@@ -255,14 +256,13 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             }
             catch (Exception ex)
             {
-                _log?.LogDebug(ex, "Basler 相机 {Id} 按临时 IP {Ip} 打开失败", Id, forcedIp);
+                if (_log is { } log) BaslerCameraLog.OpenByTempIpFailed(log, ex, Id, forcedIp);
             }
         }
 
         if (!specified && devices.Count == 1)
         {
-            _log?.LogInformation("Basler 相机 {Id} 未指定 DeviceId，现场仅一台，绑定 SN={Sn}",
-                Id, devices[0][CameraInfoKey.SerialNumber]);
+            if (_log is { } log) BaslerCameraLog.SingleDeviceBind(log, Id, devices[0][CameraInfoKey.SerialNumber]!);
             return new Camera(devices[0]);
         }
 
@@ -305,7 +305,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "Basler 相机 {Id} 网段对齐（FORCEIP）未成功，继续按原 IP 尝试", Id);
+            if (_log is { } log) BaslerCameraLog.ForceIpAlignFailed(log, ex, Id);
             return null;
         }
     }
@@ -358,7 +358,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogDebug(ex, "Basler 相机 {Id} Close 跳过", Id);
+            if (_log is { } log) BaslerCameraLog.CloseSkipped(log, ex, Id);
         }
 
         try
@@ -367,7 +367,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogDebug(ex, "Basler 相机 {Id} Dispose 跳过", Id);
+            if (_log is { } log) BaslerCameraLog.DisposeSkipped(log, ex, Id);
         }
 
         _camera = null;
@@ -381,16 +381,16 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         var camera = _camera!;
         try { camera.Parameters[PLCamera.TriggerSelector].TrySetValue(PLCamera.TriggerSelector.FrameStart); }
-        catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} TriggerSelector 设置跳过", Id); }
+        catch (Exception ex) { if (_log is { } log) BaslerCameraLog.TriggerSelectorSkipped(log, ex, Id); }
         try { camera.Parameters[PLCamera.TriggerMode].TrySetValue(PLCamera.TriggerMode.Off); }
-        catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} TriggerMode 设置跳过", Id); }
+        catch (Exception ex) { if (_log is { } log) BaslerCameraLog.TriggerModeSkipped(log, ex, Id); }
         try { camera.Parameters[PLCamera.ExposureMode].TrySetValue(PLCamera.ExposureMode.Timed); }
-        catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} ExposureMode 设置跳过", Id); }
+        catch (Exception ex) { if (_log is { } log) BaslerCameraLog.ExposureModeSkipped(log, ex, Id); }
         try { camera.Parameters[PLCamera.ExposureAuto].TrySetValue(PLCamera.ExposureAuto.Off); }
-        catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} ExposureAuto 设置跳过", Id); }
+        catch (Exception ex) { if (_log is { } log) BaslerCameraLog.ExposureAutoSkipped(log, ex, Id); }
         TrySelectAnalogGain();
         try { camera.Parameters[PLCamera.GainAuto].TrySetValue(PLCamera.GainAuto.Off); }
-        catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} GainAuto 设置跳过", Id); }
+        catch (Exception ex) { if (_log is { } log) BaslerCameraLog.GainAutoSkipped(log, ex, Id); }
     }
 
     /// <summary>
@@ -408,7 +408,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogDebug(ex, "Basler 相机 {Id} TLType 读取跳过", Id);
+            if (_log is { } log) BaslerCameraLog.TlTypeReadSkipped(log, ex, Id);
             return;
         }
 
@@ -429,6 +429,8 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
     }
 
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "VisionImage ownership transfers to CameraFrame.")]
     private CameraFrame GrabOneFrame()
     {
         var grabWatch = Stopwatch.StartNew();
@@ -440,9 +442,18 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             if (result is null || !result.GrabSucceeded)
                 throw new VisionException(VisionErrorCode.CameraGrabFailed,
                     $"Basler 相机 {Id} 采集失败: {result?.ErrorDescription ?? "无采集结果"} (code={result?.ErrorCode})");
-            var image = VisionImageCv.FromMat(ToMat(result), ownsMat: true);
-            return new CameraFrame(image, DateTime.UtcNow, acquireMs,
-                grabWatch.Elapsed.TotalMilliseconds - acquireMs);
+            Mat? mat = ToMat(result);
+            try
+            {
+                var image = VisionImageCv.Adopt(mat);
+                mat = null;
+                return new CameraFrame(image, DateTime.UtcNow, acquireMs,
+                    grabWatch.Elapsed.TotalMilliseconds - acquireMs);
+            }
+            finally
+            {
+                mat?.Dispose();
+            }
         }
     }
 
@@ -453,9 +464,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         SafeStopGrabbing();
         ApplyReducedResolution();
         _reducedResolution = true;
-        _log?.LogWarning(
-            "Basler 相机 {Id} GigE 全幅 buffer underrun，已降为 {W}x{H} 继续采集（优化网卡后可重启程序再试全幅）",
-            Id, GigEFallbackWidth, GigEFallbackHeight);
+        if (_log is { } log) BaslerCameraLog.GigEUnderrunReducedResolution(log, Id, GigEFallbackWidth, GigEFallbackHeight);
         return true;
     }
 
@@ -719,8 +728,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         if (TrySetFloat(PLCamera.ExposureTimeAbs, valueUs)
             || TrySetFloat(PLCamera.ExposureTime, valueUs))
             return true;
-        _log?.LogWarning("Basler 相机 {Id} 曝光 {Value} µs 下发失败（ExposureTimeAbs/ExposureTime 均不可写或超范围）",
-            Id, valueUs);
+        if (_log is { } log) BaslerCameraLog.ExposureSetFailed(log, Id, valueUs);
         return false;
     }
 
@@ -732,14 +740,19 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         TrySelectAnalogGain();
         try { _camera!.Parameters[PLCamera.GainAuto].TrySetValue(PLCamera.GainAuto.Off); }
-        catch (Exception ex) { _log?.LogDebug(ex, "Basler 相机 {Id} GainAuto 设置跳过", Id); }
+        catch (Exception ex)
+        {
+            if (_log is { } log)
+                BaslerCameraLog.GainAutoSkipped(log, ex, Id);
+        }
 
         if (TrySetFloat(PLCamera.Gain, value)
             || TrySetFloat(PLCamera.GainAbs, value)
             || TrySetInteger(PLCamera.GainRaw, (long)Math.Round(value)))
             return true;
-        _log?.LogWarning("Basler 相机 {Id} 增益 {Value} 下发失败（Gain/GainAbs/GainRaw 均不可写或超范围）",
-            Id, value);
+        {
+            if (_log is { } log) BaslerCameraLog.GainSetFailed(log, Id, value);
+        }
         return false;
     }
 
@@ -759,7 +772,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogDebug(ex, "Basler 相机 {Id} GainSelector 设置跳过", Id);
+            if (_log is { } log) BaslerCameraLog.GainSelectorSkipped(log, ex, Id);
         }
     }
 
@@ -815,8 +828,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             var max = p.GetMaximum();
             if (value < min || value > max)
             {
-                _log?.LogWarning("Basler 相机 {Id} 参数 {Param} 值 {Value} 超出范围 [{Min}, {Max}]，下发被拒绝",
-                    Id, name.Name, value, min, max);
+                if (_log is { } log) BaslerCameraLog.ParameterOutOfRange(log, Id, name.Name, value, min, max);
                 return false;
             }
             p.SetValue(value);
@@ -824,7 +836,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "Basler 相机 {Id} 参数 {Param} 下发异常", Id, name.Name);
+            if (_log is { } log) BaslerCameraLog.ParameterSetException(log, ex, Id, name.Name);
             return false;
         }
     }
@@ -840,8 +852,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             var max = p.GetMaximum();
             if (value < min || value > max)
             {
-                _log?.LogWarning("Basler 相机 {Id} 参数 {Param} 值 {Value} 超出范围 [{Min}, {Max}]，下发被拒绝",
-                    Id, name.Name, value, min, max);
+                if (_log is { } log) BaslerCameraLog.ParameterOutOfRange(log, Id, name.Name, value, min, max);
                 return false;
             }
             p.SetValue(value);
@@ -849,7 +860,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "Basler 相机 {Id} 参数 {Param} 下发异常", Id, name.Name);
+            if (_log is { } log) BaslerCameraLog.ParameterSetException(log, ex, Id, name.Name);
             return false;
         }
     }
@@ -865,7 +876,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "Basler 相机 {Id} 参数 {Param} 读取异常", Id, name.Name);
+            if (_log is { } log) BaslerCameraLog.ParameterReadException(log, ex, Id, name.Name);
             return null;
         }
     }
@@ -881,7 +892,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "Basler 相机 {Id} 参数 {Param} 读取异常", Id, name.Name);
+            if (_log is { } log) BaslerCameraLog.ParameterReadException(log, ex, Id, name.Name);
             return null;
         }
     }
@@ -899,7 +910,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "Basler 相机 {Id} 参数 {Param} 范围读取异常", Id, name.Name);
+            if (_log is { } log) BaslerCameraLog.ParameterRangeReadException(log, ex, Id, name.Name);
             return null;
         }
     }
@@ -917,7 +928,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "Basler 相机 {Id} 参数 {Param} 范围读取异常", Id, name.Name);
+            if (_log is { } log) BaslerCameraLog.ParameterRangeReadException(log, ex, Id, name.Name);
             return null;
         }
     }

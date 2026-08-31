@@ -2,10 +2,9 @@ using System.Collections.ObjectModel;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure.Cameras;
-using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
 
 namespace RobotVision.WpfHost.Features.SystemInfo;
@@ -16,16 +15,17 @@ public sealed record ConfigRow(string Key, string Value);
 public sealed record CameraBadge(string Id, bool Registered);
 
 /// <summary>系统总览：TCP 监听/管线健康/资产计数/目录一览（可打开）/配置摘要。</summary>
-public partial class SystemViewModel : ObservableObject
+public partial class SystemViewModel : ObservableObject, IDisposable
 {
     private readonly AppConfig _cfg;
-    private readonly TcpServerManager _tcp;
+    private readonly ITcpRuntime _tcp;
     private readonly VisionService _vision;
-    private readonly CameraManager _cameras;
+    private readonly ICameraRuntime _cameras;
     private readonly RecipeLoader _recipes;
     private readonly FailureImageStore _failures;
-    private readonly ModelManager _models;
+    private readonly IModelRuntime _models;
     private readonly IInferenceEngineFactory _inference;
+    private readonly ILogger<SystemViewModel> _log;
     private readonly DispatcherTimer _timer;
 
     public ObservableCollection<CameraBadge> CameraBadges { get; } = [];
@@ -49,13 +49,14 @@ public partial class SystemViewModel : ObservableObject
 
     public SystemViewModel(
         AppConfig cfg,
-        TcpServerManager tcp,
+        ITcpRuntime tcp,
         VisionService vision,
-        CameraManager cameras,
+        ICameraRuntime cameras,
         RecipeLoader recipes,
         FailureImageStore failures,
-        ModelManager models,
-        IInferenceEngineFactory inference)
+        IModelRuntime models,
+        IInferenceEngineFactory inference,
+        ILogger<SystemViewModel> log)
     {
         _cfg = cfg;
         _tcp = tcp;
@@ -65,6 +66,7 @@ public partial class SystemViewModel : ObservableObject
         _failures = failures;
         _models = models;
         _inference = inference;
+        _log = log;
 
         RebuildSettings();
         RebuildDirectories();
@@ -174,6 +176,9 @@ public partial class SystemViewModel : ObservableObject
     /// <summary>页面卸载/窗口关闭时停止刷新（VM 为单例，避免空转）。</summary>
     public void StopTimer() => _timer.Stop();
 
+    /// <summary>进程退出时由 DI 容器级联调用（单例 VM）：停止 1 秒实时刷新。</summary>
+    public void Dispose() => _timer.Stop();
+
     /// <summary>配方计数磁盘枚举节流：1s 轮询不每秒枚举目录，5s 一次。</summary>
     private DateTime _lastRecipeScan;
     private int _recipeCount;
@@ -219,7 +224,7 @@ public partial class SystemViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void OpenFolder(ConfigRow row)
+    private static void OpenFolder(ConfigRow? row)
     {
         if (row is null)
             return;

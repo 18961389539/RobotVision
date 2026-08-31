@@ -86,8 +86,8 @@ internal static class Program
 
                 switch (opt.Mode)
                 {
-                    case WorkerMode.Single:
-                        report.TimesMs = TimedRun.Single(pipeline, opt.Warmup, opt.Iters);
+                    case WorkerMode.One:
+                        report.TimesMs = TimedRun.RunOne(pipeline, opt.Warmup, opt.Iters);
                         break;
                     case WorkerMode.Serial2:
                     {

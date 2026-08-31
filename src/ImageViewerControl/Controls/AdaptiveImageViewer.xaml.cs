@@ -195,17 +195,17 @@ namespace ImageViewer.Controls
                 return;
             }
 
-            _ = RunQualityAnalysisAsync();
+            _ = RunQualityAnalysisAsync(_volume);
         }
 
-        private async Task RunQualityAnalysisAsync()
+        private async Task RunQualityAnalysisAsync(VolumeData volume)
         {
             // 修复：BeginOperation 返回本次操作专属取消源，EndOperation 用它判断是否仍是当前
             // 操作，避免新操作期间旧操作结束把新取消源误 Dispose。
             CancellationTokenSource operationCancellation = BeginOperation("Analyzing volume quality...");
             try
             {
-                VolumeQualityReport report = await Task.Run(() => VolumeQualityAnalyzer.Analyze(_volume), operationCancellation.Token);
+                VolumeQualityReport report = await Task.Run(() => VolumeQualityAnalyzer.Analyze(volume), operationCancellation.Token);
                 _qualityReport = report;
                 anomalyList.Items.Clear();
                 foreach (VolumeAnomaly anomaly in report.Anomalies)

@@ -9,7 +9,7 @@ namespace RobotVision.Infrastructure.Inference;
 /// </summary>
 public interface IInferenceEngine : IDisposable
 {
-    /// <summary>从 ONNX 元数据推断的模型任务；null 表示未识别（如分类/OBB）。</summary>
+    /// <summary>模型实际任务类型；未知时 null（跳过任务校验）。</summary>
     InferenceTask? DetectedTask { get; }
 
     IReadOnlyList<ObjectDetectionResult> RunObjectDetection(
@@ -27,17 +27,14 @@ public interface IInferenceEngine : IDisposable
 /// </summary>
 public interface IInferenceEngineFactory
 {
+    /// <summary>最近一次成功创建会话使用的设备（如 GPU / CPU）；无则空串。</summary>
+    string ActiveDevice { get; }
+
+    /// <summary>GPU 创建失败后进程内粘性回退 CPU 时为 true。</summary>
+    bool GpuUnavailable { get; }
+
     IInferenceEngine Create(string modelPath);
 
-    /// <summary>appsettings Inference:Provider 原文。</summary>
-    string Provider => "";
-
-    /// <summary>最近一次成功会话实际设备（GPU / CPU）；尚未加载时为空。</summary>
-    string ActiveDevice => "";
-
-    /// <summary>已确认 GPU 不可用（模型文件有效但 GPU 创建失败、CPU 成功），后续会话跳过 GPU。</summary>
-    bool GpuUnavailable => false;
-
-    /// <summary>加载模型并读取任务类型（随即释放引擎）。</summary>
-    InferenceTask? DetectTask(string modelPath) => InferenceTaskDetector.Detect(this, modelPath);
+    /// <summary>加载模型并推断任务类型（供 UI 自动选任务）。</summary>
+    InferenceTask? DetectTask(string modelPath);
 }

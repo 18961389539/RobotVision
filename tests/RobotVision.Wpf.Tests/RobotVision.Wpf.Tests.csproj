@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\RobotVision.Wpf\RobotVision.Wpf.csproj" />
+    <ProjectReference Include="..\..\src\RobotVision.Teach\RobotVision.Teach.csproj" />
   </ItemGroup>
 
   <ItemGroup>

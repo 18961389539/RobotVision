@@ -2,6 +2,12 @@
   "version": 2,
   "dependencies": {
     "net8.0": {
+      "Basler.Pylon.NET.x64": {
+        "type": "Direct",
+        "requested": "[10.3.2.636, )",
+        "resolved": "10.3.2.636",
+        "contentHash": "J8WJjGF85KdoPceERP+DFblPbK2PGAqIxzHRtuC31TGC8QgZSiiMJsNv7sWMnrkysuirtTC0IPJ1jPPTus5/jw=="
+      },
       "GigEVision.Net": {
         "type": "Direct",
         "requested": "[1.0.0, )",

@@ -1,11 +1,11 @@
 using System.Collections.ObjectModel;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Lighting;
-using RobotVision.Infrastructure.Lighting;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Lightings;
 
@@ -20,10 +20,12 @@ public sealed record LightListItem(string Id, string Type, string Status, bool R
 public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
 {
     private readonly AppConfig _cfg;
-    private readonly LightingManager _lighting;
+    private readonly ILightingRuntime _lighting;
     private readonly LightingConfigStore _store;
     private readonly RecipeLoader _recipes;
     private readonly LightControllerTypeRegistry _registry;
+    private readonly IDialogService _dialogs;
+    private readonly ILogger<LightingsViewModel> _log;
 
     public Action? FlushPendingEdits { get; set; }
 
@@ -115,8 +117,6 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
     {
         OnPropertyChanged(nameof(IsNewTcp));
     }
-
-    public double BrightnessMax => 255;
 
     public string BrightnessText => $"{Brightness:0}";
 
@@ -213,16 +213,20 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
 
     public LightingsViewModel(
         AppConfig cfg,
-        LightingManager lighting,
+        ILightingRuntime lighting,
         LightingConfigStore store,
         RecipeLoader recipes,
-        LightControllerTypeRegistry registry)
+        LightControllerTypeRegistry registry,
+        IDialogService dialogs,
+        ILogger<LightingsViewModel> log)
     {
         _cfg = cfg;
         _lighting = lighting;
         _store = store;
         _recipes = recipes;
         _registry = registry;
+        _dialogs = dialogs;
+        _log = log;
         Refresh();
     }
 
@@ -232,7 +236,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
     /// <param name="preferId">刷新后优先选中的 Id；空则尽量保持当前选中。</param>
     public void Refresh(string? preferId)
     {
-        var keepId = preferId ?? Selected?.Id;
+        var keepId = ListSelection.KeepKey(preferId, Selected?.Id);
 
         Items.Clear();
         foreach (var light in _cfg.LightControllers)
@@ -244,9 +248,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
                 string.Equals(light.Type, "None", StringComparison.OrdinalIgnoreCase),
                 Summarize(light)));
         }
-        Selected = string.IsNullOrWhiteSpace(keepId)
-            ? Items.FirstOrDefault()
-            : Items.FirstOrDefault(i => string.Equals(i.Id, keepId, StringComparison.OrdinalIgnoreCase));
+        Selected = ListSelection.Restore(Items, keepId, i => i.Id);
         Message = $"共 {Items.Count} 个光源控制器";
     }
 
@@ -365,6 +367,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         }
         catch (Exception ex)
         {
+            WpfUiLog.LightingSaveFailed(_log, ex, id);
             Message = $"保存失败: {ex.Message}";
         }
     }
@@ -440,6 +443,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         }
         catch (Exception ex)
         {
+            WpfUiLog.LightingAddFailed(_log, ex, id);
             Message = $"添加失败: {ex.Message}";
         }
     }
@@ -454,19 +458,12 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         }
         var id = Selected.Id;
 
-        var referenced = _recipes.ListNames()
-            .Where(n =>
-            {
-                try { return _recipes.Get(n).LightControllerId == id; }
-                catch { return false; }
-            })
-            .ToList();
+        var referenced = RecipeReferenceCheck.FindReferencing(_recipes, r => r.LightControllerId, id);
         var warn = referenced.Count > 0
             ? $"\n有 {referenced.Count} 个配方引用该控制器（{string.Join("、", referenced)}），删除后触发将返回 1006 错误。"
             : "";
 
-        if (MessageBox.Show($"确定删除光源控制器 {id}？{warn}", "删除光源控制器",
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (!_dialogs.ConfirmYesNo($"确定删除光源控制器 {id}？{warn}", "删除光源控制器"))
             return;
 
         try

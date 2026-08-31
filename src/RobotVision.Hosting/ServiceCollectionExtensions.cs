@@ -42,6 +42,15 @@ public static class ServiceCollectionExtensions
         DataRootBinder.Apply(cfg);
         DataRootBinder.CopyLegacyIfEmpty(cfg, AppContext.BaseDirectory);
 
+        // AlwaysOk 只允许本会话从通讯/设置页打开，启动不从磁盘恢复，避免产线默认伪装 OK。
+        if (cfg.PlcDebug.AlwaysOk)
+        {
+            bootWarnings.Add(
+                "已忽略配置文件中的 PlcDebug.AlwaysOk：该开关不会在启动时恢复。" +
+                "需要联调时请在通讯页临时开启。");
+            cfg.PlcDebug.AlwaysOk = false;
+        }
+
         // 目录缺失等启动告警：组装阶段宿主日志尚未可用（自建 LoggerFactory 只输出控制台、
         // 不进文件日志，无头部署会丢），改为暂存文本、由宿主日志管道补发一次
         // （见文件底部 BootWarningLogService，AddRobotVision 末尾统一注册）。
@@ -100,19 +109,19 @@ public static class ServiceCollectionExtensions
                 try { rotations.Warm(recipe); }
                 catch (Exception ex)
                 {
-                    recipeLog.LogWarning(ex, "配方 {Name} 模板旋转缓存预热失败，首次匹配将现场旋转", recipe.Name);
+                    ServiceCollectionExtensionsLog.RecipeRotationWarmFailed(recipeLog, ex, recipe.Name);
                 }
 
                 try { MaskSiftRefine.Warm(recipe); }
                 catch (Exception ex)
                 {
-                    recipeLog.LogWarning(ex, "配方 {Name} SIFT 示教缓存预热失败，首次精修将现场提取", recipe.Name);
+                    ServiceCollectionExtensionsLog.RecipeSiftWarmFailed(recipeLog, ex, recipe.Name);
                 }
 
                 try { MaskShapeMatch.Warm(recipe); }
                 catch (Exception ex)
                 {
-                    recipeLog.LogWarning(ex, "配方 {Name} 形状匹配示教缓存预热失败，首次精修将现场提取", recipe.Name);
+                    ServiceCollectionExtensionsLog.RecipeShapeMatchWarmFailed(recipeLog, ex, recipe.Name);
                 }
             };
             loader.AfterDelete = name =>
@@ -141,18 +150,17 @@ public static class ServiceCollectionExtensions
                 {
                     if (string.IsNullOrWhiteSpace(camera.Id))
                     {
-                        log.LogWarning("配置中存在无 Id 的相机条目，已跳过");
+                        ServiceCollectionExtensionsLog.CameraEntryMissingId(log);
                         continue;
                     }
                     if (manager.IsRegistered(camera.Id))
                     {
-                        log.LogWarning("相机 Id 重复: {Id}（后条目已跳过，请检查 appsettings.json）", camera.Id);
+                        ServiceCollectionExtensionsLog.CameraDuplicateId(log, camera.Id);
                         continue;
                     }
                     if (!registry.TryGet(camera.Type, out var factory))
                     {
-                        log.LogWarning("相机 {Id} 类型 {Type} 无工厂（实现 ICameraFactory 并调用 CameraTypeRegistry.Register 一行接入）",
-                            camera.Id, camera.Type);
+                        ServiceCollectionExtensionsLog.CameraNoFactory(log, camera.Id, camera.Type);
                         manager.Register(new FailedCamera(camera.Id, InferCameraKind(camera.Type),
                             $"相机 {camera.Id} 类型 {camera.Type} 无工厂"));
                         continue;
@@ -161,19 +169,17 @@ public static class ServiceCollectionExtensions
                     if (AppConfigExtensions.IsHardwareCameraType(camera.Type) &&
                         string.IsNullOrWhiteSpace(camera.DeviceId))
                     {
-                        log.LogWarning(
-                            "相机 {Id} 未填写 DeviceId：仅当现场只有一台该类型相机时才能打开，多台将拒绝绑定",
-                            camera.Id);
+                        ServiceCollectionExtensionsLog.CameraMissingDeviceId(log, camera.Id);
                     }
 
                     // 超时预算软校验（与具体类型无关：所有带 GrabTimeoutMs 语义的相机通用）
                     if (camera.GrabTimeoutMs > 0 && camera.GrabTimeoutMs >= cfg.TimeoutMs)
-                        log.LogWarning("相机 {Id} GrabTimeoutMs={Grab} 不小于总超时 TimeoutMs={Total}，取图超时将表现为 1008 而非 1003，建议调小",
-                            camera.Id, camera.GrabTimeoutMs, cfg.TimeoutMs);
+                        ServiceCollectionExtensionsLog.CameraGrabTimeoutExceedsTotal(
+                            log, camera.Id, camera.GrabTimeoutMs, cfg.TimeoutMs);
 
                     var instance = factory.Create(camera, log);
                     manager.Register(instance);
-                    log.LogInformation("相机 {Id} 已注册（{Type}）", camera.Id, camera.Type);
+                    ServiceCollectionExtensionsLog.CameraRegistered(log, camera.Id, camera.Type);
                 }
                 catch (Exception ex)
                 {
@@ -182,8 +188,8 @@ public static class ServiceCollectionExtensions
                         ? vex.Message
                         : $"相机 {camera.Id} 初始化失败: {ex.Message}";
                     manager.Register(new FailedCamera(camera.Id, kind, message));
-                    log.LogError(ex, "相机 {Id} 初始化失败，使用该相机的配方将返回错误码 {Code}",
-                        camera.Id, (int)VisionErrorCode.CameraInitFailed);
+                    ServiceCollectionExtensionsLog.CameraInitFailed(
+                        log, ex, camera.Id, (int)VisionErrorCode.CameraInitFailed);
                 }
             }
             return manager;
@@ -214,18 +220,17 @@ public static class ServiceCollectionExtensions
                 {
                     if (string.IsNullOrWhiteSpace(light.Id))
                     {
-                        log.LogWarning("配置中存在无 Id 的光源控制器条目，已跳过");
+                        ServiceCollectionExtensionsLog.LightEntryMissingId(log);
                         continue;
                     }
                     if (manager.IsRegistered(light.Id))
                     {
-                        log.LogWarning("光源控制器 Id 重复: {Id}（后条目已跳过，请检查 appsettings.json）", light.Id);
+                        ServiceCollectionExtensionsLog.LightDuplicateId(log, light.Id);
                         continue;
                     }
                     if (!registry.TryGet(light.Type, out var factory))
                     {
-                        log.LogWarning("光源控制器 {Id} 类型 {Type} 无工厂（实现 ILightControllerFactory 并调用 LightControllerTypeRegistry.Register 一行接入）",
-                            light.Id, light.Type);
+                        ServiceCollectionExtensionsLog.LightNoFactory(log, light.Id, light.Type);
                         manager.Register(new FailedLightController(light.Id,
                             $"光源控制器 {light.Id} 类型 {light.Type} 无工厂"));
                         continue;
@@ -233,14 +238,14 @@ public static class ServiceCollectionExtensions
 
                     var instance = factory.Create(light, log);
                     manager.Register(instance);
-                    log.LogInformation("光源控制器 {Id} 已注册（{Type}）", light.Id, light.Type);
+                    ServiceCollectionExtensionsLog.LightRegistered(log, light.Id, light.Type);
                 }
                 catch (Exception ex)
                 {
                     manager.Register(new FailedLightController(light.Id,
                         $"光源控制器 {light.Id} 初始化失败: {ex.Message}"));
-                    log.LogError(ex, "光源控制器 {Id} 初始化失败，使用该控制器的配方将返回错误码 {Code}",
-                        light.Id, (int)VisionErrorCode.LightNotRegistered);
+                    ServiceCollectionExtensionsLog.LightInitFailed(
+                        log, ex, light.Id, (int)VisionErrorCode.LightNotRegistered);
                 }
             }
             return manager;
@@ -257,9 +262,9 @@ public static class ServiceCollectionExtensions
             };
             var calibLog = sp.GetRequiredService<ILogger<CalibrationManager>>();
             foreach (var (file, error) in calibration.LoadDirectory(calibrationFolder))
-                calibLog.LogWarning("标定档案 {File} 加载失败: {Error}", file, error);
+                ServiceCollectionExtensionsLog.CalibrationFileLoadFailed(calibLog, file, error);
             foreach (var warning in calibration.QualityWarnings)
-                calibLog.LogWarning("标定质量警告: {Warning}", warning);
+                ServiceCollectionExtensionsLog.CalibrationQualityWarning(calibLog, warning);
             return calibration;
         });
 
@@ -269,6 +274,7 @@ public static class ServiceCollectionExtensions
         // 新增角度模式在启动早期调 AngleStrategyTypeRegistry.Default.Register(...) 一行接入，
         // 此处与 UI 均从注册表查询（与相机/光源注册表同构）。
         services.AddSingleton(AngleStrategyTypeRegistry.Default);
+        services.AddSingleton(SegmentRefineRuntimeRegistry.Default);
         services.AddSingleton(sp => new FailureImageStore(
             cfg.FailureImage, sp.GetRequiredService<ILogger<FailureImageStore>>()));
         services.AddSingleton(sp => new SqliteResultStore(
@@ -333,6 +339,10 @@ public static class ServiceCollectionExtensions
                 IpWhitelist = cfg.IpWhitelist,
                 Backlog = cfg.TcpBacklog,
                 IdleTimeoutMs = cfg.IdleTimeoutMs,
+                PlcAlwaysOkMode = false,
+                PlcDebugDefaultX = cfg.PlcDebug.DefaultX,
+                PlcDebugDefaultY = cfg.PlcDebug.DefaultY,
+                PlcDebugDefaultRz = cfg.PlcDebug.DefaultRz,
                 // STATUS：ready 仅在未执行且队列为空时成立，避免 PLC 在排队时误判空闲
                 StateProvider = () => new TcpServerManager.TcpServerState(
                     !vision.IsProcessing && vision.QueueDepth == 0,
@@ -378,6 +388,10 @@ public static class ServiceCollectionExtensions
                 tcp.IdleTimeoutMs = updated.IdleTimeoutMs;
                 tcp.MaxConnections = updated.MaxConnections;
                 tcp.IpWhitelist = updated.IpWhitelist;
+                tcp.PlcAlwaysOkMode = updated.PlcDebug.AlwaysOk;
+                tcp.PlcDebugDefaultX = updated.PlcDebug.DefaultX;
+                tcp.PlcDebugDefaultY = updated.PlcDebug.DefaultY;
+                tcp.PlcDebugDefaultRz = updated.PlcDebug.DefaultRz;
 
                 var vision = sp.GetRequiredService<VisionService>();
                 vision.MaxQueueDepth = Math.Max(1, updated.MaxQueueDepth);
@@ -403,8 +417,8 @@ public static class ServiceCollectionExtensions
 
                 // MaxConcurrent/TcpBacklog 首次固化或启动时读取，运行时修改不生效（UI 已提示重启）
                 if (updated.MaxConcurrent != vision.MaxConcurrent || updated.TcpBacklog != tcp.Backlog)
-                    sp.GetRequiredService<ILogger<AppSettingsStore>>().LogInformation(
-                        "MaxConcurrent/TcpBacklog 改动已保存到配置文件，需重启程序后生效");
+                    ServiceCollectionExtensionsLog.RuntimeSyncRestartRequired(
+                        sp.GetRequiredService<ILogger<AppSettingsStore>>());
             };
             return store;
         });
@@ -413,6 +427,8 @@ public static class ServiceCollectionExtensions
         if (bootWarnings.Count > 0)
             services.AddHostedService(sp => new BootWarningLogService(
                 bootWarnings, sp.GetRequiredService<ILogger<BootWarningLogService>>()));
+
+        services.AddHostingRuntimeFacades();
 
         return services;
     }
@@ -473,7 +489,7 @@ public static class ServiceCollectionExtensions
         public Task StartAsync(CancellationToken cancellationToken)
         {
             foreach (var warning in warnings)
-                log.LogWarning("{Warning}", warning);
+                ServiceCollectionExtensionsLog.BootWarning(log, warning);
             return Task.CompletedTask;
         }
 

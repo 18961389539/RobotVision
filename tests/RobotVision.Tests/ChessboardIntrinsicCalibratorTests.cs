@@ -46,7 +46,7 @@ public class ChessboardIntrinsicCalibratorTests
         var ex = Assert.Throws<VisionException>(() =>
             ChessboardIntrinsicCalibrator.Calibrate("C1", files, new Size(7, 5), 40.0));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains($"{files.Length}/{ChessboardIntrinsicCalibrator.MinImageCount}", ex.Message);
+        Assert.Contains($"{files.Length}/{ChessboardIntrinsicCalibrator.MinImageCount}", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class ChessboardIntrinsicCalibratorTests
         var ex = Assert.Throws<VisionException>(() =>
             ChessboardIntrinsicCalibrator.Calibrate("C1", files, new Size(0, 5), 40.0));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains("规格非法", ex.Message);
+        Assert.Contains("规格非法", ex.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -75,7 +75,7 @@ public class ChessboardIntrinsicCalibratorTests
         var ex = Assert.Throws<VisionException>(() =>
             ChessboardIntrinsicCalibrator.Calibrate("C1", files, new Size(7, 5), squareSizeMm));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains("单元尺寸非法", ex.Message);
+        Assert.Contains("单元尺寸非法", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class ChessboardIntrinsicCalibratorTests
             var ex = Assert.Throws<VisionException>(() =>
                 ChessboardIntrinsicCalibrator.Calibrate("C1", files, new Size(7, 5), 40.0));
             Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-            Assert.Contains("分辨率", ex.Message);
+            Assert.Contains("分辨率", ex.Message, StringComparison.Ordinal);
         }
         finally
         {
@@ -110,7 +110,7 @@ public class ChessboardIntrinsicCalibratorTests
         var ex = Assert.Throws<VisionException>(() =>
             ChessboardIntrinsicCalibrator.Calibrate("C1", files, new Size(7, 5), 40.0));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains("无法读取", ex.Message);
+        Assert.Contains("无法读取", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public class ChessboardIntrinsicCalibratorTests
             var ex = Assert.Throws<VisionException>(() =>
                 ChessboardIntrinsicCalibrator.Calibrate("C1", files, new Size(7, 5), 40.0));
             Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-            Assert.Contains("未检出棋盘", ex.Message);
+            Assert.Contains("未检出棋盘", ex.Message, StringComparison.Ordinal);
         }
         finally
         {

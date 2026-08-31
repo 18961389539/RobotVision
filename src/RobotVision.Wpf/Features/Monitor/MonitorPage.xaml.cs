@@ -1,66 +1,58 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using RobotVision.WpfHost;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Monitor;
 
 public partial class MonitorPage : Page
 {
-    private MainViewModel? _viewModel;
+    private readonly MainViewModel _vm;
+    private NotifyCollectionChangedEventHandler? _logsChanged;
 
-    public MonitorPage()
+    public MonitorPage(MainViewModel viewModel)
     {
+        _vm = viewModel;
+        ViewModelPageLifetime.Attach(this, viewModel, disposeViewModelOnUnload: false, onUnloading: () =>
+        {
+            _vm.MonitorActive = false;
+            DetachLogSubscription();
+        });
         InitializeComponent();
-        DataContextChanged += OnDataContextChanged;
-        DataContext = App.Services.GetRequiredService(typeof(MainViewModel));
-        NumberBoxCommit.Bind(this, DataContext as MainViewModel);
+        NumberBoxCommit.Bind(this, _vm);
         Loaded += (_, _) =>
         {
-            SetMonitorActive(true);
-            (DataContext as MainViewModel)?.RefreshCameras();
+            _vm.MonitorActive = true;
+            _vm.RefreshCameras();
             DetachLogSubscription();
             AttachLogSubscription();
         };
-        Unloaded += (_, _) =>
-        {
-            SetMonitorActive(false);
-            DetachLogSubscription();
-        };
-    }
-
-    private void SetMonitorActive(bool value)
-    {
-        if (DataContext is MainViewModel vm)
-            vm.MonitorActive = value;
+        DataContextChanged += OnDataContextChanged;
     }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         DetachLogSubscription();
-        _viewModel = DataContext as MainViewModel;
         AttachLogSubscription();
         ScrollLogToEnd();
     }
 
     private void AttachLogSubscription()
     {
-        if (_viewModel is null)
-            return;
-        _viewModel.Logs.CollectionChanged += OnLogsChanged;
+        _logsChanged ??= OnLogsChanged;
+        _vm.Logs.CollectionChanged += _logsChanged;
     }
 
     private void DetachLogSubscription()
     {
-        if (_viewModel is not null)
-            _viewModel.Logs.CollectionChanged -= OnLogsChanged;
+        if (_logsChanged is not null)
+            _vm.Logs.CollectionChanged -= _logsChanged;
     }
 
     private void OnLogsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (_viewModel?.AutoScroll == true)
+        if (_vm.AutoScroll)
             ScrollLogToEnd();
     }
 

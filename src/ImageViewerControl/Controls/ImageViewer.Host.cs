@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System;
 using ImageViewer.Abstractions;
 using ImageViewer.Dialogs;
@@ -195,11 +196,14 @@ namespace ImageViewer.Controls
                 serviceProvider.GetRequiredService<ISelectedRoiDetectionService>());
         }
 
+        [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+            Justification = "RenderService ownership transfers to ImageViewerRuntimeServices.")]
         public static ImageViewerRuntimeServices CreateRuntimeServices(IImageViewerSessionStoragePolicy sessionStoragePolicy)
         {
             ArgumentNullException.ThrowIfNull(sessionStoragePolicy);
 
             var sessionService = new ImageViewerSessionService();
+            var renderService = new ImageViewerRenderService();
             return new ImageViewerRuntimeServices(
                 new ImageViewerDialogService(),
                 new ImageViewerFileDialogService(),
@@ -208,7 +212,7 @@ namespace ImageViewer.Controls
                 sessionService,
                 new ImageViewerRecentProjectService(),
                 new ImageViewerProjectPackageService(sessionService, sessionStoragePolicy),
-                new ImageViewerRenderService(),
+                renderService,
                 SelectedRoiDetectionService.Default);
         }
 

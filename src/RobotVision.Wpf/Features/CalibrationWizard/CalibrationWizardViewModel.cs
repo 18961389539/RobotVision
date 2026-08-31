@@ -1,10 +1,10 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
-using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.IO;
@@ -13,6 +13,7 @@ using RobotVision.Hosting;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Cameras;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.CalibrationWizard;
 
@@ -79,11 +80,13 @@ public sealed record ModeOption(WizardMode Value, string Label, string Descripti
 /// CalibrationManager，无需重启。外参与旋转中心的取图必须经过内参去畸变
 /// （与产线推理同一坐标系，铁律见 CalibrationManager 注释）。
 /// </summary>
-public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendingEdits
+public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
-    private readonly CameraManager _cameras;
-    private readonly CalibrationManager _calibration;
+    private readonly ICameraRuntime _cameras;
+    private readonly ICalibrationRuntime _calibration;
     private readonly AppConfig _cfg;
+    private readonly IDialogService _dialogs;
+    private readonly ILogger<CalibrationWizardViewModel> _log;
     private readonly string _calibrationFolder;
 
     public Action? FlushPendingEdits { get; set; }
@@ -263,15 +266,19 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
     private bool _clickable;
 
     public CalibrationWizardViewModel(
-        CameraManager cameras,
-        CalibrationManager calibration,
-        AppConfig cfg)
+        ICameraRuntime cameras,
+        ICalibrationRuntime calibration,
+        AppConfig cfg,
+        IDialogService dialogs,
+        ILogger<CalibrationWizardViewModel> log)
     {
         _cameras = cameras;
         _calibration = calibration;
         _cfg = cfg;
+        _dialogs = dialogs;
+        _log = log;
         _calibrationFolder = cfg.ResolveCalibrationFolder();
-        SelectedCamera = CameraIds.FirstOrDefault() ?? "";
+        SelectedCamera = CameraIds.Count > 0 ? CameraIds[0] : "";
         SelectedModeOption = ModeOptions[0]; // 快换标定（推荐）
     }
 
@@ -356,8 +363,7 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
         }
 
         if ((Mode is WizardMode.Extrinsic or WizardMode.Polynomial) && Points.Count > 0 &&
-            MessageBox.Show("重新取图将清空已录入的参考点。继续？", "重新取图",
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            !_dialogs.ConfirmYesNo("重新取图将清空已录入的参考点。继续？", "重新取图"))
             return;
 
         // 快照取图参数：后台线程执行期间 UI 仍可改模式下拉/角点数/工位号，
@@ -457,11 +463,13 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
         }
 
         // 外参与（无多项式时的）旋转中心必须在去畸变坐标系下取点（与推理一致）
-        var undistorted = _calibration.Undistort(cameraId, frame);
+        using var undistortedVision = _calibration.Undistort(cameraId, grabbed.Image);
+        using var undistortedMat = VisionImageCv.AsMat(undistortedVision);
+        var display = undistortedMat.Clone();
         var text = mode == WizardMode.Extrinsic
-            ? $"新图已就绪（{undistorted.Width}×{undistorted.Height}），请依次点 9 个标定点"
-            : $"新图已就绪（{undistorted.Width}×{undistorted.Height}），请点选本角度的标记点";
-        return new GrabResult(undistorted, null, text);
+            ? $"新图已就绪（{display.Width}×{display.Height}），请依次点 9 个标定点"
+            : $"新图已就绪（{display.Width}×{display.Height}），请点选本角度的标记点";
+        return new GrabResult(display, null, text);
     }
 
     private void UpdateFrame(Mat display)
@@ -772,8 +780,8 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
                     if (!ConfirmOverwrite($"{StationId.Trim()}.extrinsic.json"))
                         return;
                     if (_calibration.HasPolynomial(StationId.Trim()) &&
-                        MessageBox.Show("该工位已有多项式档案，生产将优先使用多项式（本外参会被忽略）。仍要保存外参？",
-                            "双档案并存", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                        !_dialogs.ConfirmYesNo("该工位已有多项式档案，生产将优先使用多项式（本外参会被忽略）。仍要保存外参？",
+                            "双档案并存"))
                         return;
                     // 保存时取 UI 当前值（计算后仍可调整安装模式/位姿/平面 Z）
                     _pendingExtrinsic = _pendingExtrinsic with
@@ -810,8 +818,8 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
                     if (!ConfirmOverwrite($"{StationId.Trim()}.polynomial.json"))
                         return;
                     if (_calibration.HasExtrinsic(StationId.Trim()) &&
-                        MessageBox.Show("该工位已有外参档案，保存多项式后生产将走多项式（外参被忽略）。继续？",
-                            "双档案并存", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                        !_dialogs.ConfirmYesNo("该工位已有外参档案，保存多项式后生产将走多项式（外参被忽略）。继续？",
+                            "双档案并存"))
                         return;
                     // 保存时取 UI 当前值（坐标空间/安装模式/位姿合成模式/平面 Z 可在计算后调整）。
                     // Image 毫米系无机器人系概念：MountType 强制 Fixed、位姿不记录
@@ -868,8 +876,7 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
         var path = Path.Combine(_calibrationFolder, fileName);
         if (!File.Exists(path))
             return true;
-        return MessageBox.Show($"档案 {fileName} 已存在，覆盖保存？", "覆盖确认",
-            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        return _dialogs.ConfirmYesNo($"档案 {fileName} 已存在，覆盖保存？", "覆盖确认");
     }
 
     /// <summary>查相机已加载的内参档案（外参/旋转中心标定需记录同分辨率，供一致性校验）。</summary>
@@ -912,12 +919,12 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
             : "") +
         (p.CalibrationPlaneZ != 0 ? $"\n标定平面 Z: {p.CalibrationPlaneZ:0.000}" : "");
 
-    private static string Format(PolynomialProfile p) =>
+    private string Format(PolynomialProfile p) =>
         $"多项式阶数: {p.Order}（{p.CoefficientCount} 系数/轴） · 网格点 {p.PointCount}\n" +
         $"输出坐标: {(string.Equals(p.CoordinateSpace, PolynomialCoordinateSpace.Image, StringComparison.OrdinalIgnoreCase)
             ? "棋盘平面毫米系（免示教）" : "机器人系")}\n" +
         $"拟合残差 RMS: {p.Rms:0.0000} · 最大 {p.MaxResidual:0.0000}（mm，参考 ≤0.1 优秀 / ≤0.5 可用）" +
-        (p.MaxResidual > CalibrationManager.ExtrinsicResidualFair ? "\n警告: 残差偏大，请重拍（棋盘放平、正对镜头）或核对参数" : "") +
+        (p.MaxResidual > _calibration.ExtrinsicResidualFair ? "\n警告: 残差偏大，请重拍（棋盘放平、正对镜头）或核对参数" : "") +
         (string.Equals(p.CoordinateSpace, PolynomialCoordinateSpace.Robot, StringComparison.OrdinalIgnoreCase)
             ? p.MountType == CameraMountType.OnArm
                 ? $"\n安装模式: OnArm · {p.ComposeMode}" +
@@ -942,7 +949,7 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
         return text;
     }
 
-    /// <summary>离开向导页时释放 OpenCV 帧，避免单例 VM 长期占用原生缓冲。</summary>
+    /// <summary>离开向导页时释放 OpenCV 帧，避免长期占用原生缓冲。</summary>
     public void ResetSession()
     {
         _lastRawFrame?.Dispose();
@@ -951,4 +958,6 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
         _currentFrame = null;
         FrameImage = null;
     }
+
+    public void Dispose() => ResetSession();
 }

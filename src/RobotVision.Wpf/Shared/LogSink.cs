@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using RobotVision.Hosting.Chat;
@@ -40,7 +41,7 @@ public sealed class LogSink : ILoggerProvider, IChatLogSource
         if (all.Count > max)
             all = all.Skip(all.Count - max).ToArray();
         return all.Select(e => new ChatLogLine(
-            e.Time.ToString("HH:mm:ss"), e.Level.ToString(), e.Category, e.Message)).ToList();
+            e.Time.ToString("HH:mm:ss", CultureInfo.InvariantCulture), e.Level.ToString(), e.Category, e.Message)).ToList();
     }
 
     public void Dispose()

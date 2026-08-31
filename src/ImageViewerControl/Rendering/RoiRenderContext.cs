@@ -420,7 +420,7 @@ namespace ImageViewer.Rendering
             return string.IsNullOrWhiteSpace(PhysicalUnit) ? "px" : PhysicalUnit;
         }
 
-        private static Brush CreateFrozenInfoTextBackground()
+        private static SolidColorBrush CreateFrozenInfoTextBackground()
         {
             var brush = new SolidColorBrush(Color.FromArgb(220, 20, 20, 20));
             brush.Freeze();

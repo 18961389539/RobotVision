@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Diagnostics;
 using System.Text.Json;
 using OpenCvSharp;
@@ -251,7 +252,7 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
                 var d = MaskCaliperTab.LastDebug;
                 output.WriteLine($"[{tag}] #{i + 1:00}  {p.Cx:0.00},{p.Cy:0.00}  {p.AngleDeg:0.000}°  " +
                                  $"probes={d.ValidProbes} par={d.ParallelDeg:0.00}° w={d.WidthPx:0.0} " +
-                                 $"tab={d.TabSign?.ToString() ?? "n"} diff={d.TabGrayDiff:0.0}");
+                                 $"tab={d.TabSign?.ToString(CultureInfo.InvariantCulture) ?? "n"} diff={d.TabGrayDiff:0.0}");
             }
             else
             {

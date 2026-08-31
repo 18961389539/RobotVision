@@ -37,6 +37,10 @@ internal sealed class FakeInferenceEngine : IInferenceEngine
 
 internal sealed class FakeInferenceEngineFactory(Func<FakeInferenceEngine> create) : IInferenceEngineFactory
 {
+    public string ActiveDevice => "";
+
+    public bool GpuUnavailable => false;
+
     public FakeInferenceEngine? LastEngine { get; private set; }
 
     public IInferenceEngine Create(string modelPath)
@@ -44,4 +48,7 @@ internal sealed class FakeInferenceEngineFactory(Func<FakeInferenceEngine> creat
         LastEngine = create();
         return LastEngine;
     }
+
+    public InferenceTask? DetectTask(string modelPath) =>
+        InferenceTaskDetector.Detect(this, modelPath);
 }

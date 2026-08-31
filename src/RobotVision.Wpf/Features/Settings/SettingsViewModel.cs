@@ -1,8 +1,8 @@
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.WpfHost.Shared;
 
@@ -14,7 +14,7 @@ namespace RobotVision.WpfHost.Features.Settings;
 /// 网络端点（IP/端口）保存后热重启监听（无需重启程序，失败自动回滚并提示）。
 /// 校验集中在 AppSettingsStore（值域 + 相机取图超时联动），本页只负责展示与交互。
 /// </summary>
-public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
+public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
     // 出厂默认值（与 appsettings.json 初始一致）
     private const long DefaultIdleTimeoutMs = 0;
@@ -48,13 +48,15 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     ];
 
     private readonly AppConfig _cfg;
-    private readonly TcpServerManager _tcp;
+    private readonly ITcpRuntime _tcp;
     private readonly VisionService _vision;
     private readonly FailureImageStore _failures;
     private readonly ResultLogStore _results;
     private readonly SuccessCaptureStore _captures;
     private readonly AppSettingsStore _store;
     private readonly IInferenceEngineFactory? _inference;
+    private readonly IDialogService _dialogs;
+    private readonly ILogger<SettingsViewModel> _log;
     private readonly DispatcherTimer _timer;
 
     /// <summary>最近一次载入/保存时的参数快照（脏标记基准）。</summary>
@@ -189,16 +191,33 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     [ObservableProperty]
     private string _uiTheme = DefaultUiTheme;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowPlcDebugFields))]
+    private bool _plcDebugAlwaysOk;
+
+    [ObservableProperty]
+    private double _plcDebugDefaultX;
+
+    [ObservableProperty]
+    private double _plcDebugDefaultY;
+
+    [ObservableProperty]
+    private double _plcDebugDefaultRz;
+
+    public bool ShowPlcDebugFields => PlcDebugAlwaysOk;
+
     partial void OnUiThemeChanged(string value) => AppThemeManager.Apply(value);
 
     public SettingsViewModel(
         AppConfig cfg,
-        TcpServerManager tcp,
+        ITcpRuntime tcp,
         VisionService vision,
         FailureImageStore failures,
         ResultLogStore results,
         SuccessCaptureStore captures,
         AppSettingsStore store,
+        IDialogService dialogs,
+        ILogger<SettingsViewModel> log,
         IInferenceEngineFactory? inference = null)
     {
         _cfg = cfg;
@@ -208,6 +227,8 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         _results = results;
         _captures = captures;
         _store = store;
+        _dialogs = dialogs;
+        _log = log;
         _inference = inference;
 
         LoadFromRuntime();
@@ -254,6 +275,10 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         TcpPort = _cfg.TcpPort;
         UiTheme = UiThemes.Normalize(_cfg.UiTheme);
         WhitelistText = string.Join(Environment.NewLine, _cfg.IpWhitelist);
+        PlcDebugAlwaysOk = _cfg.PlcDebug.AlwaysOk;
+        PlcDebugDefaultX = _cfg.PlcDebug.DefaultX;
+        PlcDebugDefaultY = _cfg.PlcDebug.DefaultY;
+        PlcDebugDefaultRz = _cfg.PlcDebug.DefaultRz;
         _baseline = CurrentValues();
         RefreshStatus();
         OnPropertyChanged(nameof(FailureFolderPath));
@@ -268,6 +293,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     public void StartTimer() => _timer.Start();
 
     public void StopTimer() => _timer.Stop();
+
+    /// <summary>进程退出时由 DI 容器级联调用（单例 VM）：停止 1 秒状态轮询。</summary>
+    public void Dispose() => _timer.Stop();
 
     private void RefreshStatus()
     {
@@ -293,6 +321,14 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
             this.Commit();
             var values = CurrentValues();
 
+            if (values.PlcDebugAlwaysOk && _baseline is { PlcDebugAlwaysOk: false } &&
+                !_dialogs.ConfirmYesNo(
+                    "启用后 TCP 将不再向 PLC 返回 ERR（失败时回设置的默认 OK 坐标）。\n" +
+                    "视觉仍会照常采图推理，仅协议线伪装成功。\n\n" +
+                    "仅供 PLC 联调，正式产线务必关闭。继续保存？",
+                    "PLC 调试模式"))
+                return;
+
             var endpointChanged = _baseline is null
                 || !string.Equals(_baseline.IpAddress, values.IpAddress, StringComparison.OrdinalIgnoreCase)
                 || _baseline.TcpPort != values.TcpPort;
@@ -304,6 +340,10 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
             _vision.MaxQueueDepth = values.MaxQueueDepth;
             _tcp.MaxConnections = values.MaxConnections;
             _tcp.IpWhitelist = values.IpWhitelist;
+            _tcp.PlcAlwaysOkMode = values.PlcDebugAlwaysOk;
+            _tcp.PlcDebugDefaultX = values.PlcDebugDefaultX;
+            _tcp.PlcDebugDefaultY = values.PlcDebugDefaultY;
+            _tcp.PlcDebugDefaultRz = values.PlcDebugDefaultRz;
             _failures.Enabled = values.FailureEnabled;
             _failures.RetainedCount = values.FailureRetainedCount;
             _failures.RetainedDays = values.FailureRetainedDays;
@@ -368,6 +408,10 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         TcpPort = DefaultTcpPort;
         UiTheme = DefaultUiTheme;
         WhitelistText = "";
+        PlcDebugAlwaysOk = false;
+        PlcDebugDefaultX = 0;
+        PlcDebugDefaultY = 0;
+        PlcDebugDefaultRz = 0;
         Message = "已填入出厂默认值，点击「保存并应用」生效";
     }
 
@@ -378,7 +422,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
     private void SetIdleNever() => IdleTimeoutMs = 0;
 
     [RelayCommand]
-    private void SetIdleThirtyDays() => IdleTimeoutMs = TcpServerManager.IdleTimeoutThirtyDaysMs;
+    private void SetIdleThirtyDays() => IdleTimeoutMs = ITcpRuntime.IdleTimeoutThirtyDaysMs;
 
     [RelayCommand]
     private void OpenDataRoot() =>
@@ -444,7 +488,8 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
             InferenceProvider, InferenceMaxSessions,
             FileLoggingEnabled, FileLoggingRetainedDays,
             ProcessHealthRetainedDays,
-            UiTheme);
+            UiTheme,
+            PlcDebugAlwaysOk, PlcDebugDefaultX, PlcDebugDefaultY, PlcDebugDefaultRz);
     }
 
     private static bool Same(ServiceSettingsValues a, ServiceSettingsValues b) =>
@@ -476,6 +521,10 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits
         a.ProcessHealthEnabled == b.ProcessHealthEnabled &&
         a.ConsecutiveFailLimit == b.ConsecutiveFailLimit &&
         a.InhibitOnLimit == b.InhibitOnLimit &&
+        a.PlcDebugAlwaysOk == b.PlcDebugAlwaysOk &&
+        Math.Abs(a.PlcDebugDefaultX - b.PlcDebugDefaultX) < 1e-9 &&
+        Math.Abs(a.PlcDebugDefaultY - b.PlcDebugDefaultY) < 1e-9 &&
+        Math.Abs(a.PlcDebugDefaultRz - b.PlcDebugDefaultRz) < 1e-9 &&
         a.IpWhitelist.SequenceEqual(b.IpWhitelist, StringComparer.OrdinalIgnoreCase);
 }
 

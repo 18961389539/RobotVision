@@ -53,6 +53,34 @@ public sealed class OverlayDrawerTests
         return false;
     }
 
+    [Fact]
+    public void DrawPoses_DrawDebug_PaintsShapeInlierDot()
+    {
+        using var mat = new Mat(80, 80, MatType.CV_8UC3, Scalar.All(0));
+        OverlayDrawer.DrawPoses(mat, [PoseWithShapeDots()], drawDebug: true);
+        Assert.True(HasCyanNear(mat, 30, 30), "开启调试时应画出青色形状命中点");
+    }
+
+    [Fact]
+    public void DrawPoses_Default_DoesNotPaintShapeDot()
+    {
+        using var mat = new Mat(80, 80, MatType.CV_8UC3, Scalar.All(0));
+        OverlayDrawer.DrawPoses(mat, [PoseWithShapeDots()]);
+        Assert.False(HasCyanNear(mat, 30, 30), "默认不应画形状调试点");
+    }
+
+    private static PixelPose PoseWithShapeDots() =>
+        new(50, 50, 0, 1)
+        {
+            Overlay = new PoseOverlay
+            {
+                DebugDots =
+                [
+                    new OverlayDot(new PixelPoint(30, 30), OverlayDotKind.Inlier),
+                ],
+            },
+        };
+
     private static PixelPose PoseWithCaliper() =>
         new(50, 50, 0, 1)
         {

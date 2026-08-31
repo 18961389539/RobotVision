@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
@@ -56,6 +57,8 @@ public sealed class FileCamera : ICamera
     /// <summary>按字节流解码图片（中文路径安全）。不改变回放下标。</summary>
     public static Mat DecodeFile(string path) => ReadImage(path);
 
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "VisionImage ownership transfers to CameraFrame.")]
     public CameraFrame Grab(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -80,10 +83,12 @@ public sealed class FileCamera : ICamera
             _lastFile = file;
         }
 
-        return new CameraFrame(VisionImageCv.FromMat(ReadImage(file), ownsMat: true), DateTime.UtcNow);
+        return new CameraFrame(LoadOwnedImage(file), DateTime.UtcNow);
     }
 
     /// <summary>再读上次 <see cref="Grab"/> 的文件，不推进下标。示教/框选要沿用当前画面。</summary>
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "VisionImage ownership transfers to CameraFrame.")]
     public CameraFrame RepeatLast(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -92,7 +97,22 @@ public sealed class FileCamera : ICamera
             file = _lastFile;
         if (string.IsNullOrEmpty(file))
             return Grab(ct);
-        return new CameraFrame(VisionImageCv.FromMat(ReadImage(file), ownsMat: true), DateTime.UtcNow);
+        return new CameraFrame(LoadOwnedImage(file), DateTime.UtcNow);
+    }
+
+    private static VisionImage LoadOwnedImage(string file)
+    {
+        var mat = ReadImage(file);
+        try
+        {
+            var image = VisionImageCv.Adopt(mat);
+            mat = null!;
+            return image;
+        }
+        finally
+        {
+            mat?.Dispose();
+        }
     }
 
     /// <summary>

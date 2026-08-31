@@ -80,7 +80,7 @@ public class RotationCenterCalibratorTests
 
         var ex = Assert.Throws<VisionException>(() =>
             RotationCenterCalibrator.Calibrate("st1", "cam1", points));
-        Assert.Contains("半径", ex.Message);
-        Assert.Contains("过小", ex.Message);
+        Assert.Contains("半径", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("过小", ex.Message, StringComparison.Ordinal);
     }
 }

@@ -131,7 +131,7 @@ public sealed class ResultLogStore : IDisposable
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "提交结果日志失败（不影响管线）");
+            ResultLogStoreLog.EnqueueFailed(_log, ex);
         }
     }
 
@@ -147,7 +147,7 @@ public sealed class ResultLogStore : IDisposable
                 try { AppendJsonl(line); }
                 catch (Exception ex)
                 {
-                    _log.LogWarning(ex, "写结果 JSONL 失败（不影响管线）");
+                    ResultLogStoreLog.JsonlWriteFailed(_log, ex);
                 }
             }
 
@@ -156,7 +156,7 @@ public sealed class ResultLogStore : IDisposable
                 try { _sqlite.Insert(entry, tUnix); }
                 catch (Exception ex)
                 {
-                    _log.LogWarning(ex, "写结果 SQLite 失败（不影响管线）");
+                    ResultLogStoreLog.SqliteWriteFailed(_log, ex);
                 }
             }
         }
@@ -188,7 +188,7 @@ public sealed class ResultLogStore : IDisposable
                     DateTimeStyles.None, out var day) && day < cutoff)
             {
                 try { File.Delete(file); }
-                catch (Exception ex) { _log.LogWarning(ex, "清理结果日志失败: {File}", file); }
+                catch (Exception ex) { ResultLogStoreLog.CleanupFailed(_log, ex, file); }
             }
         }
     }

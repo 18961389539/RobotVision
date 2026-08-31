@@ -118,6 +118,7 @@ namespace ImageViewer.Controls
         public void Dispose()
         {
             _lifetime.Dispose();
+            _controlComposition.Dispose();
             _ownedHost?.Dispose();
             GC.SuppressFinalize(this);
         }

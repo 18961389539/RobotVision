@@ -55,7 +55,7 @@ public static class ChatHistoryComposer
         return Math.Max(1, (chars + 2) / 3);
     }
 
-    private static string BuildSummary(IReadOnlyList<ChatTurn> dropped)
+    private static string BuildSummary(List<ChatTurn> dropped)
     {
         var sb = new StringBuilder();
         sb.Append("〔对话摘要〕已省略较早 ").Append(dropped.Count).Append(" 条消息。");

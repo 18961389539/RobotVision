@@ -50,14 +50,16 @@ public class MainViewModelTests : IDisposable
 
     public void Dispose()
     {
+        _cameras.Dispose();
         _sink.Dispose();
         _tcp.Dispose();
         _dir.Dispose();
     }
 
     private MainViewModel CreateVm() =>
-        new(_vision, _cfg, _cameras, new RobotVision.Infrastructure.Calibration.CalibrationManager(),
-            _recipes, _tcp, _sink);
+        new(_vision, _cfg, TestInfra.CameraFacade(_cameras),
+            TestInfra.CalibrationFacade(new RobotVision.Infrastructure.Calibration.CalibrationManager()),
+            _recipes, TestInfra.TcpFacade(_tcp), _sink, TestLog.Null<MainViewModel>());
 
     [Fact]
     public void Ctor_LoadsCamerasAndRecipes_SelectsVirtualCameraByDefault()
@@ -111,8 +113,8 @@ public class MainViewModelTests : IDisposable
         try
         {
             var logger = _sink.CreateLogger("Test.Category");
-            logger.LogInformation("hello info");
-            logger.LogWarning("hello warn");
+            MainViewModelTestsLog.HelloInfo(logger);
+            MainViewModelTestsLog.HelloWarn(logger);
 
             vm.Logs.Should().HaveCount(2);
             vm.Logs[0].Message.Should().Contain("hello info");
@@ -127,8 +129,8 @@ public class MainViewModelTests : IDisposable
         try
         {
             var logger = _sink.CreateLogger("Test.Category");
-            logger.LogInformation("info line");
-            logger.LogError("error line");
+            MainViewModelTestsLog.InfoLine(logger);
+            MainViewModelTestsLog.ErrorLine(logger);
 
             vm.Logs.Should().HaveCount(2);
 
@@ -150,7 +152,7 @@ public class MainViewModelTests : IDisposable
         {
             var logger = _sink.CreateLogger("Test.Category");
             for (var i = 0; i < 600; i++)
-                logger.LogInformation("line {I}", i);
+                MainViewModelTestsLog.LineIndex(logger, i);
 
             vm.Logs.Count.Should().BeLessThanOrEqualTo(500); // LogCapacity = 500
         }
@@ -163,7 +165,7 @@ public class MainViewModelTests : IDisposable
         var vm = CreateVm();
         try
         {
-            _sink.CreateLogger("T").LogInformation("x");
+            MainViewModelTestsLog.SimpleX(_sink.CreateLogger("T"));
             vm.Logs.Should().NotBeEmpty();
 
             vm.ClearLogCommand.Execute(null);

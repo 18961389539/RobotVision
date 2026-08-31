@@ -1,6 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Teach;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -117,10 +118,10 @@ public sealed class SegmentRefineBakeOffTests
         var caliper = agg.Single(c => c.Method == SegmentRefineMethod.CaliperTab);
         Assert.True(caliper.Ok);
         Assert.Equal(0.80, caliper.Score, 2);
-        Assert.Contains("2/2", caliper.Note);
+        Assert.Contains("2/2", caliper.Note, StringComparison.Ordinal);
         var template = agg.Single(c => c.Method == SegmentRefineMethod.Template);
         Assert.Equal(0.475, template.Score, 3);
-        Assert.Contains("1/2", template.Note);
+        Assert.Contains("1/2", template.Note, StringComparison.Ordinal);
         Assert.Equal(SegmentRefineMethod.CaliperTab, SegmentRefineBakeOff.PickWinner(agg)!.Method);
     }
 
@@ -143,7 +144,7 @@ public sealed class SegmentRefineBakeOffTests
         ]).Single();
         Assert.True(stable.Score > flip.Score + 0.2,
             $"稳 {stable.Score:0.00} 应明显高于翻面 {flip.Score:0.00}（{flip.Note}）");
-        Assert.Contains("角σ", flip.Note);
+        Assert.Contains("角σ", flip.Note, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -191,7 +192,7 @@ public sealed class SegmentRefineBakeOffTests
         var caliper = agg.Single();
         Assert.Equal(0.30, caliper.Score, 2);
         Assert.False(caliper.Ok);
-        Assert.Contains("1/3", caliper.Note);
+        Assert.Contains("1/3", caliper.Note, StringComparison.Ordinal);
     }
 
     [Fact]

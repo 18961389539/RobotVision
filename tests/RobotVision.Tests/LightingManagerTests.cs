@@ -35,10 +35,13 @@ public class LightingManagerTests
 
         public LightingConfig? LastConfig;
 
-        public void Apply(LightingConfig lighting)
+        public bool ApplySucceeds { get; set; } = true;
+
+        public bool Apply(LightingConfig lighting)
         {
             ApplyCount++;
             LastConfig = lighting;
+            return ApplySucceeds;
         }
 
         public void SendRaw(string command)
@@ -91,6 +94,30 @@ public class LightingManagerTests
     }
 
     [Fact]
+    public void Apply_SendFailed_ThrowsLightCommandFailed_AndDoesNotTurnOff()
+    {
+        var manager = new LightingManager();
+        var light = new FakeLight("l1") { ApplySucceeds = false };
+        manager.Register(light);
+
+        var ex = Assert.Throws<VisionException>(() => manager.Apply("l1", SampleLighting()));
+        Assert.Equal(VisionErrorCode.LightCommandFailed, ex.ErrorCode);
+        Assert.Equal(1, light.ApplyCount);
+        Assert.Equal(0, light.TurnOffCount);
+    }
+
+    [Fact]
+    public void TurnOn_SendFailed_ThrowsLightCommandFailed()
+    {
+        var manager = new LightingManager();
+        var light = new FakeLight("l1") { ApplySucceeds = false };
+        manager.Register(light);
+
+        var ex = Assert.Throws<VisionException>(() => manager.TurnOn("l1", 1, 128));
+        Assert.Equal(VisionErrorCode.LightCommandFailed, ex.ErrorCode);
+    }
+
+    [Fact]
     public void Apply_RegisteredController_AppliesAndScopeDisposeTurnsOff()
     {
         var manager = new LightingManager();
@@ -123,6 +150,33 @@ public class LightingManagerTests
 
         using var scope = manager.Apply("l1", lighting);
         Assert.Equal(0, light.TurnOffCount);
+    }
+
+    [Fact]
+    public void Apply_SecondCallBlocksUntilScopeDisposed()
+    {
+        var manager = new LightingManager();
+        var light = new FakeLight("l1");
+        manager.Register(light);
+
+        using var scope1 = manager.Apply("l1", SampleLighting());
+        var started = new ManualResetEventSlim(false);
+        var finished = new ManualResetEventSlim(false);
+
+        var worker = Task.Run(() =>
+        {
+            started.Set();
+            using var scope2 = manager.Apply("l1", SampleLighting());
+            finished.Set();
+        });
+
+        Assert.True(started.Wait(TimeSpan.FromSeconds(2)));
+        Assert.False(finished.Wait(TimeSpan.FromMilliseconds(50)));
+
+        scope1.Dispose();
+        Assert.True(finished.Wait(TimeSpan.FromSeconds(2)));
+        worker.GetAwaiter().GetResult();
+        Assert.Equal(2, light.ApplyCount);
     }
 
     [Fact]
@@ -159,7 +213,7 @@ public class LightingManagerTests
         recipe.LightControllerId = "light1";
 
         var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
-        Assert.Contains("lighting", ex.Message);
+        Assert.Contains("lighting", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -169,7 +223,7 @@ public class LightingManagerTests
         recipe.Lighting = SampleLighting();
 
         var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
-        Assert.Contains("lightControllerId", ex.Message);
+        Assert.Contains("lightControllerId", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -180,7 +234,7 @@ public class LightingManagerTests
         recipe.Lighting = SampleLighting(brightness: 300);
 
         var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
-        Assert.Contains("亮度", ex.Message);
+        Assert.Contains("亮度", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -194,7 +248,7 @@ public class LightingManagerTests
         };
 
         var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
-        Assert.Contains("通道号", ex.Message);
+        Assert.Contains("通道号", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -206,7 +260,7 @@ public class LightingManagerTests
         recipe.Lighting.StabilizeDelayMs = -5;
 
         var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
-        Assert.Contains("stabilizeDelayMs", ex.Message);
+        Assert.Contains("stabilizeDelayMs", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -379,5 +433,28 @@ public class LightingManagerTests
         var result = await service.RunAsync("L1", CancellationToken.None);
 
         Assert.Equal(VisionErrorCode.LightNotRegistered, result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Pipeline_LightingSendFailed_Returns1020_AndDoesNotGrabInference()
+    {
+        var (service, light) = CreatePipeline("""
+            {
+              "cameraId": "cam1",
+              "angleMode": "MaskMinAreaRect",
+              "models": [ "no_such_model.onnx" ],
+              "lightControllerId": "light1",
+              "lighting": {
+                "channels": [ { "channel": 1, "brightness": 128 } ]
+              }
+            }
+            """);
+        light.ApplySucceeds = false;
+
+        var result = await service.RunAsync("L1", CancellationToken.None);
+
+        Assert.Equal(VisionErrorCode.LightCommandFailed, result.ErrorCode);
+        Assert.Equal(1, light.ApplyCount);
+        Assert.Equal(0, light.TurnOffCount);
     }
 }

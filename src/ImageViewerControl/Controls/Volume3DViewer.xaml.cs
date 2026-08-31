@@ -228,10 +228,11 @@ namespace ImageViewer.Controls
             viewport.Items.Clear();
             viewport.EffectsManager?.Dispose();
             viewport.EffectsManager = null;
-            _volumeBoundsModel = null;
-            _axialPlaneModel = null;
-            _coronalPlaneModel = null;
-            _sagittalPlaneModel = null;
+            DisposeMeshModel(ref _volumeBoundsModel);
+            DisposeMeshModel(ref _axialPlaneModel);
+            DisposeMeshModel(ref _coronalPlaneModel);
+            DisposeMeshModel(ref _sagittalPlaneModel);
+            DisposeMeshModel(ref _cropBoundsModel);
             _volume = null;
             GC.SuppressFinalize(this);
         }
@@ -500,6 +501,14 @@ namespace ImageViewer.Controls
             {
                 _sagittalPlaneModel.Visibility = _showSagittalPlane ? Visibility.Visible : Visibility.Hidden;
             }
+        }
+
+        private static void DisposeMeshModel(ref MeshGeometryModel3D? model)
+        {
+            if (model is null)
+                return;
+            model.Dispose();
+            model = null;
         }
     }
 }

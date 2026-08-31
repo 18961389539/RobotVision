@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure.Communication;
 using RobotVision.WpfHost.Features.Settings;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.Wpf.Tests;
 
@@ -42,12 +43,13 @@ public class SettingsViewModelTests : IDisposable
 
     public void Dispose()
     {
+        _results.Dispose();
         _tcp.Dispose();
         _dir.Dispose();
     }
 
     private SettingsViewModel CreateVm() =>
-        new(_cfg, _tcp, _vision, _failures, _results, _captures, _store);
+        new(_cfg, TestInfra.TcpFacade(_tcp), _vision, _failures, _results, _captures, _store, new TestDialogService(), TestLog.Null<SettingsViewModel>());
 
     [Fact]
     public void Ctor_LoadsRuntimeValues()
@@ -109,7 +111,7 @@ public class SettingsViewModelTests : IDisposable
         vm.IdleTimeoutMs.Should().Be(0);
 
         vm.SetIdleThirtyDaysCommand.Execute(null);
-        vm.IdleTimeoutMs.Should().Be(TcpServerManager.IdleTimeoutThirtyDaysMs);
+        vm.IdleTimeoutMs.Should().Be(ITcpRuntime.IdleTimeoutThirtyDaysMs);
     }
 
     [Fact]

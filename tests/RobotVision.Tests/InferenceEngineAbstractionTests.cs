@@ -39,7 +39,7 @@ public class InferenceEngineAbstractionTests : IDisposable
         var factory = new YoloDotNetEngineFactory("Cuda");
         var ex = Assert.Throws<VisionException>(() => factory.Create(Path.Combine(_folder, "x.onnx")));
         Assert.Equal(VisionErrorCode.ModelNotAvailable, ex.ErrorCode);
-        Assert.Contains("Cuda", ex.Message);
+        Assert.Contains("Cuda", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public class InferenceEngineAbstractionTests : IDisposable
         var missing = Path.Combine(_folder, "missing.onnx");
         var ex = Assert.Throws<VisionException>(() => factory.Create(missing));
         Assert.Equal(VisionErrorCode.ModelNotAvailable, ex.ErrorCode);
-        Assert.Contains("CPU 回退也失败", ex.Message);
+        Assert.Contains("CPU 回退也失败", ex.Message, StringComparison.Ordinal);
         Assert.False(factory.GpuUnavailable);
     }
 
@@ -62,7 +62,7 @@ public class InferenceEngineAbstractionTests : IDisposable
         Assert.False(manager.ModelFileExists("empty.onnx"));
         var ex = Assert.Throws<VisionException>(() => manager.Open("empty.onnx", InferenceTask.ObjectDetection));
         Assert.Equal(VisionErrorCode.ModelNotAvailable, ex.ErrorCode);
-        Assert.Contains("为空", ex.Message);
+        Assert.Contains("为空", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>记录型假引擎：验证 ModelManager 经抽象调用引擎方法。</summary>
@@ -98,9 +98,15 @@ public class InferenceEngineAbstractionTests : IDisposable
 
     private sealed class FakeEngineFactory : IInferenceEngineFactory
     {
+        public string ActiveDevice => "";
+
+        public bool GpuUnavailable => false;
+
         public FakeEngine Engine { get; } = new();
 
         public IInferenceEngine Create(string modelPath) => Engine;
+
+        public InferenceTask? DetectTask(string modelPath) => null;
     }
 
     [Fact]

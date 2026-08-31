@@ -4,7 +4,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using OpenCvSharp;
 using RobotVision.Core.Models;
-using RobotVision.Infrastructure;
+using RobotVision.Hosting;
 
 namespace RobotVision.WpfHost.Shared;
 
@@ -13,7 +13,7 @@ public static class ImageConverter
 {
     public static BitmapSource ToBitmapSource(VisionImage image)
     {
-        using var mat = VisionImageCv.AsMat(image);
+        using var mat = VisionImageMat.AsMat(image);
         return ToBitmapSource(mat);
     }
 

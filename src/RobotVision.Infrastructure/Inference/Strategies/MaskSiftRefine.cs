@@ -1,5 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
+using System.Diagnostics.CodeAnalysis;
 using OpenCvSharp;
 using OpenCvSharp.Features2D;
 using RobotVision.Core.Geometry;
@@ -63,14 +62,15 @@ public static class MaskSiftRefine
     internal static DebugInfo LastDebug;
 
     private static readonly ThreadLocal<SIFT> Detector = new(CreateDetector);
-    private static readonly object CacheGate = new();
-    private static readonly Dictionary<string, CachedTeach> Cache = new(StringComparer.OrdinalIgnoreCase);
-
-    private sealed class CachedTeach(string fingerprint, TeachModel model)
-    {
-        public string Fingerprint { get; } = fingerprint;
-        public TeachModel Model { get; } = model;
-    }
+    private static readonly RecipeTeachCache<TeachModel> TeachCache = new(
+        ShouldCache,
+        RecipeTeachFingerprints.TemplateImage,
+        recipe =>
+        {
+            using var decoded = MaskTemplateMatcher.DecodeTemplatePng(recipe.Template.TemplateImageBase64);
+            return BuildTeach(decoded);
+        },
+        m => m.Dispose());
 
     public static Result? Refine(Mat image, IReadOnlyList<Point2f> contour, TeachModel teach) =>
         TryRefine(image, contour, teach).Pose;
@@ -115,48 +115,19 @@ public static class MaskSiftRefine
         return new TeachModel(kps, desc, gray.Width / 2.0, gray.Height / 2.0);
     }
 
-    public static void Warm(RecipeConfig recipe)
-    {
-        if (!ShouldCache(recipe))
-            return;
-        GetOrCreate(recipe);
-    }
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "Warms process-wide SIFT teach cache; ownership retained in cache.")]
+    public static void Warm(RecipeConfig recipe) => TeachCache.Warm(recipe);
 
-    public static void Remove(string recipeName)
-    {
-        lock (CacheGate)
-        {
-            if (Cache.Remove(recipeName, out var cached))
-                cached.Model.Dispose();
-        }
-    }
+    public static void Remove(string recipeName) => TeachCache.Remove(recipeName);
 
-    /// <summary>命中指纹则复用；模板变更则重建。调用方不得 Dispose 返回对象。</summary>
-    public static TeachModel? GetOrCreate(RecipeConfig recipe)
-    {
-        if (!ShouldCache(recipe))
-            return null;
+    /// <summary>归还 <see cref="GetOrCreate"/> 租约。退役条目在租约归零后才释放描述子。</summary>
+    public static void Release(TeachModel? teach) => TeachCache.Release(teach);
 
-        var fingerprint = Fingerprint(recipe.Template);
-        lock (CacheGate)
-        {
-            if (Cache.TryGetValue(recipe.Name, out var cached) && cached.Fingerprint == fingerprint)
-                return cached.Model;
-
-            if (cached is not null)
-            {
-                Cache.Remove(recipe.Name);
-                cached.Model.Dispose();
-            }
-
-            using var decoded = MaskTemplateMatcher.DecodeTemplatePng(recipe.Template.TemplateImageBase64);
-            var model = BuildTeach(decoded);
-            if (model is null)
-                return null;
-            Cache[recipe.Name] = new CachedTeach(fingerprint, model);
-            return model;
-        }
-    }
+    /// <summary>命中指纹则复用；模板变更则重建。调用方必须 <see cref="Release"/>，不得 Dispose 返回对象。</summary>
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "TeachModel ownership transfers to process-wide cache until Release / Remove.")]
+    public static TeachModel? GetOrCreate(RecipeConfig recipe) => TeachCache.GetOrCreate(recipe);
 
     internal static double QualityScore(DebugInfo d)
     {
@@ -167,16 +138,13 @@ public static class MaskSiftRefine
         return Math.Clamp(0.45 * ratio + 0.55 * body, 0.15, 1);
     }
 
+    internal static string FormatQualityNote(double score, double matchThreshold, DebugInfo debug) =>
+        $"内点 {debug.Inliers}/{debug.Matches} · 分 {score:0.00} (门 {matchThreshold:0.00})";
+
     private static bool ShouldCache(RecipeConfig recipe) =>
         recipe.AngleMode == AngleMode.MaskTemplate
         && recipe.Template.RefineMethod == SegmentRefineMethod.Sift
         && !string.IsNullOrEmpty(recipe.Template.TemplateImageBase64);
-
-    private static string Fingerprint(TemplateOptions template)
-    {
-        var hash = SHA256.HashData(Encoding.ASCII.GetBytes(template.TemplateImageBase64));
-        return Convert.ToHexString(hash);
-    }
 
     private static SIFT CreateDetector() =>
         SIFT.Create(nFeatures: MaxFeatures, nOctaveLayers: 3, contrastThreshold: 0.02,
@@ -256,8 +224,10 @@ public static class MaskSiftRefine
             return Attempt.Miss();
 
         using var inliers = new Mat();
+        using var srcArray = InputArray.Create(src);
+        using var dstArray = InputArray.Create(dst);
         using var affine = Cv2.EstimateAffinePartial2D(
-            InputArray.Create(src), InputArray.Create(dst), inliers,
+            srcArray, dstArray, inliers,
             RobustEstimationAlgorithms.RANSAC, RansacPx, 2000, 0.99, 10);
         if (affine is null || affine.Empty())
             return Attempt.Miss();

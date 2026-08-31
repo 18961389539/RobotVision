@@ -348,6 +348,10 @@ public class ModelManagerRaceTests : IDisposable
 
         public FakeEngine? LastEngine { get; private set; }
 
+        public string ActiveDevice => "";
+
+        public bool GpuUnavailable => false;
+
         public IInferenceEngine Create(string modelPath)
         {
             Interlocked.Increment(ref CreateCount);
@@ -356,5 +360,7 @@ public class ModelManagerRaceTests : IDisposable
             LastEngine = engine;
             return engine;
         }
+
+        public InferenceTask? DetectTask(string modelPath) => null;
     }
 }

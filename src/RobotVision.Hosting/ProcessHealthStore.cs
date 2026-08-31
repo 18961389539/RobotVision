@@ -65,7 +65,7 @@ public sealed class ProcessHealthStore
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "恢复过程能力统计失败（将从零开始）");
+            ProcessHealthStoreLog.RestoreFailed(_log, ex);
         }
     }
 
@@ -84,7 +84,7 @@ public sealed class ProcessHealthStore
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "过程能力状态落盘失败");
+            ProcessHealthStoreLog.StatePersistFailed(_log, ex);
         }
     }
 
@@ -105,7 +105,7 @@ public sealed class ProcessHealthStore
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "过程能力落盘失败（不影响管线）");
+            ProcessHealthStoreLog.PersistFailed(_log, ex);
         }
     }
 

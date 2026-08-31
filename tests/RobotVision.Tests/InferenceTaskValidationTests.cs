@@ -36,7 +36,7 @@ public class InferenceTaskValidationTests
         var ex = Assert.Throws<VisionException>(
             () => InferenceTaskValidation.EnsureSupported(engine, InferenceTask.PoseEstimation));
         Assert.Equal(VisionErrorCode.ModelNotAvailable, ex.ErrorCode);
-        Assert.Contains("分割", ex.Message);
-        Assert.Contains("关键点", ex.Message);
+        Assert.Contains("分割", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("关键点", ex.Message, StringComparison.Ordinal);
     }
 }

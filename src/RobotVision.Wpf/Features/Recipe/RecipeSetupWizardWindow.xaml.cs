@@ -1,12 +1,16 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Media.Imaging;
+using RobotVision.Core.Recipe;
 using Wpf.Ui.Controls;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
-public partial class RecipeSetupWizardWindow : FluentWindow
+public partial class RecipeSetupWizardWindow : FluentWindow, IDisposable
 {
+    private RecipeSetupWizardViewModel? _vm;
+    private RecipeWizardImageHost? _imageHost;
+
     public RecipeSetupWizardWindow()
     {
         InitializeComponent();
@@ -15,45 +19,105 @@ public partial class RecipeSetupWizardWindow : FluentWindow
         DataContextChanged += OnDataContextChanged;
     }
 
-    private void OnLoaded(object sender, RoutedEventArgs e) =>
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
         UpdateFeatureOverlay();
+        WireImageHost();
+    }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
+        UnwireImageHost();
         if (e.OldValue is RecipeSetupWizardViewModel oldVm)
-        {
-            oldVm.RequestClose -= OnRequestClose;
-            oldVm.PropertyChanged -= OnViewModelPropertyChanged;
-        }
+            UnhookViewModel(oldVm);
 
-        HookViewModel(e.NewValue as RecipeSetupWizardViewModel);
+        _vm = e.NewValue as RecipeSetupWizardViewModel;
+        if (_vm is not null)
+            HookViewModel(_vm);
+        WireImageHost();
     }
 
-    private void HookViewModel(RecipeSetupWizardViewModel? vm)
+    private void HookViewModel(RecipeSetupWizardViewModel vm)
     {
-        if (vm is null)
-            return;
         vm.RequestClose += OnRequestClose;
         vm.PropertyChanged += OnViewModelPropertyChanged;
+        vm.PropertyChanged += OnWizardStepChanged;
+        vm.RequestBeginDetectionRoiDraw += OnBeginDetectionRoiDraw;
+        vm.RequestBeginFeatureRoiDraw += OnBeginFeatureRoiDraw;
+    }
+
+    private void UnhookViewModel(RecipeSetupWizardViewModel vm)
+    {
+        vm.RequestClose -= OnRequestClose;
+        vm.PropertyChanged -= OnViewModelPropertyChanged;
+        vm.PropertyChanged -= OnWizardStepChanged;
+        vm.RequestBeginDetectionRoiDraw -= OnBeginDetectionRoiDraw;
+        vm.RequestBeginFeatureRoiDraw -= OnBeginFeatureRoiDraw;
+    }
+
+    private void WireImageHost()
+    {
+        if (_vm is null || _imageHost is not null)
+            return;
+
+        _imageHost = new RecipeWizardImageHost(
+            WizardViewer,
+            _vm.Workspace,
+            _vm.Roi,
+            () => TemplateOptions.UsesFeatureTeachRoi(_vm.Workspace.Editor.Template.RefineMethod));
+        _imageHost.Wire();
+        SyncInteractiveViewer();
+    }
+
+    private void UnwireImageHost()
+    {
+        _imageHost?.Dispose();
+        _imageHost = null;
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
         if (DataContext is RecipeSetupWizardViewModel vm)
         {
-            vm.RequestClose -= OnRequestClose;
-            vm.PropertyChanged -= OnViewModelPropertyChanged;
-            vm.ReleasePreview();
+            UnhookViewModel(vm);
+            vm.Dispose();
         }
+
+        Dispose();
+    }
+
+    public void Dispose()
+    {
+        UnwireImageHost();
+        GC.SuppressFinalize(this);
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(RecipeSetupWizardViewModel.FeatureOverlayRoi)
             or nameof(RecipeSetupWizardViewModel.Preview)
-            or nameof(RecipeSetupWizardViewModel.ShowPreviewPane))
+            or nameof(RecipeSetupWizardViewModel.ShowPreviewPane)
+            or nameof(RecipeSetupWizardViewModel.ShowStaticPreview))
             UpdateFeatureOverlay();
     }
+
+    private void OnWizardStepChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(RecipeSetupWizardViewModel.ShowInteractiveViewer)
+            or nameof(RecipeSetupWizardViewModel.ViewerImage)
+            or nameof(RecipeSetupWizardViewModel.Step))
+            SyncInteractiveViewer();
+    }
+
+    private void SyncInteractiveViewer()
+    {
+        if (_vm?.ShowInteractiveViewer == true)
+            _imageHost?.SyncFromRecipe();
+    }
+
+    private void OnBeginDetectionRoiDraw() => _imageHost?.BeginDetectionRoiDraw();
+
+    private void OnBeginFeatureRoiDraw() => _imageHost?.BeginFeatureRoiDraw();
 
     private void OnPreviewHostSizeChanged(object sender, SizeChangedEventArgs e) =>
         UpdateFeatureOverlay();
@@ -63,6 +127,7 @@ public partial class RecipeSetupWizardWindow : FluentWindow
         if (FeatureOverlay is null || PreviewImage is null)
             return;
         if (DataContext is not RecipeSetupWizardViewModel vm ||
+            !vm.ShowStaticPreview ||
             vm.FeatureOverlayRoi is not { } roi ||
             PreviewImage.Source is not BitmapSource bmp ||
             bmp.PixelWidth < 1 || bmp.PixelHeight < 1 ||

@@ -64,10 +64,10 @@ public class SegmentationContourCoordinateTests
         Assert.Equal(box.Y, wrongCenter.Y - correctCenter.Y, 1);
     }
 
-    private static ImagePoint PoseCenterFromContour(PixelBox box, IReadOnlyList<ImagePoint> contourLocal)
+    private static ImagePoint PoseCenterFromContour(PixelBox box, ImagePoint[] contourLocal)
     {
-        var points = new Point2f[contourLocal.Count];
-        for (var i = 0; i < contourLocal.Count; i++)
+        var points = new Point2f[contourLocal.Length];
+        for (var i = 0; i < contourLocal.Length; i++)
             points[i] = new Point2f((float)(contourLocal[i].X + box.Left), (float)(contourLocal[i].Y + box.Top));
         var (center, _) = MinAreaRectGeometry.LongAxis(points);
         return center;

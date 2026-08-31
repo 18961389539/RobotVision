@@ -94,7 +94,7 @@ public class MaskTemplateJitterTests(ITestOutputHelper output)
 
     /// <summary>合成目标 → 注入粗角误差转正 → 按模式精修 → 统计误差/抖动/头尾翻转。
     /// 粗角误差 ~N(0,3°) 模拟分割 minAreaRect 的真实精度。模式：灰度/边缘图/混合（产品接入方案）。</summary>
-    private (double Bias, double Jitter, double MaxErr, double AvgScore, int Flips) Evaluate(
+    private static (double Bias, double Jitter, double MaxErr, double AvgScore, int Flips) Evaluate(
         Action<Mat, Random> texturize, double noiseSigma, string mode)
     {
         // 模板：0° 基准目标（与示教同口径：转正紧裁剪），纹理 seed 独立于测试图
@@ -205,7 +205,7 @@ public class MaskTemplateJitterTests(ITestOutputHelper output)
 
     /// <summary>渲染一个中心旋转 deg 的合成目标（浅灰背景 + 深色矩形 + 纹理档 + 可选噪声）。
     /// 流程：目标纹理化 → 贴到画布中心 → 绕画布中心（=目标中心）旋转。</summary>
-    private Mat RenderTarget(double deg, Action<Mat, Random> texturize, int seed, double noiseSigma = 0)
+    private static Mat RenderTarget(double deg, Action<Mat, Random> texturize, int seed, double noiseSigma = 0)
     {
         var rng = new Random(seed);
 
@@ -274,7 +274,7 @@ public class MaskTemplateJitterTests(ITestOutputHelper output)
     }
 
     /// <summary>按真值角度转正 + 15% 边距裁剪（与 MaskTemplateStrategy 同参数，窗口约 1.3 倍）。</summary>
-    private Mat UprightByTrueAngle(Mat canvas, double deg)
+    private static Mat UprightByTrueAngle(Mat canvas, double deg)
     {
         var center = new Point2f(canvas.Width / 2f, canvas.Height / 2f);
         using var m = Cv2.GetRotationMatrix2D(center, -deg, 1.0);
@@ -291,7 +291,7 @@ public class MaskTemplateJitterTests(ITestOutputHelper output)
     }
 
     /// <summary>模板紧裁剪（与示教同口径）：中心区域直接取。</summary>
-    private Mat TightCrop(Mat templateCanvas)
+    private static Mat TightCrop(Mat templateCanvas)
     {
         var center = new Point2f(templateCanvas.Width / 2f, templateCanvas.Height / 2f);
         var x = (int)(center.X - TargetW / 2.0);

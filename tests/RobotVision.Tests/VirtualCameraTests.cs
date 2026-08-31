@@ -20,7 +20,7 @@ public class VirtualCameraTests
     {
         var ex = Assert.Throws<VisionException>(() => new VirtualCamera("v", pattern: "Noise"));
         Assert.Equal(VisionErrorCode.CameraInitFailed, ex.ErrorCode);
-        Assert.Contains("Chessboard", ex.Message);
+        Assert.Contains("Chessboard", ex.Message, StringComparison.Ordinal);
     }
 
     [Theory]

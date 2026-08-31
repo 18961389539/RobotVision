@@ -111,6 +111,9 @@ public sealed record PoseOverlay
     /// </summary>
     public IReadOnlyList<PixelPoint>? MatchWindow { get; init; }
 
+    /// <summary>精修质量摘要（试触发/详情窗可读）；推理线程写入，UI 勿读 ThreadStatic 调试字段。</summary>
+    public string? RefineQualityNote { get; init; }
+
     /// <summary>类别标签（模型输出）；纯图像处理模式为 null。</summary>
     public string? Label { get; init; }
 

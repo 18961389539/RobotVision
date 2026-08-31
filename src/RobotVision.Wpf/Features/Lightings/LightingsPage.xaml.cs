@@ -1,17 +1,15 @@
-using Microsoft.Extensions.DependencyInjection;
 using System.Windows.Controls;
-using RobotVision.WpfHost;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Lightings;
 
 public partial class LightingsPage : Page
 {
-    public LightingsPage()
+    public LightingsPage(LightingsViewModel viewModel)
     {
+        ViewModelPageLifetime.Attach(this, viewModel);
         InitializeComponent();
-        DataContext = App.Services.GetRequiredService(typeof(LightingsViewModel));
-        NumberBoxCommit.Bind(this, DataContext as LightingsViewModel);
-        // 再次进入页面时刷新列表（运行时增删改后导航回来）
-        Loaded += (_, _) => (DataContext as LightingsViewModel)?.Refresh();
+        NumberBoxCommit.Bind(this, viewModel);
+        Loaded += (_, _) => viewModel.Refresh();
     }
 }

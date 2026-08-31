@@ -15,7 +15,7 @@ public sealed class ChatHistoryComposerTests
         };
         var result = ChatHistoryComposer.Compose(turns, contextSize: 8192, maxTokens: 512);
         Assert.Equal(2, result.Count);
-        Assert.DoesNotContain(result, t => t.Content.StartsWith("〔对话摘要〕"));
+        Assert.DoesNotContain(result, t => t.Content.StartsWith("〔对话摘要〕", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -26,7 +26,7 @@ public sealed class ChatHistoryComposerTests
             .ToList();
         var result = ChatHistoryComposer.Compose(turns, contextSize: 2048, maxTokens: 512, historyTokenBudget: 800);
         Assert.True(result.Count < turns.Count);
-        Assert.StartsWith("〔对话摘要〕", result[0].Content);
+        Assert.StartsWith("〔对话摘要〕", result[0].Content, StringComparison.Ordinal);
         Assert.Equal("assistant", result[^1].Role);
     }
 

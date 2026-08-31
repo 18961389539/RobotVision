@@ -23,3 +23,77 @@ indent_size = 2
 
 [*.{xaml,json,yml,yaml,md}]
 indent_size = 2
+
+# ============================================================================
+# 代码分析器规则（2026-08-31 建立，2026-08-31 测试/工具 CA 清零后升级门禁）
+#
+# 严重度策略遵循「增量门禁」原则，避免一次性产生大量噪音导致规则被绕过：
+#   1. 零存量告警且后果严重 → error，立即生效
+#   2. 与项目约定冲突      → none，且只在该目录豁免
+#
+# 全解决方案构建已于 2026-08-31 达到 0 警告（src / tests / tools / benchmarks）。
+# 产线 ILogger 调用已迁移至 *.Log.cs 中的 LoggerMessage 源生成器（18 个 partial 类）。
+# ============================================================================
+
+[*.cs]
+
+# ---------------------------------------------------------------------------
+# 安全类 → error
+# ---------------------------------------------------------------------------
+# 反序列化须限制 TypeNameHandling：本项目会读取外部配方/标定 JSON，
+# 不设限可能被恶意文件触发类型注入
+dotnet_diagnostic.CA2326.severity = error
+# 禁止禁用证书校验（TCP/HTTP 通信）
+dotnet_diagnostic.CA5359.severity = error
+# 禁止不安全的 XML DTD 处理
+dotnet_diagnostic.CA3075.severity = error
+
+# ---------------------------------------------------------------------------
+# 正确性 / 风格 → error（全仓已清零）
+# ---------------------------------------------------------------------------
+dotnet_diagnostic.CA1307.severity = error   # 字符串比较须显式 StringComparison
+dotnet_diagnostic.CA1310.severity = error   # 字符串 StartsWith/EndsWith 须显式 StringComparison
+dotnet_diagnostic.CA1305.severity = error   # 指定 IFormatProvider
+dotnet_diagnostic.CA1805.severity = error   # 避免显式初始化为默认值
+dotnet_diagnostic.CA1822.severity = error   # 不访问实例数据的成员标记 static
+dotnet_diagnostic.CA1826.severity = error   # 用索引器代替 LINQ FirstOrDefault
+dotnet_diagnostic.CA1859.severity = error   # 可用具体类型提升性能
+dotnet_diagnostic.CA1861.severity = error   # 避免常量数组作为参数
+dotnet_diagnostic.CA1862.severity = error   # 用 StringComparison 代替 ToLower/ToUpper
+dotnet_diagnostic.CA1720.severity = error   # 标识符勿与类型名冲突
+dotnet_diagnostic.CA1051.severity = error   # 不要声明可见实例字段
+
+# ---------------------------------------------------------------------------
+# 资源类 → warning（默认）；产线 src 见下方 [src/**.cs] 升为 error
+# ---------------------------------------------------------------------------
+dotnet_diagnostic.CA1001.severity = warning   # 拥有可释放字段的类型应实现 IDisposable
+dotnet_diagnostic.CA2000.severity = warning   # 在失去作用域前释放对象
+dotnet_diagnostic.CA2213.severity = warning   # 可释放字段应被释放
+dotnet_diagnostic.CA1848.severity = warning   # 非 src 默认 warning；ImageViewerControl 用 IImageViewerLogger 抽象，不触发
+
+# ============================================================================
+# 产线源码（src）→ error
+# ============================================================================
+[src/**.cs]
+dotnet_diagnostic.CA2000.severity = error   # Mat/相机句柄/流对象须在失去作用域前释放
+dotnet_diagnostic.CA1848.severity = error   # 日志须用 LoggerMessage 源生成器
+
+# ============================================================================
+# 测试项目豁免（section 顺序靠后，覆盖上面的全局设置）
+# ============================================================================
+[tests/**.cs]
+
+# CA2000：测试夹具/临时 Mat·VisionImage 由 GC 或 xUnit 收尾，非产线泄漏路径
+dotnet_diagnostic.CA2000.severity = none
+
+# 测试方法名使用下划线（Method_Should_When 命名法）是业界通行惯例。
+# 实测 92 条告警全部来自测试命名，源码目录命中数为 0，故仅在测试目录豁免。
+# 源码目录仍保留默认规则，防止生产代码出现下划线命名。
+dotnet_diagnostic.CA1707.severity = none
+
+[benchmarks/**.cs]
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.CA1822.severity = none
+
+[tools/**.cs]
+dotnet_diagnostic.CA2000.severity = none

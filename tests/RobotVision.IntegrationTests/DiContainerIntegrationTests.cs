@@ -74,6 +74,14 @@ public class DiContainerIntegrationTests
     }
 
     [Fact]
+    public async Task AddRobotVision_DoesNotRestorePlcAlwaysOkFromConfig()
+    {
+        await using var server = await TestServer.StartAsync((cfg, _) => cfg.PlcDebug.AlwaysOk = true);
+        server.Cfg.PlcDebug.AlwaysOk.Should().BeFalse();
+        server.Tcp.PlcAlwaysOkMode.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task RuntimeSync_AppliesSavedSettings_Hot()
     {
         await using var server = await TestServer.StartAsync();

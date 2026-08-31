@@ -31,15 +31,17 @@ public sealed class NetworkLightControllerFactory : ILightControllerFactory
 
         if (string.IsNullOrWhiteSpace(config.LocalEndpoint))
         {
-            logger?.LogInformation("光源 {Id}：{Protocol} → {Endpoint}", config.Id, protocol, config.Endpoint);
+            if (logger is not null)
+                NetworkLightControllerFactoryLog.Registered(logger, config.Id, protocol.ToString(), config.Endpoint);
             return new NetworkLightController(config.Id, protocol, host, port,
                 timeoutMs: config.TimeoutMs, reconnectAttempts: config.ReconnectAttempts);
         }
 
         // UDP 固定本地端口：绑定本地端点后同一端口收发（应答/心跳场景）
         var (localHost, localPort) = ParseEndpoint(config.LocalEndpoint);
-        logger?.LogInformation("光源 {Id}：{Protocol} → {Endpoint}（本地 {LocalEndpoint}）",
-            config.Id, protocol, config.Endpoint, config.LocalEndpoint);
+        if (logger is not null)
+            NetworkLightControllerFactoryLog.RegisteredWithLocal(
+                logger, config.Id, protocol.ToString(), config.Endpoint, config.LocalEndpoint);
         return new NetworkLightController(config.Id, protocol, host, port,
             timeoutMs: config.TimeoutMs, reconnectAttempts: config.ReconnectAttempts,
             localEndPoint: new System.Net.IPEndPoint(

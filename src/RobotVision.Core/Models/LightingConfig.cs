@@ -30,7 +30,7 @@ public sealed class LightingConfig
     /// 频闪模式须与相机硬触发曝光同步，此延时应设为 0。
     /// 延时计入单次 TRIGGER 超时预算。
     /// </summary>
-    public int StabilizeDelayMs { get; set; } = 0;
+    public int StabilizeDelayMs { get; set; }
 
     /// <summary>
     /// 取图完成后是否熄灯（默认 true）。常亮场景（光源与产线节拍联动）可设 false，

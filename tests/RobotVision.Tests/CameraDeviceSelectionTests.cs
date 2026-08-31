@@ -37,7 +37,7 @@ public class CameraDeviceSelectionTests
     public void UnresolvedMessage_MentionsRefuseOtherCameras()
     {
         var msg = CameraDeviceSelection.UnresolvedMessage("cam_basler", "SN-404", 2, "111;222");
-        Assert.Contains("SN-404", msg);
-        Assert.Contains("拒绝绑定其他相机", msg);
+        Assert.Contains("SN-404", msg, StringComparison.Ordinal);
+        Assert.Contains("拒绝绑定其他相机", msg, StringComparison.Ordinal);
     }
 }

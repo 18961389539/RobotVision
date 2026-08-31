@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -35,7 +37,7 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     private readonly GvspDisplayConverter _display = new();
 
     private IGigECameraSession? _session;
-    private IGvspStreamSession? _stream;
+    private GvspStreamSession? _stream;
     private TaskCompletionSource<GvspFrame>? _pendingFrame;
     private volatile bool _disposed;
     private volatile bool _connected;
@@ -71,6 +73,8 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
         }
     }
 
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "VisionImage ownership transfers to CameraFrame.")]
     public CameraFrame Grab(CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -96,9 +100,18 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
                     var grabWatch = Stopwatch.StartNew();
                     var frame = WaitForFrame(ct);
                     var acquireMs = grabWatch.Elapsed.TotalMilliseconds;
-                    var image = VisionImageCv.FromMat(ToMat(frame), ownsMat: true);
-                    return new CameraFrame(image, DateTime.UtcNow, acquireMs,
-                        grabWatch.Elapsed.TotalMilliseconds - acquireMs);
+                    Mat? mat = ToMat(frame);
+                    try
+                    {
+                        var image = VisionImageCv.Adopt(mat);
+                        mat = null;
+                        return new CameraFrame(image, DateTime.UtcNow, acquireMs,
+                            grabWatch.Elapsed.TotalMilliseconds - acquireMs);
+                    }
+                    finally
+                    {
+                        mat?.Dispose();
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -112,12 +125,14 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
                 catch (VisionException vex) when (attempt == 0)
                 {
                     _connected = false;
-                    _log?.LogWarning("GigE Vision 相机 {Id} 采集失败（{Message}），尝试自动重连", Id, vex.Message);
+                    if (_log is { } log)
+                        GigEVisionCameraLog.GrabFailedRetry(log, Id, vex.Message);
                 }
                 catch (Exception ex) when (attempt == 0)
                 {
                     _connected = false;
-                    _log?.LogWarning(ex, "GigE Vision 相机 {Id} 采集异常，尝试自动重连", Id);
+                    if (_log is { } log)
+                        GigEVisionCameraLog.GrabExceptionRetry(log, ex, Id);
                 }
                 catch (VisionException vex) when (attempt == 1)
                 {
@@ -262,14 +277,15 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
                 TrySetGainCore(_gain.Value);
 
             _connected = true;
-            _log?.LogInformation("GigE Vision 相机 {Id} 已连接: SN={Sn} IP={Ip} Name={Name}",
-                Id, _serialNumber, info.IpAddress, _friendlyName);
+            if (_log is { } log)
+                GigEVisionCameraLog.Connected(log, Id, _serialNumber, info.IpAddress.ToString(), _friendlyName);
             return true;
         }
         catch (Exception ex)
         {
             _connected = false;
-            _log?.LogWarning(ex, "GigE Vision 相机 {Id} 连接失败", Id);
+            if (_log is { } log)
+                GigEVisionCameraLog.ConnectFailed(log, ex, Id);
             DisconnectCore();
             return false;
         }
@@ -462,8 +478,8 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
                 return false;
             if (value < node.Min || value > node.Max)
             {
-                _log?.LogWarning("GigE Vision 相机 {Id} {Node}={Value} 超出 [{Min}, {Max}]",
-                    Id, name, value, node.Min, node.Max);
+                if (_log is { } log)
+                    GigEVisionCameraLog.ParameterOutOfRange(log, Id, name, (long)value, (long)node.Min, (long)node.Max);
                 return false;
             }
             node.Value = value;
@@ -471,7 +487,8 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "GigE Vision 相机 {Id} 写入 {Node} 失败", Id, name);
+            if (_log is { } log)
+                GigEVisionCameraLog.WriteFailed(log, ex, Id, name);
             return false;
         }
     }
@@ -490,7 +507,8 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "GigE Vision 相机 {Id} 写入 {Node} 失败", Id, name);
+            if (_log is { } log)
+                GigEVisionCameraLog.WriteFailed(log, ex, Id, name);
             return false;
         }
     }
@@ -509,7 +527,8 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
-            _log?.LogDebug(ex, "GigE Vision 相机 {Id} 枚举 {Node}={Value} 跳过", Id, name, symbolic);
+            if (_log is { } log)
+                GigEVisionCameraLog.EnumSkipped(log, ex, Id, name, symbolic);
             return false;
         }
     }
@@ -635,8 +654,9 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     {
         try
         {
-            var client = new UdpClient(new IPEndPoint(local, 0));
-            using var discovery = new GigEDiscovery(new UdpTransportAdapter(client));
+            using var client = new UdpClient(new IPEndPoint(local, 0));
+            using var transport = new UdpTransportAdapter(client);
+            using var discovery = new GigEDiscovery(transport);
             return await discovery.DiscoverAsync((int)timeout.TotalMilliseconds, cancellationToken: ct);
         }
         catch (Exception)
@@ -686,7 +706,7 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
 
     private static string FormatMac(byte[] mac) =>
         mac.Length >= 6
-            ? string.Join("-", mac.Take(6).Select(b => b.ToString("X2")))
+            ? string.Join("-", mac.Take(6).Select(b => b.ToString("X2", CultureInfo.InvariantCulture)))
             : "";
 
     private static string FormatDevice(GigECameraInfo info)

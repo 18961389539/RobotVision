@@ -31,8 +31,8 @@ public class CalibToolCsvTests
         var ex = Assert.Throws<FormatException>(() => CsvPointParser.ParsePairs([
             "1.0,2.0,3.0", // 3 列
         ]));
-        Assert.Contains("第 1 行", ex.Message);
-        Assert.Contains("4 列", ex.Message);
+        Assert.Contains("第 1 行", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("4 列", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class CalibToolCsvTests
             "1.0,2.0,3.0,4.0",
             "abc,2.0,3.0,4.0",
         ]));
-        Assert.Contains("第 2 行", ex.Message);
+        Assert.Contains("第 2 行", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

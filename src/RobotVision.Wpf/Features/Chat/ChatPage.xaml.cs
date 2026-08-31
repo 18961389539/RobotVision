@@ -1,33 +1,34 @@
 using System.Collections.Specialized;
-using Microsoft.Extensions.DependencyInjection;
 using System.Windows.Controls;
-using RobotVision.WpfHost;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Chat;
 
 public partial class ChatPage : Page
 {
-    public ChatPage()
+    private readonly ChatViewModel _vm;
+    private NotifyCollectionChangedEventHandler? _messagesChanged;
+
+    public ChatPage(ChatViewModel viewModel)
     {
+        _vm = viewModel;
+        ViewModelPageLifetime.Attach(this, viewModel, onUnloading: () =>
+        {
+            if (_messagesChanged is not null)
+                _vm.Messages.CollectionChanged -= _messagesChanged;
+        });
         InitializeComponent();
-        DataContext = App.Services.GetRequiredService(typeof(ChatViewModel));
         Loaded += (_, _) =>
         {
-            if (DataContext is not ChatViewModel vm)
-                return;
-            vm.Messages.CollectionChanged += OnMessagesChanged;
-            _ = vm.ProbeAsync();
-        };
-        Unloaded += (_, _) =>
-        {
-            if (DataContext is ChatViewModel vm)
-                vm.Messages.CollectionChanged -= OnMessagesChanged;
+            _messagesChanged ??= OnMessagesChanged;
+            _vm.Messages.CollectionChanged += _messagesChanged;
+            _vm.ScheduleProbe();
         };
     }
 
     private void OnMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (DataContext is ChatViewModel vm && vm.Messages.Count > 0)
-            MessageList.ScrollIntoView(vm.Messages[^1]);
+        if (_vm.Messages.Count > 0)
+            MessageList.ScrollIntoView(_vm.Messages[^1]);
     }
 }

@@ -1,17 +1,16 @@
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure.Calibration;
-using RobotVision.Infrastructure.Cameras;
-using RobotVision.Infrastructure.Communication;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Monitor;
@@ -30,11 +29,12 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
 
     private readonly VisionService _vision;
     private readonly AppConfig _cfg;
-    private readonly CameraManager _cameras;
-    private readonly CalibrationManager _calibration;
+    private readonly ICameraRuntime _cameras;
+    private readonly ICalibrationRuntime _calibration;
     private readonly RecipeLoader _recipes;
-    private readonly TcpServerManager _tcp;
+    private readonly ITcpRuntime _tcp;
     private readonly LogSink _sink;
+    private readonly ILogger<MainViewModel> _log;
     private readonly DispatcherTimer _previewTimer;
     private readonly DispatcherTimer _statusTimer;
     private readonly Random _random = new();
@@ -173,11 +173,12 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
     public MainViewModel(
         VisionService vision,
         AppConfig cfg,
-        CameraManager cameras,
-        CalibrationManager calibration,
+        ICameraRuntime cameras,
+        ICalibrationRuntime calibration,
         RecipeLoader recipes,
-        TcpServerManager tcp,
-        LogSink sink)
+        ITcpRuntime tcp,
+        LogSink sink,
+        ILogger<MainViewModel> log)
     {
         _vision = vision;
         _cfg = cfg;
@@ -186,6 +187,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         _recipes = recipes;
         _tcp = tcp;
         _sink = sink;
+        _log = log;
 
         foreach (var option in BuildCameraOptions())
             CameraOptions.Add(option);
@@ -201,7 +203,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
             AppendLog(entry);
 
         _previewTimer = new DispatcherTimer { Interval = PreviewInterval };
-        _previewTimer.Tick += (_, _) => _ = GrabPreviewAsync();
+        _previewTimer.Tick += (_, _) => UiFireAndForget.Run(GrabPreviewAsync, _log);
         _previewTimer.Start();
 
         _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -460,7 +462,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         return $"预览失败 · {cameraId} ({(int)vex.ErrorCode}): {vex.Message}{hint}";
     }
 
-    /// <summary>管线线程回调：同步绘制叠加并转换，再封送到 UI 线程更新显示。</summary>
+    /// <summary>线程池回调（VisionService.PublishSnapshot → Task.Run）：同步绘制叠加并转换，再封送到 UI 线程更新显示。</summary>
     private void OnFrameProcessed(VisionFrameSnapshot snapshot)
     {
         BitmapSource source;
@@ -486,8 +488,9 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
                     : $"结果 · {recipeName} · 未检出目标";
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            WpfUiLog.MonitorSnapshotOverlayFailed(_log, ex, snapshot.RecipeName);
             // 绘制失败不影响管线；快照图像由 using 释放
         }
     }
@@ -498,7 +501,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
     private void AppendLog(LogEntry entry)
     {
         var line = new LogLine(
-            entry.Time.ToString("HH:mm:ss"), entry.Level.ToString(), entry.Message);
+            entry.Time.ToString("HH:mm:ss", CultureInfo.InvariantCulture), entry.Level.ToString(), entry.Message);
         _allLogs.Add(line);
         while (_allLogs.Count > LogCapacity)
             _allLogs.RemoveAt(0);

@@ -1,13 +1,13 @@
 ﻿using OpenCvSharp;
 using RobotVision.Core.Models;
-using RobotVision.Infrastructure;
+using RobotVision.Hosting;
 using WpfColor = System.Windows.Media.Color;
 
 namespace RobotVision.WpfHost.Shared;
 
 /// <summary>
 /// 检测叠加层：在去畸变图像上绘制中心十字、角度方向箭头与序号/分数。
-/// 配方测试可额外叠加卡尺探针与抓边点（drawDebug）。
+/// 配方测试与监控（对齐配方测试）可额外叠加精修调试点：卡尺探针、形状/SIFT 匹配点（drawDebug）。
 /// </summary>
 public static class OverlayDrawer
 {
@@ -33,7 +33,7 @@ public static class OverlayDrawer
 
     public static void DrawPoses(VisionImage image, IReadOnlyList<PixelPose> poses, bool drawDebug = false)
     {
-        using var mat = VisionImageCv.AsMat(image);
+        using var mat = VisionImageMat.AsMat(image);
         DrawPoses(mat, poses, drawDebug);
     }
 
@@ -62,7 +62,7 @@ public static class OverlayDrawer
     /// <summary>相对比例 ROI（配方特征框）。橙色框 + 可选标签。</summary>
     public static void DrawNormalizedRoi(VisionImage image, Roi roi, string? label = null)
     {
-        using var mat = VisionImageCv.AsMat(image);
+        using var mat = VisionImageMat.AsMat(image);
         DrawNormalizedRoi(mat, roi, label);
     }
 
@@ -82,7 +82,7 @@ public static class OverlayDrawer
     }
 
     /// <summary>检测叠加（位姿标记下层）：mask 半透明填充 + 轮廓线，检测框，关键点骨架。
-    /// <paramref name="drawDebug"/> 为真时再画卡尺探针/抓边点（配方测试用，监控默认关）。</summary>
+    /// <paramref name="drawDebug"/> 为真时再画精修调试（卡尺条/抓边点、形状与 SIFT 内点）。</summary>
     private static void DrawOverlays(Mat image, IReadOnlyList<PixelPose> poses, bool drawDebug)
     {
         // mask 填充先画到独立覆盖层，最后一次性混合：

@@ -87,8 +87,8 @@ static void RunIntrinsic(Dictionary<string, string> options)
 {
     var cameraId = Require(options, "camera");
     var folder = Require(options, "folder");
-    var cols = int.Parse(Require(options, "cols"));
-    var rows = int.Parse(Require(options, "rows"));
+    var cols = int.Parse(Require(options, "cols"), CultureInfo.InvariantCulture);
+    var rows = int.Parse(Require(options, "rows"), CultureInfo.InvariantCulture);
     var square = double.Parse(Require(options, "square"), CultureInfo.InvariantCulture);
     var outDir = ResolveOutDir(options.GetValueOrDefault("out", "data/calibration"));
 
@@ -101,8 +101,8 @@ static void RunIntrinsic(Dictionary<string, string> options)
         throw new FormatException($"--square 方格边长必须是正的有限数（当前 {square}），请检查是否输入了 NaN/Infinity 或非正值");
 
     var files = Directory.EnumerateFiles(folder)
-        .Where(f => new[] { ".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff" }
-            .Contains(Path.GetExtension(f).ToLowerInvariant()))
+        .Where(f => CalibToolImageExtensions.Values
+            .Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
         .OrderBy(f => f)
         .ToList();
 
@@ -345,7 +345,7 @@ static void RunPolynomial(Dictionary<string, string> options)
         MountType = imageSpace || mountUpper != "ONARM"
             ? RobotVision.Core.Models.CameraMountType.Fixed
             : RobotVision.Core.Models.CameraMountType.OnArm,
-        ComposeMode = !imageSpace && mountUpper == "ONARM" && compose.ToUpperInvariant() == "TRANSLATE"
+        ComposeMode = !imageSpace && mountUpper == "ONARM" && compose.Equals("TRANSLATE", StringComparison.OrdinalIgnoreCase)
             ? RobotVision.Core.Models.PoseComposeMode.Translate
             : RobotVision.Core.Models.PoseComposeMode.Check,
         TeachTcpX = imageSpace ? 0 : teachX,
@@ -478,4 +478,9 @@ static void PrintUsage()
           CalibTool template --kind extrinsic|rotation [--out <文件>]
               生成示例 CSV 模板（默认 pairs.csv / points.csv）
         """);
+}
+
+file static class CalibToolImageExtensions
+{
+    internal static readonly string[] Values = [".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"];
 }

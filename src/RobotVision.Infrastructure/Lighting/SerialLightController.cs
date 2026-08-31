@@ -40,17 +40,20 @@ public sealed class SerialLightController : ILightController
         _timeoutMs = Math.Max(1, timeoutMs);
     }
 
-    /// <summary>按照明配置点亮光源（幂等）：逐通道设置亮度并点亮。</summary>
-    public void Apply(LightingConfig lighting)
+    /// <summary>按照明配置点亮光源（幂等）：逐通道设置亮度并点亮。发送失败返回 false。</summary>
+    public bool Apply(LightingConfig lighting)
     {
         if (lighting?.Channels is null || lighting.Channels.Count == 0)
-            return;
+            return true;
 
+        var ok = true;
         foreach (var channel in lighting.Channels)
         {
             var brightness = Math.Clamp(channel.Brightness, 0, 255);
-            SendFrame(BuildSetFrame(channel.Channel, brightness));
+            ok &= SendFrame(BuildSetFrame(channel.Channel, brightness));
         }
+
+        return ok;
     }
 
     /// <summary>熄灭全部通道。</summary>
@@ -87,25 +90,32 @@ public sealed class SerialLightController : ILightController
         Encoding.ASCII.GetBytes("OFF ALL\r\n");
 
     private static string Unescape(string text) =>
-        text.Replace("\\r", "\r").Replace("\\n", "\n").Replace("\\t", "\t");
+        text.Replace("\\r", "\r", StringComparison.Ordinal)
+            .Replace("\\n", "\n", StringComparison.Ordinal)
+            .Replace("\\t", "\t", StringComparison.Ordinal);
 
     // ---- 传输层 ----
 
-    private void SendFrame(byte[] frame)
+    private bool SendFrame(byte[] frame)
     {
-        if (_disposed || frame.Length == 0)
-            return;
+        if (frame.Length == 0)
+            return true;
+        if (_disposed)
+            return false;
 
         lock (_sendLock)
         {
             try
             {
                 EnsurePortOpen();
-                _port?.Write(frame, 0, frame.Length);
+                if (_port is null)
+                    return false;
+                _port.Write(frame, 0, frame.Length);
+                return true;
             }
             catch
             {
-                // 串口不可用/写入失败：静默（光源故障不影响取图流程）
+                return false;
             }
         }
     }

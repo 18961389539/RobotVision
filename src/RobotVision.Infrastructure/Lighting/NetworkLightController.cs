@@ -73,18 +73,21 @@ public sealed class NetworkLightController : ILightController
 
     /// <summary>
     /// 按照明配置点亮光源（幂等）：逐通道设置亮度并点亮。
-    /// 空配置/空通道静默无操作；发送失败仅记录，不抛异常（保持上层流程健壮）。
+    /// 空配置/空通道视为成功；任一通道发送失败返回 false（上层报 1020，不取图）。
     /// </summary>
-    public void Apply(LightingConfig lighting)
+    public bool Apply(LightingConfig lighting)
     {
         if (lighting?.Channels is null || lighting.Channels.Count == 0)
-            return;
+            return true;
 
+        var ok = true;
         foreach (var channel in lighting.Channels)
         {
             var brightness = Math.Clamp(channel.Brightness, 0, 255);
-            SendFrame(BuildSetFrame(channel.Channel, brightness));
+            ok &= SendFrame(BuildSetFrame(channel.Channel, brightness));
         }
+
+        return ok;
     }
 
     /// <summary>熄灭全部通道。</summary>
@@ -102,7 +105,9 @@ public sealed class NetworkLightController : ILightController
     }
 
     private static string Unescape(string text) =>
-        text.Replace("\\r", "\r").Replace("\\n", "\n").Replace("\\t", "\t");
+        text.Replace("\\r", "\r", StringComparison.Ordinal)
+            .Replace("\\n", "\n", StringComparison.Ordinal)
+            .Replace("\\t", "\t", StringComparison.Ordinal);
 
     public void Dispose()
     {
@@ -139,25 +144,32 @@ public sealed class NetworkLightController : ILightController
 
     // ---- 传输层（参照 ECLightControl） ----
 
-    private void SendFrame(byte[] frame)
+    private bool SendFrame(byte[] frame)
     {
         if (frame.Length == 0)
-            return;
+            return true;
 
         lock (_sendLock)
         {
             if (_disposed)
-                return;
+                return false;
             try
             {
                 if (Protocol == LightProtocol.Udp)
+                {
                     SendUdp(frame);
-                else
-                    SendTcp(frame);
+                    return true;
+                }
+
+                EnsureTcpConnected();
+                if (_tcp is null || _tcpStream is null)
+                    return false;
+                SendTcp(frame);
+                return true;
             }
             catch
             {
-                // 发送失败不抛异常：上层取图流程不受光源故障影响（尽力而为语义）
+                return false;
             }
         }
     }

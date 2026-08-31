@@ -1,9 +1,11 @@
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -25,20 +27,19 @@ using RobotVision.WpfHost.Features.Recipe;
 using RobotVision.WpfHost.Features.Settings;
 using RobotVision.WpfHost.Shared;
 using SystemPage = RobotVision.WpfHost.Features.SystemInfo.SystemPage;
-using SystemViewModel = RobotVision.WpfHost.Features.SystemInfo.SystemViewModel;
+using Wpf.Ui;
 
 namespace RobotVision.WpfHost;
 
-public partial class App : Application
+public partial class App : Application, IDisposable
 {
+    private const int MaxRecoverableUnhandled = 2;
+
     private IHost? _host;
+    private ILogger<App>? _logger;
     private Mutex? _instanceMutex;
     private bool _showingFatalDialog;
     private int _unhandledCount;
-
-    /// <summary>页面 code-behind 解析 ViewModel 的入口（快照模式同样可用）。</summary>
-    public static IServiceProvider Services { get; private set; } =
-        new ServiceCollection().BuildServiceProvider();
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -65,29 +66,7 @@ public partial class App : Application
         }
 
         // 重入保护：MessageBox 自带嵌套消息泵，期间的新异常不允许再弹框（否则递归至栈溢出）
-        DispatcherUnhandledException += (_, args) =>
-        {
-            var count = Interlocked.Increment(ref _unhandledCount);
-            var text = $"[第 {count} 次] {args.Exception}";
-            Console.Error.WriteLine(text);
-            System.Diagnostics.Debug.WriteLine(text);
-            try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rv-ui-exception.txt"), DateTime.Now.ToString("HH:mm:ss.fff") + " " + text + Environment.NewLine + new string('-', 80) + Environment.NewLine); } catch { }
-
-            if (!_showingFatalDialog && count <= 3)
-            {
-                _showingFatalDialog = true;
-                try
-                {
-                    MessageBox.Show($"未处理的 UI 异常，程序已尝试继续运行：\n\n{args.Exception}",
-                        "RobotVision", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
-                finally
-                {
-                    _showingFatalDialog = false;
-                }
-            }
-            args.Handled = true;
-        };
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         var builder = Host.CreateApplicationBuilder();
         builder.Configuration.AddJsonFile(
@@ -101,44 +80,149 @@ public partial class App : Application
         builder.Services.AddSingleton<LogSink>();
         builder.Services.AddSingleton<ILoggerProvider>(sp => sp.GetRequiredService<LogSink>());
         builder.Services.AddSingleton<IChatLogSource>(sp => sp.GetRequiredService<LogSink>());
-        builder.Services.AddSingleton<MainViewModel>();
-        RegisterPageViewModels(builder.Services);
+        builder.Services.AddSingleton<IDialogService, WpfDialogService>();
+        builder.Services.AddSingleton<IRecipeWindowService, RecipeWindowService>();
+        builder.Services.AddSingleton<IHtmlPreviewService, HtmlPreviewService>();
+        builder.Services.AddWpfNavigation();
 
         _host = builder.Build();
-        Services = _host.Services;
+        _logger = _host.Services.GetRequiredService<ILogger<App>>();
+
+        var shellViewModel = _host.Services.GetRequiredService<MainViewModel>();
+        var pageService = _host.Services.GetRequiredService<IPageService>();
 
         // 先显示主窗口壳，避免 CameraManager / MainViewModel 组装期间长时间无界面
-        var window = new MainWindow();
+        var window = new MainWindow(shellViewModel, pageService);
         MainWindow = window;
         window.Show();
 
-        // 服务与 ViewModel 在首帧渲染后继续（仍可能在绑定 DataContext 时短暂卡顿，但窗口已可见）
+        // 服务在首帧渲染后继续（仍可能在绑定 DataContext 时短暂卡顿，但窗口已可见）
         Dispatcher.BeginInvoke(() =>
         {
             var logger = _host.Services.GetRequiredService<ILogger<App>>();
             var recipeErrors = _host.Services.GetRequiredService<RobotVision.Core.Recipe.RecipeLoader>().LoadAll();
             foreach (var (recipeName, error) in recipeErrors)
-                logger.LogWarning("配方 {Recipe} 加载失败: {Error}", recipeName, error);
+                AppLog.RecipeLoadFailed(logger, recipeName, error);
 
-            _host.Services.GetRequiredService<CommunicationViewModel>();
             _host.Start();
-            window.DataContext = _host.Services.GetRequiredService<MainViewModel>();
         }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        Dispose();
+        base.OnExit(e);
+    }
+
+    private bool _disposed;
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+
+        StopHostSafely();
+        ReleaseSingleInstance();
+    }
+
+    private void StopHostSafely()
+    {
+        if (_host is null)
+            return;
+
+        var host = _host;
+        _host = null;
         try
         {
-            _host?.StopAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            // 避免在 UI 线程同步等待 StopAsync 时与消息泵/同步上下文死锁
+            if (!Task.Run(() => host.StopAsync(TimeSpan.FromSeconds(5)))
+                    .Wait(TimeSpan.FromSeconds(6))
+                && _logger is not null)
+                AppLog.HostStopTimedOut(_logger);
+        }
+        catch (Exception ex)
+        {
+            if (_logger is not null)
+                AppLog.HostStopFailed(_logger, ex);
+        }
+        finally
+        {
+            host.Dispose();
+        }
+    }
+
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs args)
+    {
+        var count = Interlocked.Increment(ref _unhandledCount);
+        var ex = args.Exception;
+        var text = $"[第 {count} 次] {ex}";
+        Console.Error.WriteLine(text);
+        System.Diagnostics.Debug.WriteLine(text);
+        try
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rv-ui-exception.txt"),
+                DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture) + " " + text
+                + Environment.NewLine + new string('-', 80) + Environment.NewLine);
         }
         catch
         {
-            // 退出阶段尽力而为
+            // 诊断文件写入失败不影响后续处理
         }
-        _host?.Dispose();
-        ReleaseSingleInstance();
-        base.OnExit(e);
+
+        if (_logger is not null)
+            AppLog.DispatcherUnhandled(_logger, ex, count);
+
+        if (IsFatalUiException(ex) || count > MaxRecoverableUnhandled)
+        {
+            if (_logger is not null)
+                AppLog.TooManyUnhandledUiExceptions(_logger, ex);
+            args.Handled = false;
+            PromptFatalAndShutdown(ex);
+            return;
+        }
+
+        if (!_showingFatalDialog)
+        {
+            _showingFatalDialog = true;
+            try
+            {
+                MessageBox.Show(
+                    $"未处理的 UI 异常（第 {count}/{MaxRecoverableUnhandled} 次）：\n\n{ex.Message}\n\n" +
+                    "程序将尝试继续；若问题反复出现将自动退出。",
+                    "RobotVision", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            finally
+            {
+                _showingFatalDialog = false;
+            }
+        }
+
+        args.Handled = true;
+    }
+
+    private static bool IsFatalUiException(Exception ex) =>
+        ex is StackOverflowException or OutOfMemoryException or AccessViolationException;
+
+    private void PromptFatalAndShutdown(Exception ex)
+    {
+        if (!_showingFatalDialog)
+        {
+            _showingFatalDialog = true;
+            try
+            {
+                MessageBox.Show(
+                    $"严重错误，程序即将退出：\n\n{ex.Message}",
+                    "RobotVision", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _showingFatalDialog = false;
+            }
+        }
+
+        try { Shutdown(1); } catch { /* 已在退出流程 */ }
     }
 
     /// <summary>进程级互斥：禁止双开（否则 TCP 9999 端口冲突、相机争用）。</summary>
@@ -179,23 +263,6 @@ public partial class App : Application
         _instanceMutex = null;
     }
 
-    private static void RegisterPageViewModels(IServiceCollection services)
-    {
-        services.AddSingleton<RecipeViewModel>();
-        services.AddSingleton<CamerasViewModel>();
-        services.AddSingleton<LightingsViewModel>();
-        services.AddSingleton<ModelsViewModel>();
-        services.AddSingleton<CalibrationViewModel>();
-        services.AddSingleton<CalibrationWizardViewModel>();
-        services.AddSingleton<FailuresViewModel>();
-        services.AddSingleton<AnalysisViewModel>();
-        services.AddSingleton<CommunicationViewModel>();
-        services.AddSingleton<ChatViewModel>();
-        services.AddSingleton<LogsViewModel>();
-        services.AddSingleton<SettingsViewModel>();
-        services.AddSingleton<SystemViewModel>();
-    }
-
     private void RenderSnapshot()
     {
         const int width = 1280;
@@ -211,21 +278,23 @@ public partial class App : Application
         builder.Services.AddSingleton<LogSink>();
         builder.Services.AddSingleton<ILoggerProvider>(sp => sp.GetRequiredService<LogSink>());
         builder.Services.AddSingleton<IChatLogSource>(sp => sp.GetRequiredService<LogSink>());
-        builder.Services.AddSingleton<MainViewModel>();
-        RegisterPageViewModels(builder.Services);
+        builder.Services.AddSingleton<IDialogService, WpfDialogService>();
+        builder.Services.AddSingleton<IRecipeWindowService, RecipeWindowService>();
+        builder.Services.AddSingleton<IHtmlPreviewService, HtmlPreviewService>();
+        builder.Services.AddWpfNavigation();
         _host = builder.Build();
-        Services = _host.Services;
 
         var sink = _host.Services.GetRequiredService<LogSink>();
         var vm = _host.Services.GetRequiredService<MainViewModel>();
+        var pageService = _host.Services.GetRequiredService<IPageService>();
 
         // 示例数据：让快照呈现真实内容（日志行 + 结果行）
-        vm.Logs.Add(new LogLine(DateTime.Now.ToString("HH:mm:ss"), "Information", "RobotVision 已启动 | TCP 0.0.0.0:9999"));
-        vm.Logs.Add(new LogLine(DateTime.Now.ToString("HH:mm:ss"), "Information", "配方 A01: 检出 8 个目标，耗时 1422ms"));
+        vm.Logs.Add(new LogLine(DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture), "Information", "RobotVision 已启动 | TCP 0.0.0.0:9999"));
+        vm.Logs.Add(new LogLine(DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture), "Information", "配方 A01: 检出 8 个目标，耗时 1422ms"));
         vm.Poses.Add(new PoseRow(1, 102.356, 88.412, 45.123, 0.95));
         vm.Poses.Add(new PoseRow(2, -15.004, 210.779, 132.050, 0.87));
 
-        var window = new MainWindow { DataContext = vm };
+        var window = new MainWindow(vm, pageService);
         window.Arrange(new Rect(0, 0, width, height));
         window.UpdateLayout();
 
@@ -270,7 +339,7 @@ public partial class App : Application
         foreach (var (name, page) in pages)
         {
             // WPF Page 只允许 Window/Frame 父级，快照用 Frame 承载
-            var instance = (System.Windows.Controls.Page)Activator.CreateInstance(page)!;
+            var instance = (System.Windows.Controls.Page)pageService.GetPage(page)!;
             var frame = new System.Windows.Controls.Frame { Content = instance };
             host.Child = frame;
             host.UpdateLayout();
@@ -278,7 +347,7 @@ public partial class App : Application
                 () => { }, System.Windows.Threading.DispatcherPriority.SystemIdle);
             if (instance.DataContext is AnalysisViewModel analysis)
             {
-                _ = analysis.RefreshAsync();
+                analysis.ScheduleRefresh();
                 var deadline = DateTime.UtcNow.AddSeconds(2);
                 while (DateTime.UtcNow < deadline && analysis.Message is "尚未加载" or "加载中…")
                 {

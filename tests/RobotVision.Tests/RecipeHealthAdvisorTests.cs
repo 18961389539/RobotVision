@@ -46,6 +46,6 @@ public sealed class RecipeHealthAdvisorTests
         var prior = RecipeHealthAdvisor.ToPlaybookPrior(hints, SegmentRefineMethod.Template);
         Assert.NotNull(prior);
         Assert.Equal(SegmentRefineMethod.Template, prior!.Downrank);
-        Assert.Contains("1019", prior.Reason);
+        Assert.Contains("1019", prior.Reason, StringComparison.Ordinal);
     }
 }

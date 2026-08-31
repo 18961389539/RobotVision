@@ -1,10 +1,13 @@
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure.Communication;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Communication;
 
@@ -27,8 +30,8 @@ public partial class ClientRow : ObservableObject
     public string Remote { get; }
     public DateTime ConnectedAt { get; }
 
-    public string Ip => Remote.Contains(':') ? Remote[..Remote.LastIndexOf(':')] : Remote;
-    public string Port => Remote.Contains(':') ? Remote[(Remote.LastIndexOf(':') + 1)..] : "";
+    public string Ip => Remote.Contains(':', StringComparison.Ordinal) ? Remote[..Remote.LastIndexOf(":", StringComparison.Ordinal)] : Remote;
+    public string Port => Remote.Contains(':', StringComparison.Ordinal) ? Remote[(Remote.LastIndexOf(":", StringComparison.Ordinal) + 1)..] : "";
 
     [ObservableProperty] private long _requests;
     [ObservableProperty] private long _bytesIn;
@@ -42,7 +45,7 @@ public sealed record RequestRow(
     DateTime Time, long ClientId, string Client,
     string Request, string Reply, bool Ok, double ElapsedMs)
 {
-    public string TimeText => Time.ToString("HH:mm:ss.fff");
+    public string TimeText => Time.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
     public string Result => Reply == "处理中" ? "…" : Ok ? "OK" : "ERR";
     public string ElapsedText => $"{ElapsedMs:0} ms";
     public string ReplyTrimmed => Reply.Length <= 96 ? Reply : Reply[..96] + "…";
@@ -59,13 +62,17 @@ public sealed record RecipeStatsRow(
 /// 通信监控：连接列表、请求历史、主动断开与服务启停、按配方运行统计。
 /// 事件来自套接字线程，统一封送到 UI 线程后更新集合。
 /// </summary>
-public partial class CommunicationViewModel : ObservableObject
+public partial class CommunicationViewModel : ObservableObject, IDisposable
 {
     private const int MaxRequestRows = 200;
 
-    private readonly TcpServerManager _tcp;
+    private readonly ITcpRuntime _tcp;
     private readonly VisionService _vision;
+    private readonly AppConfig _cfg;
+    private readonly IDialogService _dialogs;
+    private readonly ILogger<CommunicationViewModel> _log;
     private readonly DispatcherTimer _timer;
+    private bool _syncingPlcDebug;
 
     public ObservableCollection<ClientRow> Clients { get; } = [];
 
@@ -103,10 +110,29 @@ public partial class CommunicationViewModel : ObservableObject
 
     public bool HasInterlock => !string.IsNullOrEmpty(InterlockText);
 
-    public CommunicationViewModel(TcpServerManager tcp, VisionService vision)
+    public bool HasPlcDebugWarning => PlcAlwaysOkMode;
+
+    public string PlcDebugWarningText =>
+        $"PLC 调试模式：TCP 应答一律改写为 OK（默认坐标 {_cfg.PlcDebug.DefaultX:0.###},{_cfg.PlcDebug.DefaultY:0.###},{_cfg.PlcDebug.DefaultRz:0.###}）。视觉仍照常执行，产线务必关闭。";
+
+    public bool PlcAlwaysOkMode
+    {
+        get => _tcp.PlcAlwaysOkMode;
+        set => SetPlcAlwaysOkMode(value);
+    }
+
+    public CommunicationViewModel(
+        ITcpRuntime tcp,
+        VisionService vision,
+        AppConfig cfg,
+        IDialogService dialogs,
+        ILogger<CommunicationViewModel> log)
     {
         _tcp = tcp;
         _vision = vision;
+        _cfg = cfg;
+        _dialogs = dialogs;
+        _log = log;
         foreach (var snapshot in _tcp.GetClients())
             Clients.Add(new ClientRow(snapshot));
 
@@ -128,6 +154,17 @@ public partial class CommunicationViewModel : ObservableObject
     public void StartTimer() => _timer.Start();
 
     public void StopTimer() => _timer.Stop();
+
+    /// <summary>进程退出时由 DI 容器级联调用（单例 VM）：退订挂在长命 TcpServerManager 上的 4 个事件，
+    /// 否则套接字线程会一直向已死的 VM 封送 UI 更新。</summary>
+    public void Dispose()
+    {
+        _tcp.ClientConnected -= OnClientConnected;
+        _tcp.ClientDisconnected -= OnClientDisconnected;
+        _tcp.RequestStarted -= OnRequestStarted;
+        _tcp.RequestProcessed -= OnRequestProcessed;
+        _timer.Stop();
+    }
 
     private void OnClientConnected(TcpClientSnapshot snapshot) =>
         Dispatch(() => Clients.Add(new ClientRow(snapshot)));
@@ -204,8 +241,12 @@ public partial class CommunicationViewModel : ObservableObject
     private void RefreshStatus()
     {
         ServiceStatus = _tcp.IsRunning
-            ? $"运行中 · {_tcp.ConnectedClients} 个客户端"
-            : "已停止";
+            ? PlcAlwaysOkMode
+                ? $"运行中 · {_tcp.ConnectedClients} 个客户端 · PLC 调试"
+                : $"运行中 · {_tcp.ConnectedClients} 个客户端"
+            : PlcAlwaysOkMode
+                ? "已停止 · PLC 调试"
+                : "已停止";
         ToggleButtonLabel = _tcp.IsRunning ? "停止服务" : "启动服务";
         SummaryText =
             $"监听 {_tcp.ListenEndPoint} · 累计连接 {_tcp.TotalConnections} · 累计请求 {_tcp.TotalRequests}";
@@ -228,7 +269,7 @@ public partial class CommunicationViewModel : ObservableObject
             StatsRows.Add(new RecipeStatsRow(
                 s.Recipe, s.Total, s.Ok, s.Failed,
                 $"{s.SuccessRate:P1}", $"{s.AvgMs:0}", $"{s.LastMs:0}",
-                s.LastAt?.ToString("HH:mm:ss") ?? "—",
+                s.LastAt?.ToString("HH:mm:ss", CultureInfo.InvariantCulture) ?? "—",
                 rate, tier, s.ConsecutiveFails));
         }
 
@@ -241,6 +282,10 @@ public partial class CommunicationViewModel : ObservableObject
 
         SuccessRateText = total == 0 ? "—" : $"{(double)ok / total:P1}";
         AvgMsText = total == 0 ? "—" : $"{avg:0} ms";
+
+        OnPropertyChanged(nameof(PlcAlwaysOkMode));
+        OnPropertyChanged(nameof(HasPlcDebugWarning));
+        OnPropertyChanged(nameof(PlcDebugWarningText));
 
         if (_vision.AnyInhibited)
         {
@@ -257,7 +302,38 @@ public partial class CommunicationViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(HasInterlock));
+        OnPropertyChanged(nameof(HasPlcDebugWarning));
         OnPropertyChanged(nameof(HasStats));
+    }
+
+    private void SetPlcAlwaysOkMode(bool value)
+    {
+        if (_syncingPlcDebug || value == _tcp.PlcAlwaysOkMode)
+            return;
+
+        if (value &&
+            !_dialogs.ConfirmYesNo(
+                "启用后 TCP 将不再向 PLC 返回 ERR（失败时回默认坐标的 OK）。\n" +
+                "视觉仍会照常采图推理，仅协议线伪装成功。\n\n" +
+                "仅供 PLC 联调，正式产线务必关闭。继续？",
+                "PLC 调试模式"))
+        {
+            _syncingPlcDebug = true;
+            OnPropertyChanged(nameof(PlcAlwaysOkMode));
+            OnPropertyChanged(nameof(HasPlcDebugWarning));
+            _syncingPlcDebug = false;
+            return;
+        }
+
+        _cfg.PlcDebug.AlwaysOk = value;
+        _tcp.PlcAlwaysOkMode = value;
+        _tcp.PlcDebugDefaultX = _cfg.PlcDebug.DefaultX;
+        _tcp.PlcDebugDefaultY = _cfg.PlcDebug.DefaultY;
+        _tcp.PlcDebugDefaultRz = _cfg.PlcDebug.DefaultRz;
+        OnPropertyChanged(nameof(PlcAlwaysOkMode));
+        OnPropertyChanged(nameof(HasPlcDebugWarning));
+        OnPropertyChanged(nameof(PlcDebugWarningText));
+        RefreshStatus();
     }
 
     [RelayCommand]
@@ -284,10 +360,15 @@ public partial class CommunicationViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void Refresh() => RefreshStatus();
+
+    [RelayCommand]
     private void ToggleService()
     {
         if (_tcp.IsRunning)
         {
+            if (!ConfirmStopService())
+                return;
             _tcp.Stop();
         }
         else
@@ -303,6 +384,20 @@ public partial class CommunicationViewModel : ObservableObject
             }
         }
         RefreshStatus();
+    }
+
+    /// <summary>停止 TCP 前确认（测试可注入，默认 MessageBox）。</summary>
+    internal Func<bool>? ConfirmStopServiceForTests { get; set; }
+
+    private bool ConfirmStopService()
+    {
+        if (ConfirmStopServiceForTests is { } confirm)
+            return confirm();
+
+        return _dialogs.ConfirmYesNo(
+            "停止后 PLC 将无法通过 TCP 触发视觉（STATUS/TRIGGER 均不可用）。\n\n" +
+            "确认停止 TCP 服务？",
+            "停止 TCP 服务");
     }
 
     private void NotifyLists()

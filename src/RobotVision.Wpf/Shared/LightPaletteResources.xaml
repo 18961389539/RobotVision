@@ -1,0 +1,12 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- 浅色主题语义画刷：键与 DarkPaletteResources.xaml 一一对应，由 AppThemeManager 按主题二选一加载。 -->
+    <SolidColorBrush x:Key="Brush.AppTextSecondary" Color="#FF55606E" />
+    <SolidColorBrush x:Key="Brush.AppTextSecondaryStrong" Color="#FF3D4754" />
+    <SolidColorBrush x:Key="Brush.AppTextPrimary" Color="#FF1F242B" />
+    <SolidColorBrush x:Key="Brush.AppBadgeText" Color="#FF0D1117" />
+    <SolidColorBrush x:Key="Brush.AppPlotBackground" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="Brush.AppLogTime" Color="#FFB04A4A" />
+    <SolidColorBrush x:Key="Brush.AppRowErrorBg" Color="#33F2B8B8" />
+    <SolidColorBrush x:Key="Brush.AppRowWarningBg" Color="#33EFB25E" />
+</ResourceDictionary>

@@ -6,19 +6,25 @@ namespace RobotVision.Core.Recipe;
 public sealed record RecipeDisplayHints(
     bool DrawDetectionRoi,
     Roi? DetectionRoi,
-    bool ShowCaliperDebug)
+    bool ShowRefineDebug)
 {
-    /// <summary>产线简洁模式：只画位姿本体，不画检测 ROI / 卡尺探针。</summary>
+    /// <summary>产线简洁模式：只画位姿本体，不画检测 ROI / 精修调试点。</summary>
     public static RecipeDisplayHints Production { get; } = new(false, null, false);
 
-    /// <summary>与配方页「试触发」结果图一致。</summary>
+    /// <summary>卡尺 / 形状匹配 / SIFT 等带 <see cref="PoseOverlay.DebugDots"/> 的精修方法。</summary>
+    public static bool RefineMethodShowsDebugOverlay(SegmentRefineMethod method) =>
+        method is SegmentRefineMethod.CaliperTab
+            or SegmentRefineMethod.ShapeMatch
+            or SegmentRefineMethod.Sift;
+
+    /// <summary>与配方页「试触发」、监控「对齐配方测试」结果图一致。</summary>
     public static RecipeDisplayHints ForRecipeTest(RecipeConfig recipe)
     {
         ArgumentNullException.ThrowIfNull(recipe);
         return new(
             DrawDetectionRoi: recipe.Roi is not null,
             DetectionRoi: recipe.Roi,
-            ShowCaliperDebug: recipe.AngleMode == AngleMode.MaskTemplate
-                && recipe.Template.RefineMethod == SegmentRefineMethod.CaliperTab);
+            ShowRefineDebug: recipe.AngleMode == AngleMode.MaskTemplate
+                && RefineMethodShowsDebugOverlay(recipe.Template.RefineMethod));
     }
 }

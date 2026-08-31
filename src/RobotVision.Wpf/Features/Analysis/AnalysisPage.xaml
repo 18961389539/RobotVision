@@ -3,6 +3,7 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:oxy="http://oxyplot.org/wpf"
+      xmlns:analysis="clr-namespace:RobotVision.WpfHost.Features.Analysis"
       Title="结果分析"
       Background="{DynamicResource ApplicationBackgroundBrush}"
       ScrollViewer.VerticalScrollBarVisibility="Disabled">
@@ -145,10 +146,10 @@
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 </Grid>
                                 <oxy:PlotView Grid.Row="1" Model="{Binding AnglePlot}"
-                                              Controller="{Binding InspectPlotController}"
+                                              Controller="{x:Static analysis:AnalysisPlots.Inspect}"
                                               IsMouseWheelEnabled="False"
                                               MinHeight="200"
-                                              Background="#202020" />
+                                              Background="{DynamicResource Brush.AppPlotBackground}" />
                             </Grid>
                         </ui:Card>
 
@@ -165,10 +166,10 @@
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 </Grid>
                                 <oxy:PlotView Grid.Row="1" Model="{Binding CodePlot}"
-                                              Controller="{Binding InspectPlotController}"
+                                              Controller="{x:Static analysis:AnalysisPlots.Inspect}"
                                               IsMouseWheelEnabled="False"
                                               MinHeight="200"
-                                              Background="#202020" />
+                                              Background="{DynamicResource Brush.AppPlotBackground}" />
                             </Grid>
                         </ui:Card>
 
@@ -185,10 +186,10 @@
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 </Grid>
                                 <oxy:PlotView Grid.Row="1" Model="{Binding TrendPlot}"
-                                              Controller="{Binding InspectPlotController}"
+                                              Controller="{x:Static analysis:AnalysisPlots.Inspect}"
                                               IsMouseWheelEnabled="False"
                                               MinHeight="200"
-                                              Background="#202020" />
+                                              Background="{DynamicResource Brush.AppPlotBackground}" />
                             </Grid>
                         </ui:Card>
 
@@ -205,10 +206,10 @@
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 </Grid>
                                 <oxy:PlotView Grid.Row="1" Model="{Binding RecipePlot}"
-                                              Controller="{Binding InspectPlotController}"
+                                              Controller="{x:Static analysis:AnalysisPlots.Inspect}"
                                               IsMouseWheelEnabled="False"
                                               MinHeight="200"
-                                              Background="#202020" />
+                                              Background="{DynamicResource Brush.AppPlotBackground}" />
                             </Grid>
                         </ui:Card>
 
@@ -225,9 +226,9 @@
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 </Grid>
                                 <oxy:PlotView Grid.Row="1" Model="{Binding XyPlot}"
-                                              Controller="{Binding ExplorePlotController}"
+                                              Controller="{x:Static analysis:AnalysisPlots.Explore}"
                                               MinHeight="200"
-                                              Background="#202020" />
+                                              Background="{DynamicResource Brush.AppPlotBackground}" />
                             </Grid>
                         </ui:Card>
 
@@ -244,10 +245,10 @@
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 </Grid>
                                 <oxy:PlotView Grid.Row="1" Model="{Binding ElapsedPlot}"
-                                              Controller="{Binding InspectPlotController}"
+                                              Controller="{x:Static analysis:AnalysisPlots.Inspect}"
                                               IsMouseWheelEnabled="False"
                                               MinHeight="200"
-                                              Background="#202020" />
+                                              Background="{DynamicResource Brush.AppPlotBackground}" />
                             </Grid>
                         </ui:Card>
                     </Grid>

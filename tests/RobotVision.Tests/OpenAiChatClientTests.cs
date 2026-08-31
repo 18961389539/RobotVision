@@ -13,7 +13,7 @@ public sealed class OpenAiChatClientTests
     {
         using var client = Create(req =>
         {
-            Assert.EndsWith("/health", req.RequestUri!.AbsolutePath);
+            Assert.EndsWith("/health", req.RequestUri!.AbsolutePath, StringComparison.Ordinal);
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
         Assert.True(await client.ProbeAsync());

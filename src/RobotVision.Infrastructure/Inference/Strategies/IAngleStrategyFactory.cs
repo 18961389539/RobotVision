@@ -5,8 +5,8 @@ using RobotVision.Core.Recipe;
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
 /// <summary>
-/// 角度策略类型工厂：按 <see cref="AngleMode"/> 创建策略实例的扩展点。
-/// 新增角度模式（模板匹配/OCR/测量等）＝新建一个实现类 + 调用
+/// 角度策略工厂：一种 <see cref="AngleMode"/> 对应一个实现。
+/// 新增模式时实现本接口并在
 /// <c>AngleStrategyTypeRegistry.Register</c> 一行，服务注册、UI 角度模式下拉
 /// 自动生效，不再改动 VisionService 与配方编辑分支——与 ICameraFactory 同构。
 /// </summary>

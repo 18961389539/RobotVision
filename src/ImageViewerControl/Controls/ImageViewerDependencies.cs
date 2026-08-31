@@ -107,10 +107,10 @@ namespace ImageViewer.Controls
 
         public static ImageViewerDependencies CreateDefault(RoiPluginRegistry? pluginRegistry = null)
         {
-            return new ImageViewerHostBuilder()
-                .UsePluginRegistry(ImageViewerPluginRegistryBootstrap.Resolve(pluginRegistry))
-                .Build()
-                .Dependencies;
+            var plugins = ImageViewerPluginRegistryBootstrap.Resolve(pluginRegistry);
+            var hostServices = ImageViewerHostDefaults.CreateHostServices();
+            var runtimeServices = ImageViewerHostDefaults.CreateRuntimeServices(hostServices.SessionStoragePolicy);
+            return new ImageViewerDependencies(plugins, runtimeServices, hostServices);
         }
     }
 }

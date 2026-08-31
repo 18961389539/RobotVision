@@ -29,3 +29,14 @@ crash_diag*.txt
 
 # BenchmarkDotNet 产物（基准测试结果/日志，自动生成，不入库）
 BenchmarkDotNet.Artifacts/
+
+# 根目录恢复/补丁脚本（工具临时产物，不入库）
+/_*.js
+/_*.txt
+/_recovered/
+/_recovered_full/
+/_recovered_maskcaliper/
+/build-*.txt
+
+# Visual Studio WPF 临时工程文件（编辑 XAML 时生成）
+*_wpftmp.csproj

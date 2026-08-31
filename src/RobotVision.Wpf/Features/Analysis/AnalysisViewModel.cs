@@ -5,9 +5,11 @@ using System.Text;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using OxyPlot;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Analysis;
 
@@ -30,7 +32,7 @@ public sealed record AnalysisRecipeYield(
 /// 筛选时间/配方/工位/相机/成败/关键字 → 合格率、离散度、角度分布、结果码、
 /// 时间趋势、按配方合格率、明细表；可导出 CSV。
 /// </summary>
-public partial class AnalysisViewModel : ObservableObject
+public partial class AnalysisViewModel : ObservableObject, IDisposable
 {
     public const string AllRecipes = "全部配方";
     public const string AllStations = "全部工位";
@@ -49,6 +51,7 @@ public partial class AnalysisViewModel : ObservableObject
     private readonly SqliteResultStore _db;
     private readonly ResultLogStore? _results;
     private readonly RecipeLoader? _recipes;
+    private readonly ILogger<AnalysisViewModel> _log;
     private readonly DispatcherTimer _timer;
     private CancellationTokenSource? _refreshCts;
     private bool _ready;
@@ -194,10 +197,6 @@ public partial class AnalysisViewModel : ObservableObject
     [ObservableProperty]
     private bool _hasElapsedBars;
 
-    public IPlotController InspectPlotController => AnalysisPlots.Inspect;
-
-    public IPlotController ExplorePlotController => AnalysisPlots.Explore;
-
     public void InvalidatePlots()
     {
         AnglePlot.InvalidatePlot(true);
@@ -208,9 +207,14 @@ public partial class AnalysisViewModel : ObservableObject
         ElapsedPlot.InvalidatePlot(true);
     }
 
-    public AnalysisViewModel(SqliteResultStore db, ResultLogStore? results = null, RecipeLoader? recipes = null)
+    public AnalysisViewModel(
+        SqliteResultStore db,
+        ILogger<AnalysisViewModel> log,
+        ResultLogStore? results = null,
+        RecipeLoader? recipes = null)
     {
         _db = db;
+        _log = log;
         _results = results;
         _recipes = recipes;
         RecipeOptions.Add(AllRecipes);
@@ -220,9 +224,11 @@ public partial class AnalysisViewModel : ObservableObject
         _timer.Tick += (_, _) =>
         {
             if (_ready)
-                _ = RefreshAsync();
+                ScheduleRefresh();
         };
     }
+
+    public void ScheduleRefresh() => UiFireAndForget.Run(RefreshAsync, _log);
 
     public void StartTimer() => _timer.Start();
 
@@ -231,37 +237,37 @@ public partial class AnalysisViewModel : ObservableObject
     partial void OnRangeChanged(string value)
     {
         if (_ready && !_suppressFilter)
-            _ = RefreshAsync();
+            ScheduleRefresh();
     }
 
     partial void OnRecipeFilterChanged(string value)
     {
         if (_ready && !_suppressFilter)
-            _ = RefreshAsync();
+            ScheduleRefresh();
     }
 
     partial void OnStationFilterChanged(string value)
     {
         if (_ready && !_suppressFilter)
-            _ = RefreshAsync();
+            ScheduleRefresh();
     }
 
     partial void OnCameraFilterChanged(string value)
     {
         if (_ready && !_suppressFilter)
-            _ = RefreshAsync();
+            ScheduleRefresh();
     }
 
     partial void OnOutcomeChanged(string value)
     {
         if (_ready && !_suppressFilter)
-            _ = RefreshAsync();
+            ScheduleRefresh();
     }
 
     partial void OnKeywordChanged(string value)
     {
         if (_ready && !_suppressFilter)
-            _ = RefreshAsync();
+            ScheduleRefresh();
     }
 
     [RelayCommand]
@@ -290,6 +296,7 @@ public partial class AnalysisViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            WpfUiLog.AnalysisLoadFailed(_log, ex);
             Message = "读取结果库失败: " + ex.Message;
             HasRows = false;
         }
@@ -463,7 +470,7 @@ public partial class AnalysisViewModel : ObservableObject
             var ratio = codePeak == 0 ? 0 : (double)item.Count / codePeak;
             CodeRows.Add(new CodeShareRow(
                 ResultAnalysis.DescribeCode(item.Code), item.Count, ratio,
-                item.Count.ToString("N0")));
+                item.Count.ToString("N0", CultureInfo.InvariantCulture)));
         }
         HasCodeRows = CodeRows.Count > 0;
         CodeSummary = snapshot.Codes.Count == 0 ? "暂无分布" : $"{snapshot.Codes.Count} 种结果码";
@@ -604,7 +611,7 @@ public partial class AnalysisViewModel : ObservableObject
     {
         var ok = row.Code == 0;
         var time = DateTimeOffset.TryParse(row.T, out var parsed)
-            ? parsed.ToString("MM-dd HH:mm:ss")
+            ? parsed.ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
             : row.T;
         return new AnalysisRow(
             time, row.Recipe, row.Station, row.Camera,
@@ -625,9 +632,17 @@ public partial class AnalysisViewModel : ObservableObject
     private static string Csv(string? value)
     {
         var s = value ?? "";
-        if (s.Contains(',') || s.Contains('"') || s.Contains('\n') || s.Contains('\r'))
+        if (s.Contains(',', StringComparison.Ordinal) || s.Contains('"', StringComparison.Ordinal) || s.Contains('\n', StringComparison.Ordinal) || s.Contains('\r', StringComparison.Ordinal))
             return "\"" + s.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
         return s;
+    }
+
+    public void Dispose()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
+        _timer.Stop();
     }
 
     private sealed record Snapshot(

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using ImageViewer.Abstractions;
+using ImageViewer.Logging;
 
 namespace ImageViewer.Controls
 {
@@ -602,7 +603,7 @@ namespace ImageViewer.Controls
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(exception);
 
-            logger.LogError(message, exception);
+            ImageViewerLoggerSupport.NonCriticalError(logger, message, exception);
             _telemetry.RecordNonCriticalError(message, exception);
         }
     }

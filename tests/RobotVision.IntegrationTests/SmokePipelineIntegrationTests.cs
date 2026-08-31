@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Diagnostics;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -212,7 +213,7 @@ public class SmokePipelineIntegrationTests : IClassFixture<SmokePipelineIntegrat
         result.Ok.Should().BeTrue();
 
         var captureDir = server.Cfg.CaptureSuccess.Folder;
-        var png = WaitForFile(Path.Combine(captureDir, DateTime.Now.ToString("yyyy-MM-dd")), "*_OK.png");
+        var png = WaitForFile(Path.Combine(captureDir, DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), "*_OK.png");
         png.Should().NotBeEmpty("开启成功存图后应有 OK 现场图");
         // 元数据 JSON 与图同名;同后台线程 PNG 先写、JSON 后写,轮询等待
         var metaPath = Path.ChangeExtension(png, ".json");

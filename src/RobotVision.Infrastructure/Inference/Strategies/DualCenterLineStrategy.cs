@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
@@ -93,6 +94,8 @@ public sealed class DualCenterLineStrategy(ModelManager models) : IAngleStrategy
         return poses.OrderByDescending(p => p.Score).ToList();
     }
 
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "Mat ROI view disposed in finally after inference window.")]
     private static List<PixelPose> PairByWindow(
         VisionImage undistorted, RecipeConfig recipe, ModelSession sessionB,
         IReadOnlyList<ObjectDetectionResult> listA, double ox, double oy, CancellationToken ct)
@@ -107,46 +110,55 @@ public sealed class DualCenterLineStrategy(ModelManager models) : IAngleStrategy
             ct.ThrowIfCancellationRequested();
             var window = ExpandWindow(a.Box, recipe.DualModel.CropExpandRatio, roiView.Width, roiView.Height);
 
-            using var windowView = new Mat(roiView, new Rect(window.Left, window.Top, window.Width, window.Height));
-            using var windowImage = VisionImageCv.FromMat(windowView, ownsMat: false);
-            var listB = sessionB.Run(
-                y => y.RunObjectDetection(windowImage, recipe.Confidence, recipe.Iou), ct);
-            if (listB.Count == 0)
-                continue;
-
-            var boxes = listB.Select(b => b.Box).ToList();
-            var centerA = Center(a.Box);
-            var bestIndex = SelectNearest(
-                centerA, boxes, window.Left, window.Top,
-                recipe.DualModel.PairingMaxDistancePx);
-            if (bestIndex < 0)
-                continue;
-
-            var boxB = listB[bestIndex].Box;
-            var centerB = Center(boxB);
-            var (center, angleDeg) = AngleGeometry.FromTwoPoints(
-                centerA.X + ox, centerA.Y + oy,
-                centerB.X + window.Left + ox, centerB.Y + window.Top + oy);
-            poses.Add(new PixelPose(
-                center.X, center.Y, angleDeg,
-                Math.Min(a.Confidence, listB[bestIndex].Confidence))
+            Mat? windowView = null;
+            try
             {
-                Overlay = new PoseOverlay
+                windowView = new Mat(roiView, new Rect(window.Left, window.Top, window.Width, window.Height));
+                using var windowImage = VisionImageCv.FromMat(windowView, ownsMat: false);
+                var listB = sessionB.Run(
+                    y => y.RunObjectDetection(windowImage, recipe.Confidence, recipe.Iou), ct);
+                if (listB.Count == 0)
+                    continue;
+
+                var boxes = listB.Select(b => b.Box).ToList();
+                var centerA = Center(a.Box);
+                var bestIndex = SelectNearest(
+                    centerA, boxes, window.Left, window.Top,
+                    recipe.DualModel.PairingMaxDistancePx);
+                if (bestIndex < 0)
+                    continue;
+
+                var boxB = listB[bestIndex].Box;
+                var centerB = Center(boxB);
+                var (center, angleDeg) = AngleGeometry.FromTwoPoints(
+                    centerA.X + ox, centerA.Y + oy,
+                    centerB.X + window.Left + ox, centerB.Y + window.Top + oy);
+                windowView = null;
+                poses.Add(new PixelPose(
+                    center.X, center.Y, angleDeg,
+                    Math.Min(a.Confidence, listB[bestIndex].Confidence))
                 {
-                    Boxes =
-                    [
-                        new PixelRect(a.Box.Left + ox, a.Box.Top + oy, a.Box.Width, a.Box.Height),
-                        new PixelRect(boxB.Left + window.Left + ox, boxB.Top + window.Top + oy,
-                            boxB.Width, boxB.Height),
-                    ],
-                    Baseline =
-                    [
-                        new PixelPoint(centerA.X + ox, centerA.Y + oy),
-                        new PixelPoint(centerB.X + window.Left + ox, centerB.Y + window.Top + oy),
-                    ],
-                    Label = a.Label,
-                },
-            });
+                    Overlay = new PoseOverlay
+                    {
+                        Boxes =
+                        [
+                            new PixelRect(a.Box.Left + ox, a.Box.Top + oy, a.Box.Width, a.Box.Height),
+                            new PixelRect(boxB.Left + window.Left + ox, boxB.Top + window.Top + oy,
+                                boxB.Width, boxB.Height),
+                        ],
+                        Baseline =
+                        [
+                            new PixelPoint(centerA.X + ox, centerA.Y + oy),
+                            new PixelPoint(centerB.X + window.Left + ox, centerB.Y + window.Top + oy),
+                        ],
+                        Label = a.Label,
+                    },
+                });
+            }
+            finally
+            {
+                windowView?.Dispose();
+            }
         }
 
         return poses.OrderByDescending(p => p.Score).ToList();

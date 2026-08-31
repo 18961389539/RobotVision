@@ -19,7 +19,7 @@ public sealed class TestInferenceEngine : IInferenceEngine
 
     public Func<VisionImage, IReadOnlyList<PoseDetectionResult>>? OnPose { get; set; }
 
-    public int DisposedCount;
+    public int DisposedCount { get; private set; }
 
     public IReadOnlyList<ObjectDetectionResult> RunObjectDetection(
         VisionImage image, double confidence = 0.25, double iou = 0.45) =>
@@ -38,6 +38,10 @@ public sealed class TestInferenceEngine : IInferenceEngine
 
 public sealed class TestInferenceEngineFactory(Func<TestInferenceEngine> create) : IInferenceEngineFactory
 {
+    public string ActiveDevice => "";
+
+    public bool GpuUnavailable => false;
+
     public TestInferenceEngine? LastEngine { get; private set; }
 
     public IInferenceEngine Create(string modelPath)
@@ -45,4 +49,6 @@ public sealed class TestInferenceEngineFactory(Func<TestInferenceEngine> create)
         LastEngine = create();
         return LastEngine;
     }
+
+    public InferenceTask? DetectTask(string modelPath) => null;
 }

@@ -158,7 +158,7 @@ public sealed class TestServer : IAsyncDisposable
                 if (n == 0)
                     break;
                 sb.Append(Encoding.ASCII.GetString(buffer, 0, n));
-                if (sb.ToString().Contains('\n'))
+                if (sb.ToString().Contains('\n', StringComparison.Ordinal))
                     break;
             }
             else

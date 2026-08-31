@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -179,7 +180,7 @@ public sealed class SqliteResultStore : IDisposable
             ApplyFilters(cmd, query, where);
             cmd.CommandText = $"SELECT COUNT(*) FROM results {where};";
             var value = cmd.ExecuteScalar();
-            return value is long n ? n : Convert.ToInt64(value);
+            return value is long n ? n : Convert.ToInt64(value, CultureInfo.InvariantCulture);
         }
     }
 
@@ -207,7 +208,7 @@ public sealed class SqliteResultStore : IDisposable
             if (!reader.Read())
                 return new ResultDbSummary(0, 0, 0, null, null, null, null);
             var total = reader.IsDBNull(0) ? 0 : reader.GetInt64(0);
-            var ok = reader.IsDBNull(1) ? 0 : Convert.ToInt64(reader.GetValue(1));
+            var ok = reader.IsDBNull(1) ? 0 : Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture);
             return new ResultDbSummary(
                 total, ok, total - ok,
                 ReadNullableDouble(reader, 2),
@@ -337,7 +338,7 @@ public sealed class SqliteResultStore : IDisposable
             using var reader = cmd.ExecuteReader();
             var rows = new List<ResultCodeCount>();
             while (reader.Read())
-                rows.Add(new ResultCodeCount(reader.GetInt32(0), Convert.ToInt64(reader.GetValue(1))));
+                rows.Add(new ResultCodeCount(reader.GetInt32(0), Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture)));
             return rows;
         }
     }
@@ -414,8 +415,8 @@ public sealed class SqliteResultStore : IDisposable
             var rows = new List<ResultRecipeStat>();
             while (reader.Read())
             {
-                var total = Convert.ToInt64(reader.GetValue(1));
-                var ok = reader.IsDBNull(2) ? 0 : Convert.ToInt64(reader.GetValue(2));
+                var total = Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture);
+                var ok = reader.IsDBNull(2) ? 0 : Convert.ToInt64(reader.GetValue(2), CultureInfo.InvariantCulture);
                 rows.Add(new ResultRecipeStat(
                     reader.GetString(0), total, ok, total - ok,
                     ReadNullableDouble(reader, 3),
@@ -454,8 +455,8 @@ public sealed class SqliteResultStore : IDisposable
             while (reader.Read())
             {
                 var label = reader.IsDBNull(0) ? "" : reader.GetString(0);
-                var total = Convert.ToInt64(reader.GetValue(1));
-                var ok = reader.IsDBNull(2) ? 0 : Convert.ToInt64(reader.GetValue(2));
+                var total = Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture);
+                var ok = reader.IsDBNull(2) ? 0 : Convert.ToInt64(reader.GetValue(2), CultureInfo.InvariantCulture);
                 rows.Add(new ResultTrendBucket(label, total, ok, total - ok));
             }
             rows.Reverse();
@@ -488,7 +489,7 @@ public sealed class SqliteResultStore : IDisposable
                 return;
             _disposed = true;
             try { _conn?.Dispose(); }
-            catch (Exception ex) { _log.LogDebug(ex, "关闭结果库连接"); }
+            catch (Exception ex) { SqliteResultStoreLog.CloseConnection(_log, ex); }
             _conn = null;
         }
     }
@@ -565,7 +566,7 @@ public sealed class SqliteResultStore : IDisposable
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "清理结果库超期行失败（不影响管线）");
+            SqliteResultStoreLog.CleanupFailed(_log, ex);
         }
     }
 
@@ -616,7 +617,7 @@ public sealed class SqliteResultStore : IDisposable
         }
     }
 
-    private IReadOnlyList<string> ListDistinct(string column, int limit)
+    private List<string> ListDistinct(string column, int limit)
     {
         lock (_sync)
         {
@@ -668,7 +669,7 @@ public sealed class SqliteResultStore : IDisposable
             ParsePoses(posesJson, x, y, angle, confidence));
     }
 
-    private static IReadOnlyList<ResultPoseLog> ParsePoses(
+    private static ResultPoseLog[] ParsePoses(
         string? json, double? x, double? y, double? angle, double? confidence)
     {
         if (!string.IsNullOrWhiteSpace(json))
@@ -699,7 +700,7 @@ public sealed class SqliteResultStore : IDisposable
         if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
             || name.Contains("..", StringComparison.Ordinal)
             || Path.IsPathRooted(name)
-            || name.Contains('/') || name.Contains('\\'))
+            || name.Contains('/', StringComparison.Ordinal) || name.Contains('\\', StringComparison.Ordinal))
             name = "results.db";
         return Path.Combine(folder, name);
     }

@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using ImageViewer.Logging;
 using ImageViewer.Models;
 using ImageViewer.ViewModels;
 
@@ -11,7 +12,7 @@ namespace ImageViewer.Controls
 
         private void LogNonCriticalError(string context, Exception ex)
         {
-            Logger.LogError(context, ex);
+            ImageViewerLoggerSupport.NonCriticalError(Logger, context, ex);
         }
 
         private ImageViewerBackgroundOperationObserver BackgroundOperationObserver =>
@@ -36,12 +37,12 @@ namespace ImageViewer.Controls
             }
             catch (OperationCanceledException)
             {
-                Logger.LogInfo($"UI operation canceled: {operationName}; category=Cancellation");
+                ImageViewerLoggerSupport.UiOperationCanceled(Logger, operationName);
             }
             catch (Exception ex)
             {
                 string category = ImageViewerExceptionClassifier.Classify(ex);
-                Logger.LogError($"UI operation failed: {operationName}; category={category}", ex);
+                ImageViewerLoggerSupport.UiOperationFailed(Logger, operationName, category, ex);
                 DiagnosticErrorText = $"操作失败 [{category}]：{operationName}。";
                 HasDiagnosticError = true;
                 _dialogWorkflowService.ShowWarning("操作失败", $"操作“{operationName}”失败。请查看诊断信息。" );
@@ -56,12 +57,12 @@ namespace ImageViewer.Controls
             }
             catch (OperationCanceledException)
             {
-                Logger.LogInfo($"Shutdown operation canceled: {operationName}; category=Cancellation");
+                ImageViewerLoggerSupport.ShutdownOperationCanceled(Logger, operationName);
             }
             catch (Exception ex)
             {
                 string category = ImageViewerExceptionClassifier.Classify(ex);
-                Logger.LogError($"Shutdown operation failed: {operationName}; category={category}", ex);
+                ImageViewerLoggerSupport.ShutdownOperationFailed(Logger, operationName, category, ex);
             }
         }
 

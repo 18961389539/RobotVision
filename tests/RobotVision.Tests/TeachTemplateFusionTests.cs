@@ -1,5 +1,5 @@
 using OpenCvSharp;
-using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Teach;
 using Xunit;
 
 namespace RobotVision.Tests;

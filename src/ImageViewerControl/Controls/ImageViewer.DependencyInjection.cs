@@ -1,6 +1,7 @@
 using System;
 using ImageViewer.Abstractions;
 using ImageViewer.Dialogs;
+using ImageViewer.Logging;
 using ImageViewer.Plugins;
 using ImageViewer.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -76,7 +77,9 @@ namespace ImageViewer.Controls
             services.TryAdd(ServiceDescriptor.Singleton<IImageViewerPeriodicTaskSchedulerFactory>(static serviceProvider =>
                 new DispatcherImageViewerPeriodicTaskSchedulerFactory(
                     serviceProvider.GetRequiredService<IImageViewerDispatcherTimerFactory>(),
-                    exception => serviceProvider.GetRequiredService<IImageViewerLogger>().LogError("Periodic image viewer task failed.", exception))));
+                    exception => ImageViewerLoggerSupport.PeriodicTaskFailed(
+                        serviceProvider.GetRequiredService<IImageViewerLogger>(),
+                        exception))));
         }
 
         private static void AddHostAnalysisServices(IServiceCollection services)

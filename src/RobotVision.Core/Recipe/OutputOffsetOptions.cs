@@ -30,6 +30,14 @@ public sealed class OutputOffsetOptions
 
     public bool HasTeachOutput => TeachX is not null && TeachY is not null && TeachRzDeg is not null;
 
+    /// <summary>抓取原点变了之后清掉已记示教坐标，避免旧点叠到新原点上。</summary>
+    public void ClearTeachOutput()
+    {
+        TeachX = null;
+        TeachY = null;
+        TeachRzDeg = null;
+    }
+
     public RobotPose Apply(RobotPose pose) =>
         IsZero ? pose : new(pose.X + X, pose.Y + Y, AngleGeometry.NormalizeSignedDeg(pose.AngleDeg + RzDeg));
 

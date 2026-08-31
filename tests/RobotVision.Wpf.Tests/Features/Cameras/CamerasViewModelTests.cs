@@ -1,13 +1,38 @@
+using System.Threading;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using FluentAssertions;
+using RobotVision.Core.Abstractions;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Cameras;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.WpfHost.Features.Cameras;
+using RobotVision.WpfHost.Shared;
+using Microsoft.Extensions.Logging;
 
 namespace RobotVision.Wpf.Tests;
+
+/// <summary>测试用：统计 Create 调用次数，验证预览会话复用。</summary>
+internal sealed class CountingCameraFactory : ICameraFactory
+{
+    public static int CreateCount;
+
+    public string TypeName => "CountingVirtual";
+
+    public ICamera Create(CameraConfig config, ILogger? logger = null)
+    {
+        Interlocked.Increment(ref CreateCount);
+        return new VirtualCamera(
+            config.Id,
+            config.Width,
+            config.Height,
+            config.Pattern,
+            config.IntervalMs,
+            config.NoiseSigma,
+            config.ChessCellPx);
+    }
+}
 
 /// <summary>
 /// 相机管理页：保存后应保留当前预览图（图仍属于这台相机）；
@@ -43,8 +68,10 @@ public class CamerasViewModelTests : IDisposable
         _dir.Dispose();
     }
 
+    private readonly TestDialogService _dialogs = new();
+
     private CamerasViewModel CreateVm() =>
-        new(_cfg, _store, _cameras, _recipes, _registry);
+        new(_cfg, _store, TestInfra.CameraFacade(_cameras), _recipes, _registry, _dialogs, TestLog.Null<CamerasViewModel>());
 
     private static BitmapSource TinyImage() =>
         BitmapSource.Create(1, 1, 96, 96, PixelFormats.Bgra32, null, new byte[] { 0, 0, 0, 255 }, 4);
@@ -238,6 +265,52 @@ public class CamerasViewModelTests : IDisposable
             vm.HasUnsavedChanges.Should().BeFalse();
             vm.UnsavedHint.Should().BeEmpty();
             dirtyNotified.Should().BeTrue();
+        });
+    }
+
+    [Fact]
+    public void Preview_Unregistered_ReusesSingleCameraInstance()
+    {
+        TestInfra.RunSta(() =>
+        {
+            CountingCameraFactory.CreateCount = 0;
+            var registry = CameraTypeRegistry.CreateDefault();
+            registry.Register(new CountingCameraFactory());
+            _cfg.Cameras =
+            [
+                new CameraConfig { Id = "cam_spy", Type = "CountingVirtual", Width = 64, Height = 64, Pattern = "Bars" },
+            ];
+            var vm = new CamerasViewModel(_cfg, _store, TestInfra.CameraFacade(_cameras), _recipes, registry, new TestDialogService(), TestLog.Null<CamerasViewModel>());
+            vm.Selected = vm.Items.Single(i => i.Id == "cam_spy");
+
+            vm.TogglePreviewCommand.Execute(null);
+            TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(800));
+            vm.StopPreview();
+
+            CountingCameraFactory.CreateCount.Should().Be(1);
+        });
+    }
+
+    [Fact]
+    public void StopPreview_IgnoresLatePreviewFrame()
+    {
+        TestInfra.RunSta(() =>
+        {
+            _cfg.Cameras =
+            [
+                new CameraConfig { Id = "cam_slow", Type = "Virtual", Width = 64, Height = 64, IntervalMs = 400 },
+            ];
+            var vm = CreateVm();
+            vm.Selected = vm.Items.Single(i => i.Id == "cam_slow");
+            vm.PreviewCaption = "保留角标";
+
+            vm.TogglePreviewCommand.Execute(null);
+            TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(50));
+            vm.StopPreview();
+            TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(600));
+
+            vm.IsPreviewing.Should().BeFalse();
+            vm.PreviewCaption.Should().Be("保留角标");
         });
     }
 }

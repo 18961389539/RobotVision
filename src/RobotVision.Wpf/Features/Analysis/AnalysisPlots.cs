@@ -474,7 +474,7 @@ internal static class AnalysisPlots
         return label;
     }
 
-    private static IPlotController CreateInspect()
+    private static PlotController CreateInspect()
     {
         var c = new PlotController();
         c.UnbindAll();
@@ -485,7 +485,7 @@ internal static class AnalysisPlots
         return c;
     }
 
-    private static IPlotController CreateExplore()
+    private static PlotController CreateExplore()
     {
         var c = new PlotController();
         c.UnbindAll();

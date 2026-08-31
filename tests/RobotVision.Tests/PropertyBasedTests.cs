@@ -1,3 +1,4 @@
+using System.Globalization;
 using FsCheck.Xunit;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Models;
@@ -132,7 +133,7 @@ public class PropertyBasedTests
             return true;
 
         // 用往返格式（R）保留 double 精度，确保数值无损往返
-        var line = $"{key},{x.ToString("R")},{y.ToString("R")},{rz.ToString("R")}";
+        var line = $"{key},{x.ToString("R", CultureInfo.InvariantCulture)},{y.ToString("R", CultureInfo.InvariantCulture)},{rz.ToString("R", CultureInfo.InvariantCulture)}";
         var (recipeKey, pose, formatError) = TcpServerManager.ParseTriggerLine(line);
         if (formatError is not null || pose is null)
             return false;
@@ -152,13 +153,14 @@ public class PropertyBasedTests
             12.3,
             [0.9, 0.8]);
         var reply = TcpServerManager.FormatReply(result);
-        return reply.StartsWith("OK,") && reply.Contains("A01") && reply.EndsWith(",2,12");
+        return reply.StartsWith("OK,", StringComparison.Ordinal) && reply.Contains("A01", StringComparison.Ordinal) && reply.EndsWith(",2,12", StringComparison.Ordinal);
     }
 
     [Property]
     public bool TryParseWhitelistEntry_AnyString_NoThrow(string octet1, string octet2, string octet3, string octet4)
     {
         var entry = $"{octet1}.{octet2}.{octet3}.{octet4}";
-        return TcpServerManager.TryParseWhitelistEntry(entry) is true or false;
+        _ = TcpServerManager.TryParseWhitelistEntry(entry);
+        return true;
     }
 }

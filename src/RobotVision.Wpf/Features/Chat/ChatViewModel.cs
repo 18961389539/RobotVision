@@ -1,12 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
-using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Web.WebView2.Wpf;
+using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Chat;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Chat;
 
@@ -59,7 +59,7 @@ public sealed partial class ChatBubble : ObservableObject
 }
 
 /// <summary>本机 CPU 对话页：只连接 llama-server，不加载 9GB 权重。</summary>
-public partial class ChatViewModel : ObservableObject
+public partial class ChatViewModel : ObservableObject, IDisposable
 {
     public const string TitleText = "站内工艺助手";
     public const string ReadyStatus = "本机模型已就绪。查询走实时数据；改参、删除与停 TCP 须明确指令。";
@@ -72,7 +72,9 @@ public partial class ChatViewModel : ObservableObject
 
     private readonly ILocalChatClient _client;
     private readonly ChatConfig _cfg;
+    private readonly IHtmlPreviewService _htmlPreview;
     private readonly ChatAgent? _agent;
+    private readonly ILogger<ChatViewModel> _log;
     private CancellationTokenSource? _sendCts;
 
     public ObservableCollection<ChatBubble> Messages { get; } = [];
@@ -94,12 +96,21 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty]
     private string _status = "尚未连接本机推理服务。";
 
-    public ChatViewModel(ILocalChatClient client, ChatConfig cfg, ChatAgent? agent = null)
+    public ChatViewModel(
+        ILocalChatClient client,
+        ChatConfig cfg,
+        IHtmlPreviewService htmlPreview,
+        ILogger<ChatViewModel> log,
+        ChatAgent? agent = null)
     {
         _client = client;
         _cfg = cfg;
+        _htmlPreview = htmlPreview;
+        _log = log;
         _agent = agent;
     }
+
+    public void ScheduleProbe() => UiFireAndForget.Run(ProbeAsync, _log);
 
     [RelayCommand]
     public async Task ProbeAsync()
@@ -118,6 +129,7 @@ public partial class ChatViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            WpfUiLog.ChatProbeFailed(_log, ex);
             IsReady = false;
             Status = ex.Message;
         }
@@ -264,34 +276,18 @@ public partial class ChatViewModel : ObservableObject
             return;
         try
         {
-            var view = new WebView2();
-            var window = new Window
-            {
-                Title = "HTML 预览（模型生成内容，脚本已禁用）",
-                Width = 920,
-                Height = 660,
-                WindowStartupLocation = WindowStartupLocation.CenterScreen,
-                Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20)),
-                Content = view,
-            };
-            window.Loaded += async (_, _) =>
-            {
-                try
-                {
-                    await view.EnsureCoreWebView2Async();
-                    view.CoreWebView2.Settings.IsScriptEnabled = false;
-                    view.NavigateToString(html);
-                }
-                catch (Exception ex)
-                {
-                    Status = $"网页预览不可用: {ex.Message}";
-                }
-            };
-            window.Show();
+            _htmlPreview.Show(html);
         }
         catch (Exception ex)
         {
             Status = $"网页预览不可用: {ex.Message}";
         }
+    }
+
+    public void Dispose()
+    {
+        _sendCts?.Cancel();
+        _sendCts?.Dispose();
+        _sendCts = null;
     }
 }

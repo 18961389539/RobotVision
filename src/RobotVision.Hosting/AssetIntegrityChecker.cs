@@ -40,7 +40,7 @@ public sealed class AssetIntegrityChecker(
             }
             catch (Exception ex)
             {
-                log.LogWarning(ex, "读取模型清单失败");
+                AssetIntegrityCheckerLog.ManifestReadFailed(log, ex);
                 return "MANIFEST_INVALID";
             }
         }
@@ -71,8 +71,7 @@ public sealed class AssetIntegrityChecker(
                     var warnKey = $"{recipe.Name}\0{file}";
                     if (_unpinnedWarned.TryAdd(warnKey, 0))
                     {
-                        log.LogWarning("配方 {Recipe} 未钉扎模型 {Model} 的 SHA-256，同名替换不会被 1017 拦住",
-                            recipe.Name, file);
+                        AssetIntegrityCheckerLog.ModelSha256NotPinned(log, recipe.Name, file);
                     }
                 }
                 else if (!FileSha256.EqualsHex(pinned, actual))

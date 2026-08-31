@@ -1,0 +1,14 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- 深色主题语义画刷（Brush.App* 前缀 = 本应用自定义，区别于 WPF-UI 的系统画刷）。
+         浅色对应版本见 LightPaletteResources.xaml，由 AppThemeManager 按主题二选一加载。
+         注意：压在深色图像/悬浮面板（#F01E2836、#0A0F16）上的颜色仍是字面量，不随主题切换。 -->
+    <SolidColorBrush x:Key="Brush.AppTextSecondary" Color="#FFB8C0CC" />
+    <SolidColorBrush x:Key="Brush.AppTextSecondaryStrong" Color="#FFD0D8E4" />
+    <SolidColorBrush x:Key="Brush.AppTextPrimary" Color="#FFE8EDF4" />
+    <SolidColorBrush x:Key="Brush.AppBadgeText" Color="#FF0D1117" />
+    <SolidColorBrush x:Key="Brush.AppPlotBackground" Color="#FF202020" />
+    <SolidColorBrush x:Key="Brush.AppLogTime" Color="#FFFF8080" />
+    <SolidColorBrush x:Key="Brush.AppRowErrorBg" Color="#FF3D791F1F" />
+    <SolidColorBrush x:Key="Brush.AppRowWarningBg" Color="#FF2D633806" />
+</ResourceDictionary>

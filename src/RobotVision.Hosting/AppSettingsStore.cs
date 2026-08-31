@@ -106,6 +106,13 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             resultLog["Sqlite"] = values.ResultLogSqlite;
             resultLog["RetainedDays"] = values.ResultLogRetainedDays;
             obj["ResultLog"] = resultLog;
+
+            var plcDebug = obj["PlcDebug"] as JsonObject ?? [];
+            plcDebug["AlwaysOk"] = values.PlcDebugAlwaysOk;
+            plcDebug["DefaultX"] = values.PlcDebugDefaultX;
+            plcDebug["DefaultY"] = values.PlcDebugDefaultY;
+            plcDebug["DefaultRz"] = values.PlcDebugDefaultRz;
+            obj["PlcDebug"] = plcDebug;
         });
 
         cfg.TimeoutMs = values.TimeoutMs;
@@ -139,6 +146,10 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         cfg.FileLogging.Enabled = values.FileLoggingEnabled;
         cfg.FileLogging.RetainedDays = values.FileLoggingRetainedDays;
         cfg.UiTheme = UiThemes.Normalize(values.UiTheme);
+        cfg.PlcDebug.AlwaysOk = values.PlcDebugAlwaysOk;
+        cfg.PlcDebug.DefaultX = values.PlcDebugDefaultX;
+        cfg.PlcDebug.DefaultY = values.PlcDebugDefaultY;
+        cfg.PlcDebug.DefaultRz = values.PlcDebugDefaultRz;
 
         // 落盘 + 内存同步完成后，把可热应用的参数同步到运行中的管理器（见 RuntimeSync 注释）
         RuntimeSync?.Invoke(cfg);
@@ -200,6 +211,9 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             if (!TcpServerManager.TryParseWhitelistEntry(entry))
                 throw new InvalidDataException($"白名单条目无效: {entry}（支持精确 IP 或前缀通配如 192.168.*）");
         }
+        if (!double.IsFinite(values.PlcDebugDefaultX) || !double.IsFinite(values.PlcDebugDefaultY) ||
+            !double.IsFinite(values.PlcDebugDefaultRz))
+            throw new InvalidDataException("PLC 调试默认坐标必须为有限数字");
     }
 
     /// <summary>
@@ -298,4 +312,8 @@ public sealed record ServiceSettingsValues(
     bool FileLoggingEnabled = true,
     int FileLoggingRetainedDays = 30,
     int ProcessHealthRetainedDays = 90,
-    string UiTheme = UiThemes.Dark);
+    string UiTheme = UiThemes.Dark,
+    bool PlcDebugAlwaysOk = false,
+    double PlcDebugDefaultX = 0,
+    double PlcDebugDefaultY = 0,
+    double PlcDebugDefaultRz = 0);

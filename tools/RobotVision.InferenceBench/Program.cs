@@ -65,7 +65,7 @@ internal static class Program
 
             Console.WriteLine("=== Phase A  单枪（预热不计） ===");
             Console.WriteLine("加载进程内 OpenVINO CPU 会话…");
-            var cpuTimes = TimedRun.Single(cpu.Infer, resolved.Warmup, resolved.Iters);
+            var cpuTimes = TimedRun.RunOne(cpu.Infer, resolved.Warmup, resolved.Iters);
             var cpuSample = new EpSample
             {
                 Name = BenchDecide.InProcOpenVinoCpu,
@@ -89,12 +89,12 @@ internal static class Program
                     foreach (var (device, display) in new[] { ("AUTO:CPU", "OpenVINO CPU"), ("GPU", "OpenVINO GPU") })
                     {
                         Console.WriteLine($"加载 {display}（独立进程，device={device}）…");
-                        var report = OpenVinoClient.Run(workerA, resolved, device, WorkerMode.Single);
+                        var report = OpenVinoClient.Run(workerA, resolved, device, WorkerMode.One);
                         var name = display;
                         if (!report.Ok && device == "AUTO:CPU")
                         {
                             Console.WriteLine($"  AUTO:CPU 失败，回退 YoloDotNet 默认 CPU 会话: {report.Error}");
-                            report = OpenVinoClient.Run(workerA, resolved, "CPU", WorkerMode.Single);
+                            report = OpenVinoClient.Run(workerA, resolved, "CPU", WorkerMode.One);
                             name = "OpenVINO CPU";
                         }
 

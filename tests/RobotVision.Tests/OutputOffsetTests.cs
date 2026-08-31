@@ -60,7 +60,7 @@ public class OutputOffsetTests
         clone.OutputOffset.X = 9;
         clone.ModelSha256[0] = "x";
         Assert.Equal(0.1, recipe.OutputOffset.X);
-        Assert.StartsWith("abcd", recipe.ModelSha256[0]);
+        Assert.StartsWith("abcd", recipe.ModelSha256[0], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -139,5 +139,17 @@ public class OutputOffsetTests
         var clone = recipe.Clone();
         clone.OutputOffset.TeachX = 0;
         Assert.Equal(12, recipe.OutputOffset.TeachX);
+    }
+
+    [Fact]
+    public void ClearTeachOutput_RemovesTeachCoordinates_KeepsDelta()
+    {
+        var offset = new OutputOffsetOptions { X = 0.2, Y = -0.1, TeachX = 10, TeachY = 20, TeachRzDeg = 3 };
+        offset.ClearTeachOutput();
+
+        Assert.False(offset.HasTeachOutput);
+        Assert.Equal(0.2, offset.X);
+        Assert.Equal(-0.1, offset.Y);
+        Assert.Null(offset.TeachX);
     }
 }

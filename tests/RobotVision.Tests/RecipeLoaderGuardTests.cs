@@ -1,4 +1,4 @@
-﻿using RobotVision.Core.Recipe;
+using RobotVision.Core.Recipe;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -316,7 +316,7 @@ public sealed class RecipeLoaderGuardTests : IDisposable
             RotationCompensation = RotationCompensationMode.EccentricTool,
         };
         var ex = Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
-        Assert.Contains("偏心", ex.Message);
+        Assert.Contains("偏心", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

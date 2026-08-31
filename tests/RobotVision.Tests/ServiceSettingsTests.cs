@@ -448,7 +448,7 @@ public class AppSettingsStoreTests : IDisposable
             ],
         };
         var ex = Assert.Throws<InvalidDataException>(() => AppSettingsStore.ValidateConfig(cfg));
-        Assert.Contains("cam_gige", ex.Message);
+        Assert.Contains("cam_gige", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

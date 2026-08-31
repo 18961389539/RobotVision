@@ -12,7 +12,7 @@ public enum BenchTask
 
 public enum WorkerMode
 {
-    Single,
+    One,
     Serial2,
     Parallel2,
     Gated,
@@ -36,7 +36,7 @@ public sealed record BenchOptions
     public string? OvWorkerDir { get; init; }
     public string OvDevice { get; init; } = "CPU";
     public string OvPrecision { get; init; } = "";
-    public WorkerMode Mode { get; init; } = WorkerMode.Single;
+    public WorkerMode Mode { get; init; } = WorkerMode.One;
     public string? OutFile { get; init; }
 
     public static BenchOptions From(CliArgs args)
@@ -87,7 +87,7 @@ public sealed record BenchOptions
 
     public static WorkerMode ParseMode(string text) => text.Trim().ToLowerInvariant() switch
     {
-        "single" => WorkerMode.Single,
+        "single" => WorkerMode.One,
         "serial2" => WorkerMode.Serial2,
         "parallel2" => WorkerMode.Parallel2,
         "gated" => WorkerMode.Gated,

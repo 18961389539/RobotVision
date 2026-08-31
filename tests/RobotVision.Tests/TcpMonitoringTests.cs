@@ -83,7 +83,7 @@ public class TcpMonitoringTests : IDisposable
         await client.ConnectAsync(IPAddress.Loopback, _tcp.Port);
         var session = await connected.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(1, _tcp.ConnectedClients);
-        Assert.Contains("127.0.0.1", session.Remote);
+        Assert.Contains("127.0.0.1", session.Remote, StringComparison.Ordinal);
         var portPart = session.Remote[(session.Remote.LastIndexOf(':') + 1)..];
         Assert.True(int.TryParse(portPart, out var remotePort) && remotePort > 0, $"远端应含端口: {session.Remote}");
 
@@ -160,7 +160,7 @@ public class TcpMonitoringTests : IDisposable
             var buffer = new byte[4096];
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var read = await client.GetStream().ReadAsync(buffer, timeout.Token);
-            Assert.StartsWith("OK,", Encoding.ASCII.GetString(buffer, 0, read));
+            Assert.StartsWith("OK,", Encoding.ASCII.GetString(buffer, 0, read), StringComparison.Ordinal);
             Assert.Single(tcp.GetRecentRequests());
         }
         finally
@@ -284,7 +284,7 @@ public class TcpMonitoringTests : IDisposable
             using var client = new TcpClient();
             await client.ConnectAsync(IPAddress.Loopback, tcp.Port);
             var reply = await RoundTripAsync(client.GetStream(), "A01");
-            Assert.StartsWith("OK,", reply);
+            Assert.StartsWith("OK,", reply, StringComparison.Ordinal);
             Assert.Equal(0, handlerSawCallerContext);
         }
         finally

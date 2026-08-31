@@ -247,6 +247,42 @@ public class CameraManagerTests
     }
 
     [Fact]
+    public void Dispose_WaitsForInFlightGrab()
+    {
+        var manager = new CameraManager();
+        using var enteredGrab = new ManualResetEventSlim(false);
+        using var finished = new ManualResetEventSlim(false);
+        var camera = new FakeCamera("cam1")
+        {
+            OnGrab = _ =>
+            {
+                enteredGrab.Set();
+                Thread.Sleep(150);
+                return new CameraFrame(VisionImage.AllocateZero(4, 4, 3), DateTime.UtcNow);
+            },
+        };
+        manager.Register(camera);
+
+        var grabTask = Task.Run(() =>
+        {
+            try
+            {
+                using var frame = manager.Grab("cam1");
+            }
+            finally
+            {
+                finished.Set();
+            }
+        });
+
+        Assert.True(enteredGrab.Wait(TimeSpan.FromSeconds(2)));
+        manager.Dispose();
+        Assert.True(finished.Wait(TimeSpan.FromSeconds(2)));
+        grabTask.GetAwaiter().GetResult();
+        Assert.Equal(1, camera.DisposedCount);
+    }
+
+    [Fact]
     public void Dispose_DisposesAllCameras_AndIsIdempotent()
     {
         var manager = new CameraManager();

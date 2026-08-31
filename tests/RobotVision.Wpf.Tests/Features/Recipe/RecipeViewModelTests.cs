@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Reflection;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using RobotVision.Core.Recipe;
@@ -5,6 +7,7 @@ using RobotVision.Hosting;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Communication;
 using RobotVision.WpfHost.Features.Recipe;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.Wpf.Tests;
 
@@ -27,6 +30,8 @@ public class RecipeViewModelTests : IDisposable
     private readonly RobotVision.Infrastructure.Lighting.LightingManager _lighting = new();
     private readonly RobotVision.Infrastructure.Inference.Strategies.AngleStrategyTypeRegistry _angleRegistry = new();
     private readonly AssetIntegrityChecker _assets;
+    private readonly TestDialogService _dialogs = new();
+    private readonly NullRecipeWindowService _recipeWindows = new();
 
     public RecipeViewModelTests()
     {
@@ -56,12 +61,18 @@ public class RecipeViewModelTests : IDisposable
 
     public void Dispose()
     {
+        _models.Dispose();
+        _lighting.Dispose();
+        _calibration.Dispose();
+        _cameras.Dispose();
         _tcp.Dispose();
         _dir.Dispose();
     }
 
     private RecipeViewModel CreateVm() =>
-        new(_loader, _cfg, _cameras, _models, _calibration, _vision, _lighting, _angleRegistry, _tcp, _assets);
+        new(_loader, _cfg, TestInfra.CameraFacade(_cameras), TestInfra.ModelFacade(_models),
+            TestInfra.CalibrationFacade(_calibration), _vision, TestInfra.LightingFacade(_lighting),
+            TestInfra.AngleCatalog(_angleRegistry), _assets, _dialogs, _recipeWindows, TestLog.Null<RecipeViewModel>());
 
     [Fact]
     public void Ctor_LoadsRecipeList_SelectsFirst()
@@ -120,6 +131,7 @@ public class RecipeViewModelTests : IDisposable
             vm.NewCommand.Execute(null);
 
             vm.IsNew.Should().BeTrue();
+            vm.Selected.Should().BeNull("新建草稿不应再高亮列表中的已存配方");
             vm.Editor.Name.Should().Be("");
             vm.Editor.Models.Should().ContainSingle(m => m == ""); // 新配方预留模型槽
             // 新建即对齐基线：尚未修改时无未保存标记，改动后才出现
@@ -144,7 +156,10 @@ public class RecipeViewModelTests : IDisposable
             vm.CopyCommand.Execute(null);
 
             vm.IsNew.Should().BeTrue();
+            vm.Selected.Should().BeNull("复制草稿不应再高亮源配方");
             vm.Editor.Name.Should().Be("A01_copy"); // 复制命名规则：原名 + _copy
+            vm.Editor.SerialNumber.Should().Be(0);
+            vm.DeleteCommand.CanExecute(null).Should().BeFalse();
             vm.HasUnsavedChanges.Should().BeFalse(); // 复制即基线，未修改
         }
         finally { vm.Dispose(); }
@@ -299,4 +314,289 @@ public class RecipeViewModelTests : IDisposable
         }
         finally { vm.Dispose(); }
     }
+
+    [Fact]
+    public void Copy_ClearsSerialNumberAndOutputOffset()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "A01");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.SerialNumber = 3;
+            vm.Editor.OutputOffset.X = 0.25;
+            vm.Editor.OutputOffset.TeachX = 10;
+            vm.Editor.OutputOffset.TeachY = 20;
+            vm.Editor.OutputOffset.TeachRzDeg = 1;
+            vm.SaveCommand.Execute(null);
+            vm.Message.Should().NotStartWith("保存失败");
+            vm.HasUnsavedChanges.Should().BeFalse();
+
+            vm.CopyCommand.Execute(null);
+
+            vm.IsNew.Should().BeTrue();
+            vm.Editor.Name.Should().Be("A01_copy");
+            vm.Editor.SerialNumber.Should().Be(0);
+            vm.Editor.OutputOffset.IsZero.Should().BeTrue();
+            vm.Editor.OutputOffset.HasTeachOutput.Should().BeFalse();
+            _loader.Get("A01", forceReload: true).SerialNumber.Should().Be(3);
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void Copy_ClearsSelection_SoDeleteCannotRemoveSource()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "A01");
+            vm.Selected = null;
+            vm.Selected = target;
+
+            vm.CopyCommand.Execute(null);
+
+            vm.Selected.Should().BeNull();
+            vm.DeleteCommand.CanExecute(null).Should().BeFalse();
+            File.Exists(Path.Combine(_recipeFolder, "A01.json")).Should().BeTrue();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void Refresh_IgnoreUnsaved_RebuildsListAfterFileDeletedWhileEditorDirty()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.Confidence = 0.88f;
+            vm.NotifyEditorMutated();
+            vm.HasUnsavedChanges.Should().BeTrue();
+
+            _loader.Delete("B02");
+            vm.Refresh(preferName: string.Empty, reloadEditor: true, ignoreUnsaved: true);
+
+            vm.Recipes.Should().NotContain(r => r.Name == "B02");
+            vm.Selected.Should().NotBeNull();
+            vm.Selected!.Name.Should().NotBe("B02");
+            vm.HasUnsavedChanges.Should().BeFalse();
+            File.Exists(Path.Combine(_recipeFolder, "B02.json")).Should().BeFalse();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void MaskTemplateWithoutTeach_ExposesBlockReason()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.AngleMode = AngleMode.MaskTemplate;
+            vm.Editor.Template.RefineMethod = SegmentRefineMethod.Template;
+            vm.Editor.Template.TemplateImageBase64 = "";
+            vm.NotifyEditorMutated();
+
+            vm.CanTestTrigger.Should().BeFalse();
+            vm.TestTriggerBlockHint.Should().NotBeNullOrEmpty();
+            vm.TestTriggerBlockHint.Should().StartWith("无法测试触发：");
+            vm.ShowTestTriggerBlockHint.Should().BeTrue();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void IsBusy_DisablesSaveCopyDeleteAndShowsIdle()
+    {
+        var vm = CreateVm();
+        try
+        {
+            vm.IsIdle.Should().BeTrue();
+            vm.SaveCommand.CanExecute(null).Should().BeTrue();
+            vm.CopyCommand.CanExecute(null).Should().BeTrue();
+            vm.Selected = vm.Recipes.First();
+            vm.DeleteCommand.CanExecute(null).Should().BeTrue();
+
+            vm.IsBusy = true;
+            vm.IsIdle.Should().BeFalse();
+            vm.SaveCommand.CanExecute(null).Should().BeFalse();
+            vm.CopyCommand.CanExecute(null).Should().BeFalse();
+            vm.DeleteCommand.CanExecute(null).Should().BeFalse();
+            vm.RefreshCommand.CanExecute(null).Should().BeFalse();
+            vm.Roi.PreviewRoiCommand.CanExecute(null).Should().BeFalse();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void ClearAssetPins_RefreshesAssetPinStatus()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "A01");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.ModelSha256 = ["abc"];
+            vm.NotifyEditorMutated();
+            vm.AssetPinStatus.Should().NotBe(AssetPinStatusText.Unpinned);
+
+            vm.ClearAssetPinsCommand.Execute(null);
+            vm.AssetPinStatus.Should().Be(AssetPinStatusText.Unpinned);
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void SearchFilter_HidesSelectedFromList_DisablesDelete()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.IsSelectedVisibleInFilter.Should().BeTrue();
+            vm.DeleteCommand.CanExecute(null).Should().BeTrue();
+
+            vm.SearchText = "A01";
+            vm.IsSelectedVisibleInFilter.Should().BeFalse();
+            vm.SelectedFilterHint.Should().Contain("B02");
+            vm.DeleteCommand.CanExecute(null).Should().BeFalse();
+            vm.Selected!.Name.Should().Be("B02");
+
+            vm.SearchText = "";
+            vm.IsSelectedVisibleInFilter.Should().BeTrue();
+            vm.DeleteCommand.CanExecute(null).Should().BeTrue();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void LockedPolarity_ExposesPolarityLockHint()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.AngleMode = AngleMode.MaskTemplate;
+            vm.Editor.Template.RefineMethod = SegmentRefineMethod.CaliperTab;
+            vm.Editor.Template.HousingEdgePolarity = HousingEdgePolarity.BrightToDark;
+            vm.Editor.Template.TabPolarity = TabPolarityLock.PlusShortAxis;
+            vm.NotifyEditorMutated();
+
+            vm.PolarityLockHint.Should().Contain("已锁定");
+            vm.PolarityLockHint.Should().Contain("亮场");
+            vm.PolarityLockHint.Should().Contain("凸起在+短轴");
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void FeatureRoi_OnTemplateMatch_ExposesGrabOriginHint()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.AngleMode = AngleMode.MaskTemplate;
+            vm.Editor.Template.RefineMethod = SegmentRefineMethod.Template;
+            vm.Editor.Template.Roi = new RobotVision.Core.Models.Roi(0.1, 0.4, 0.5, 0.08);
+            vm.NotifyEditorMutated();
+
+            vm.FeatureGrabOriginHint.Should().Contain("特征中心");
+            vm.FeatureGrabOriginHint.Should().Contain("扁框");
+            vm.RefineDetailsSummary.Should().Contain("十字=特征中心");
+            vm.RefineDetailsSummary.Should().Contain("扁框易跳齿");
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void SetupWizard_DetachForClose_DoesNotAccumulateSingletonHandlers()
+    {
+        var vm = CreateVm();
+        try
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                using var wizard = CreateWizard(vm);
+                WizardSubscribesToHost(vm, wizard).Should().BeTrue();
+                WizardSubscribesToTest(vm, wizard).Should().BeTrue();
+            }
+
+            CountWizardHostHandlers(vm).Should().Be(0);
+            CountWizardTestHandlers(vm).Should().Be(0);
+
+            using (var wizard = CreateWizard(vm))
+            {
+                WizardSubscribesToHost(vm, wizard).Should().BeTrue();
+                wizard.Dispose();
+                WizardSubscribesToHost(vm, wizard).Should().BeFalse();
+                WizardSubscribesToTest(vm, wizard).Should().BeFalse();
+            }
+        }
+        finally { vm.Dispose(); }
+    }
+
+    private static int CountWizardHostHandlers(RecipeViewModel host) =>
+        CountHandlers(host, "OnHostPropertyChanged");
+
+    private static int CountWizardTestHandlers(RecipeViewModel host) =>
+        CountHandlers(host.Test, "OnTestPropertyChanged");
+
+    private static int CountHandlers(INotifyPropertyChanged source, string methodName)
+    {
+        var handler = GetPropertyChangedHandlers(source);
+        return handler is null
+            ? 0
+            : handler.GetInvocationList().Count(d => d.Method.Name == methodName);
+    }
+
+    private static bool WizardSubscribesToHost(RecipeViewModel host, RecipeSetupWizardViewModel wizard) =>
+        HasHandler(host, wizard, "OnHostPropertyChanged");
+
+    private static bool WizardSubscribesToTest(RecipeViewModel host, RecipeSetupWizardViewModel wizard) =>
+        HasHandler(host.Test, wizard, "OnTestPropertyChanged");
+
+    private static bool HasHandler(INotifyPropertyChanged source, object target, string methodName)
+    {
+        var handler = GetPropertyChangedHandlers(source);
+        if (handler is null)
+            return false;
+        var method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        return method is not null &&
+               handler.GetInvocationList().Any(d => ReferenceEquals(d.Target, target) && d.Method == method);
+    }
+
+    private static PropertyChangedEventHandler? GetPropertyChangedHandlers(INotifyPropertyChanged source)
+    {
+        for (var type = source.GetType(); type is not null; type = type.BaseType)
+        {
+            var field = type.GetField(
+                         "PropertyChanged",
+                         BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                     ?? type.GetField(
+                         "<PropertyChanged>k__BackingField",
+                         BindingFlags.Instance | BindingFlags.NonPublic);
+            if (field?.GetValue(source) is PropertyChangedEventHandler handler)
+                return handler;
+        }
+
+        return null;
+    }
+
+    private RecipeSetupWizardViewModel CreateWizard(RecipeViewModel host) =>
+        new(host, TestInfra.CameraFacade(_cameras), TestInfra.ModelFacade(_models),
+            TestInfra.CalibrationFacade(_calibration), TestInfra.LightingFacade(_lighting), host.Roi, host.Test);
 }

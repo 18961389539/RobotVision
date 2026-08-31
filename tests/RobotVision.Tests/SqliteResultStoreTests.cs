@@ -11,6 +11,8 @@ namespace RobotVision.Tests;
 /// </summary>
 public class SqliteResultStoreTests : IDisposable
 {
+    private static readonly string[] ExpectedRecipeList = ["A01", "B02"];
+
     private readonly string _folder =
         Path.Combine(Path.GetTempPath(), "rv_sqlite_" + Guid.NewGuid().ToString("N"));
 
@@ -83,7 +85,7 @@ public class SqliteResultStoreTests : IDisposable
         Assert.Null(row.X);
         Assert.Null(row.Y);
         Assert.Empty(row.Poses);
-        Assert.Contains("未检出", row.Message);
+        Assert.Contains("未检出", row.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -214,7 +216,7 @@ public class SqliteResultStoreTests : IDisposable
         db.Insert(Entry("B02", x: 2, y: 0, angle: 20), t + 1);
         db.Insert(Entry("A01", x: null, y: null, angle: null, count: 0, code: 1007, poses: []), t + 2);
 
-        Assert.Equal(new[] { "A01", "B02" }, db.ListRecipes());
+        Assert.Equal(ExpectedRecipeList, db.ListRecipes());
         var angles = db.QueryAngles(new ResultDbQuery { OkOnly = true });
         Assert.Equal(2, angles.Count);
         Assert.Contains(10d, angles);
@@ -280,7 +282,7 @@ public class SqliteResultStoreTests : IDisposable
 
         var jsonl = Directory.GetFiles(store.Sqlite.Folder, "results-*.jsonl");
         Assert.Single(jsonl);
-        Assert.Contains("A03", File.ReadAllText(jsonl[0]));
+        Assert.Contains("A03", File.ReadAllText(jsonl[0]), StringComparison.Ordinal);
     }
 
     [Fact]

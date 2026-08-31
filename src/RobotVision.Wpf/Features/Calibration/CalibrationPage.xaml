@@ -105,18 +105,18 @@
                                                     </Style>
                                                 </Border.Style>
                                                 <TextBlock Text="{Binding Quality}" FontSize="10" FontWeight="SemiBold"
-                                                           Foreground="#0D1117" />
+                                                           Foreground="{DynamicResource Brush.AppBadgeText}" />
                                             </Border>
                                         </Grid>
                                         <TextBlock Text="{Binding Resolution}" FontSize="11" Margin="0,8,0,0"
                                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                         <TextBlock FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis">
                                             <Run Text="畸变: " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Distortion}" />
+                                            <Run Text="{Binding Distortion, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock FontSize="11" Margin="0,2,0,0">
                                             <Run Text="RMS " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Rms}" FontWeight="SemiBold" />
+                                            <Run Text="{Binding Rms, Mode=OneWay}" FontWeight="SemiBold" />
                                         </TextBlock>
                                         <TextBlock Text="{Binding CalibratedAt}" FontSize="10" Margin="0,2,0,0"
                                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
@@ -194,28 +194,28 @@
                                                     </Style>
                                                 </Border.Style>
                                                 <TextBlock Text="{Binding Quality}" FontSize="10" FontWeight="SemiBold"
-                                                           Foreground="#0D1117" />
+                                                           Foreground="{DynamicResource Brush.AppBadgeText}" />
                                             </Border>
                                         </Grid>
                                         <TextBlock FontSize="11" Margin="0,6,0,0">
                                             <Run Text="相机 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding CameraId}" />
+                                            <Run Text="{Binding CameraId, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"
                                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}">
                                             <Run Text="仿射 " />
-                                            <Run Text="{Binding AffineRow0}" />
+                                            <Run Text="{Binding AffineRow0, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock FontSize="10" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"
                                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}">
                                             <Run Text="     " />
-                                            <Run Text="{Binding AffineRow1}" />
+                                            <Run Text="{Binding AffineRow1, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock FontSize="11" Margin="0,4,0,0">
                                             <Run Text="RMS " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Rms}" FontWeight="SemiBold" />
+                                            <Run Text="{Binding Rms, Mode=OneWay}" FontWeight="SemiBold" />
                                             <Run Text=" · 最大残差" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding MaxResidual}" />
+                                            <Run Text="{Binding MaxResidual, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock Text="{Binding CalibratedAt}" FontSize="10" Margin="0,2,0,0"
                                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
@@ -293,28 +293,28 @@
                                                     </Style>
                                                 </Border.Style>
                                                 <TextBlock Text="{Binding Quality}" FontSize="10" FontWeight="SemiBold"
-                                                           Foreground="#0D1117" />
+                                                           Foreground="{DynamicResource Brush.AppBadgeText}" />
                                             </Border>
                                         </Grid>
                                         <TextBlock FontSize="11" Margin="0,6,0,0">
                                             <Run Text="相机 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding CameraId}" />
+                                            <Run Text="{Binding CameraId, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock FontSize="11" Margin="0,2,0,0">
                                             <Run Text="轴心 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Center}" FontWeight="SemiBold" />
+                                            <Run Text="{Binding Center, Mode=OneWay}" FontWeight="SemiBold" />
                                         </TextBlock>
                                         <TextBlock FontSize="11" Margin="0,2,0,0">
                                             <Run Text="半径 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Radius}" />
+                                            <Run Text="{Binding Radius, Mode=OneWay}" />
                                             <Run Text=" · RMS " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Rms}" />
+                                            <Run Text="{Binding Rms, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock FontSize="11" Margin="0,2,0,0">
                                             <Run Text="轴比 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding AxisRatio}" />
+                                            <Run Text="{Binding AxisRatio, Mode=OneWay}" />
                                             <Run Text=" · 点数 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding PointCount}" />
+                                            <Run Text="{Binding PointCount, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock Text="{Binding CalibratedAt}" FontSize="10" Margin="0,2,0,0"
                                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
@@ -392,28 +392,28 @@
                                                     </Style>
                                                 </Border.Style>
                                                 <TextBlock Text="{Binding Quality}" FontSize="10" FontWeight="SemiBold"
-                                                           Foreground="#0D1117" />
+                                                           Foreground="{DynamicResource Brush.AppBadgeText}" />
                                             </Border>
                                         </Grid>
                                         <TextBlock FontSize="11" Margin="0,6,0,0">
                                             <Run Text="相机 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding CameraId}" />
+                                            <Run Text="{Binding CameraId, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock FontSize="11" Margin="0,2,0,0">
                                             <Run Text="分辨率" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Resolution}" />
+                                            <Run Text="{Binding Resolution, Mode=OneWay}" />
                                             <Run Text=" · " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Order}" />
+                                            <Run Text="{Binding Order, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock FontSize="11" Margin="0,2,0,0">
                                             <Run Text="坐标 " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Space}" />
+                                            <Run Text="{Binding Space, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock FontSize="11" Margin="0,4,0,0">
                                             <Run Text="RMS " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding Rms}" FontWeight="SemiBold" />
+                                            <Run Text="{Binding Rms, Mode=OneWay}" FontWeight="SemiBold" />
                                             <Run Text=" · 最大残差" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                            <Run Text="{Binding MaxResidual}" />
+                                            <Run Text="{Binding MaxResidual, Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock Text="{Binding CalibratedAt}" FontSize="10" Margin="0,2,0,0"
                                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
@@ -522,7 +522,7 @@
                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <StackPanel Margin="2" Width="178">
+                                        <StackPanel Margin="2,4" Width="200">
                                             <StackPanel Orientation="Horizontal">
                                                 <ui:TextBlock Text="{Binding StationId, Mode=OneWay}" FontTypography="BodyStrong" Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                                               TextTrimming="CharacterEllipsis" />
@@ -539,18 +539,44 @@
                                                         </Style>
                                                     </Border.Style>
                                                     <TextBlock Text="{Binding Quality, Mode=OneWay}" FontSize="9"
-                                                               Foreground="#0D1117" FontWeight="Bold" />
+                                                               Foreground="{DynamicResource Brush.AppBadgeText}" FontWeight="Bold" />
                                                 </Border>
                                             </StackPanel>
-                                            <TextBlock FontSize="10" TextTrimming="CharacterEllipsis"
+                                            <TextBlock FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
                                                        Foreground="#FFB8C0CC">
                                                 <Run Text="{Binding CameraId, Mode=OneWay}" />
                                                 <Run Text=" · " />
-                                                <Run Text="{Binding ScaleX, Mode=OneWay, StringFormat={}{0:0.######}}" />
-                                                <Run Text="/" />
-                                                <Run Text="{Binding ScaleY, Mode=OneWay, StringFormat={}{0:0.######}}" />
-                                                <Run Text=" mm/px" />
+                                                <Run Text="{Binding Resolution, Mode=OneWay}" />
                                             </TextBlock>
+                                            <UniformGrid Columns="2" Margin="0,4,0,0">
+                                                <ui:NumberBox Value="{Binding ScaleX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Minimum="0" Maximum="1000" SmallChange="0.001"
+                                                              SpinButtonPlacementMode="Compact" FontSize="11"
+                                                              ToolTip="X 比例 (mm/px)" />
+                                                <ui:NumberBox Value="{Binding ScaleY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Minimum="0" Maximum="1000" SmallChange="0.001"
+                                                              SpinButtonPlacementMode="Compact" FontSize="11" Margin="4,0,0,0"
+                                                              ToolTip="Y 比例 (mm/px)" />
+                                            </UniformGrid>
+                                            <TextBlock Text="{Binding FieldOfView, Mode=OneWay, StringFormat=视场 {0}}"
+                                                       FontSize="9" Margin="0,2,0,0"
+                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+                                                <ui:Button Content="载入" FontSize="10" Padding="6,2" Margin="0,0,4,0"
+                                                           ToolTip="载入右侧参数面板（含卡片上已改的比例）"
+                                                           Command="{Binding DataContext.LoadScaleToFormCommand,
+                                                               RelativeSource={RelativeSource AncestorType=Page}}"
+                                                           CommandParameter="{Binding}" />
+                                                <ui:Button Content="保存" FontSize="10" Padding="6,2" Margin="0,0,4,0"
+                                                           ToolTip="仅保存本卡片 X/Y，相机与分辨率不变"
+                                                           Command="{Binding DataContext.QuickSaveScaleCommand,
+                                                               RelativeSource={RelativeSource AncestorType=Page}}"
+                                                           CommandParameter="{Binding}" />
+                                                <ui:Button Content="删除" FontSize="10" Padding="6,2"
+                                                           Command="{Binding DataContext.DeleteScaleCommand,
+                                                               RelativeSource={RelativeSource AncestorType=Page}}"
+                                                           CommandParameter="{Binding StationId}" />
+                                            </StackPanel>
                                         </StackPanel>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>

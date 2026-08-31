@@ -35,9 +35,7 @@ public class LightControllerTypeRegistryTests
 
         public string CreatedBy { get; } = type;
 
-        public void Apply(LightingConfig lighting)
-        {
-        }
+        public bool Apply(LightingConfig lighting) => true;
 
         public void SendRaw(string command)
         {

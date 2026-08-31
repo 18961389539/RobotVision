@@ -36,9 +36,11 @@ public interface ILightController : IDisposable
 
     /// <summary>
     /// 按照明配置点亮光源（幂等）：逐通道设置亮度并点亮。
-    /// 实现必须容忍空配置/全禁用通道（静默无操作），不得抛异常。
+    /// 空配置/空通道视为成功（无操作）。发送失败必须返回 false，不得吞掉后当作已点亮。
+    /// 初始化失败的占位实现（FailedLight）仍抛 1006，与「未注册」同处置。
     /// </summary>
-    void Apply(LightingConfig lighting);
+    /// <returns>true 指令已发出或无需发出（空通道/Noop）；false 硬件发送失败。</returns>
+    bool Apply(LightingConfig lighting);
 
     /// <summary>熄灭全部通道。</summary>
     void TurnOff();

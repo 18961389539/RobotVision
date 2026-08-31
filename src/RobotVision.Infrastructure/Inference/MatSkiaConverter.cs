@@ -5,8 +5,6 @@ namespace RobotVision.Infrastructure.Inference;
 
 /// <summary>
 /// OpenCvSharp Mat 与 SkiaSharp SKBitmap 的转换（YoloDotNet 输入为 SKBitmap）。
-/// 3 通道/1 通道直接逐像素转换（省去中间 BGRA Mat 的一次整图分配与拷贝）；
-/// 其他通道数兜底走 CvtColor。结果坐标即像素坐标，与 Mat 一致。
 /// </summary>
 public static unsafe class MatSkiaConverter
 {

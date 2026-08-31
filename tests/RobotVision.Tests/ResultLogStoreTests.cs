@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using RobotVision.Core.Models;
@@ -86,7 +87,7 @@ public class ResultLogStoreTests : IDisposable
         Assert.Null(entry.X);
         Assert.Null(entry.Y);
         Assert.Equal(0, entry.Count);
-        Assert.Contains("未检出目标", entry.Message);
+        Assert.Contains("未检出目标", entry.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -140,7 +141,7 @@ public class ResultLogStoreTests : IDisposable
         using var store = new ResultLogStore(Config(_folder, retainedDays: 7), NullLogger<ResultLogStore>.Instance);
         Directory.CreateDirectory(_folder);
         // 造一个 10 天前的日志文件(应在清理范围内)
-        var oldFile = Path.Combine(_folder, "results-" + DateTime.Now.AddDays(-10).ToString("yyyy-MM-dd") + ".jsonl");
+        var oldFile = Path.Combine(_folder, "results-" + DateTime.Now.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".jsonl");
         File.WriteAllText(oldFile, "{}\n");
 
         store.Record(VisionResult.Success("A", [new RobotPose(1, 2, 0)], 10));
@@ -160,7 +161,7 @@ public class ResultLogStoreTests : IDisposable
     {
         using var store = new ResultLogStore(Config(_folder, retainedDays: 0), NullLogger<ResultLogStore>.Instance);
         Directory.CreateDirectory(_folder);
-        var oldFile = Path.Combine(_folder, "results-" + DateTime.Now.AddDays(-30).ToString("yyyy-MM-dd") + ".jsonl");
+        var oldFile = Path.Combine(_folder, "results-" + DateTime.Now.AddDays(-30).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".jsonl");
         File.WriteAllText(oldFile, "{}\n");
 
         store.Record(VisionResult.Success("A", [new RobotPose(1, 2, 0)], 10));

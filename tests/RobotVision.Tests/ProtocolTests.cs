@@ -52,7 +52,7 @@ public class ProtocolTests
     public void FormatReply_TimeoutUsesErrorCode1008()
     {
         var result = VisionResult.Fail("A01", VisionErrorCode.Timeout, "处理超时", 5000);
-        Assert.StartsWith("ERR,1008,", TcpServerManager.FormatReply(result));
+        Assert.StartsWith("ERR,1008,", TcpServerManager.FormatReply(result), StringComparison.Ordinal);
     }
 
     // ---- 改进 3：错误消息契约 ----
@@ -212,7 +212,7 @@ public class ProtocolTests
     {
         var result = VisionResult.Fail("A01", VisionErrorCode.PoseMismatch,
             "拍照位姿不一致: 上报与标定偏差超容差", 5);
-        Assert.StartsWith("ERR,1012,", TcpServerManager.FormatReply(result));
+        Assert.StartsWith("ERR,1012,", TcpServerManager.FormatReply(result), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -228,6 +228,31 @@ public class ProtocolTests
     {
         var result = VisionResult.Fail("A01", VisionErrorCode.PoseRequired,
             "OnArm 工位必须使用 TRIGGER,配方名,X,Y,RZ", 0);
-        Assert.StartsWith("ERR,1014,", TcpServerManager.FormatReply(result));
+        Assert.StartsWith("ERR,1014,", TcpServerManager.FormatReply(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CoerceAlwaysOkReply_KeepsOkAndPong()
+    {
+        Assert.Equal("PONG", TcpServerManager.CoerceAlwaysOkReply("PONG", "PING", 0));
+        Assert.Equal("OK,ready,0,0,0", TcpServerManager.CoerceAlwaysOkReply("OK,ready,0,0,0", "STATUS", 0));
+        Assert.Equal("OK,12.346,-7.890,15.250,A01,1,0",
+            TcpServerManager.CoerceAlwaysOkReply("OK,12.346,-7.890,15.250,A01,1,0", "A01", 0));
+    }
+
+    [Fact]
+    public void CoerceAlwaysOkReply_TriggerErr_BecomesDefaultOk()
+    {
+        var err = TcpServerManager.FormatReply(
+            VisionResult.Fail("A01", VisionErrorCode.NoTargetFound, "no target", 88));
+        var ok = TcpServerManager.CoerceAlwaysOkReply(err, "A01", 88, 10, 20, 30);
+        Assert.Equal("OK,10.000,20.000,30.000,A01,1,88", ok);
+    }
+
+    [Fact]
+    public void CoerceAlwaysOkReply_ClearInhibitErr_BecomesCleared()
+    {
+        var err = "ERR,1001,UNKNOWN_RECIPE";
+        Assert.Equal("OK,CLEARED", TcpServerManager.CoerceAlwaysOkReply(err, "CLEARINHIBIT,FOO", 0));
     }
 }

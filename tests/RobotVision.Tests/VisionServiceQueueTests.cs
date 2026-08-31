@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Abstractions;
 using RobotVision.Hosting;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
@@ -186,8 +186,8 @@ public class VisionServiceQueueTests : IDisposable
             var jsons = Directory.GetFiles(failureFolder, "*.json");
             Assert.Single(pngs);
             Assert.Single(jsons);
-            Assert.EndsWith("_SLOW_1005.png", Path.GetFileName(pngs[0]));
-            Assert.Contains("\"Recipe\": \"SLOW\"", File.ReadAllText(jsons[0]));
+            Assert.EndsWith("_SLOW_1005.png", Path.GetFileName(pngs[0]), StringComparison.Ordinal);
+            Assert.Contains("\"Recipe\": \"SLOW\"", File.ReadAllText(jsons[0]), StringComparison.Ordinal);
         }
         finally
         {

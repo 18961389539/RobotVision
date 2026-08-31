@@ -208,7 +208,7 @@
                                                 </Style>
                                             </Border.Style>
                                             <TextBlock Text="未注册" FontSize="10" FontWeight="Bold"
-                                                       Foreground="#0D1117" />
+                                                       Foreground="{DynamicResource Brush.AppBadgeText}" />
                                         </Border>
                                     </StackPanel>
                                 </Border>

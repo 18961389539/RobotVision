@@ -15,15 +15,15 @@ public sealed class LlamaServerHostTests
             Threads = 8,
             ContextSize = 4096,
         });
-        Assert.Contains("--host 127.0.0.1", args);
-        Assert.Contains("--port 8080", args);
-        Assert.Contains("-c 4096", args);
-        Assert.Contains("-t 8", args);
-        Assert.Contains("-ngl 0", args);
-        Assert.Contains("--parallel 1", args);
-        Assert.Contains("--jinja", args);
-        Assert.Contains("--no-webui", args);
-        Assert.Contains("Qwen3.5-4B-Q4_K_M.gguf", args);
+        Assert.Contains("--host 127.0.0.1", args, StringComparison.Ordinal);
+        Assert.Contains("--port 8080", args, StringComparison.Ordinal);
+        Assert.Contains("-c 4096", args, StringComparison.Ordinal);
+        Assert.Contains("-t 8", args, StringComparison.Ordinal);
+        Assert.Contains("-ngl 0", args, StringComparison.Ordinal);
+        Assert.Contains("--parallel 1", args, StringComparison.Ordinal);
+        Assert.Contains("--jinja", args, StringComparison.Ordinal);
+        Assert.Contains("--no-webui", args, StringComparison.Ordinal);
+        Assert.Contains("Qwen3.5-4B-Q4_K_M.gguf", args, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -34,7 +34,7 @@ public sealed class LlamaServerHostTests
             Port = 8080,
             Threads = 8,
         });
-        Assert.Contains("-c 8192", args);
+        Assert.Contains("-c 8192", args, StringComparison.Ordinal);
     }
 
     [Fact]

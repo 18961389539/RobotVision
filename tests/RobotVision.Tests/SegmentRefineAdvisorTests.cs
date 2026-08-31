@@ -1,6 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Teach;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -59,8 +60,8 @@ public sealed class SegmentRefineAdvisorTests
         var advice = SegmentRefineAdvisor.OverlayBatch(seed, agg, 35, 39);
         Assert.Equal(SegmentRefineMethod.CaliperTab, advice.Recommended);
         Assert.Equal(TabPolarityLock.MinusShortAxis, advice.TabPolarity);
-        Assert.Contains("回放 35/39 检出", advice.Summary);
-        Assert.Contains("采用回放胜出", advice.Summary);
+        Assert.Contains("回放 35/39 检出", advice.Summary, StringComparison.Ordinal);
+        Assert.Contains("采用回放胜出", advice.Summary, StringComparison.Ordinal);
         Assert.Equal(agg, advice.Candidates);
     }
 
@@ -81,6 +82,42 @@ public sealed class SegmentRefineAdvisorTests
         ];
         var advice = SegmentRefineAdvisor.OverlayBatch(seed, agg, 35, 39);
         Assert.Equal(SegmentRefineMethod.Template, advice.Recommended);
-        Assert.Contains("尚未示教", advice.Summary);
+        Assert.Contains("尚未示教", advice.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatBriefAdvice_MethodMismatch_IsShortAndPointsToWizard()
+    {
+        var advice = new SegmentRefineAdvice(
+            SegmentRefineMethod.CaliperTab, false, true, 2.2, 0, 0.43, 0, 0, "long playbook")
+        {
+            Candidates =
+            [
+                new(SegmentRefineMethod.ShapeMatch, true, true, 0.19, "低分"),
+                new(SegmentRefineMethod.CaliperTab, true, true, 0.86, "高"),
+            ],
+        };
+        var text = SegmentRefineAdvisor.FormatBriefAdvice(advice, SegmentRefineMethod.ShapeMatch);
+        Assert.Contains("推荐 卡尺", text, StringComparison.Ordinal);
+        Assert.Contains("形状匹配", text, StringComparison.Ordinal);
+        Assert.Contains("0.19", text, StringComparison.Ordinal);
+        Assert.Contains("配方向导", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("long playbook", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatMethodScoreHint_OnlyWhenRecommendedDiffers()
+    {
+        var advice = new SegmentRefineAdvice(
+            SegmentRefineMethod.Sift, false, true, 2.0, 0, 0.2, 0, 0, "")
+        {
+            Candidates =
+            [
+                new(SegmentRefineMethod.ShapeMatch, true, true, 0.19, ""),
+                new(SegmentRefineMethod.Sift, true, true, 0.86, ""),
+            ],
+        };
+        Assert.Contains("0.19", SegmentRefineAdvisor.FormatMethodScoreHint(advice, SegmentRefineMethod.ShapeMatch), StringComparison.Ordinal);
+        Assert.Equal("", SegmentRefineAdvisor.FormatMethodScoreHint(advice, SegmentRefineMethod.Sift));
     }
 }

@@ -26,7 +26,6 @@
   <!-- 优先引用本机 pylon 安装目录（与 Runtime 大版本一致）；否则回退 NuGet 10.x。 -->
   <PropertyGroup>
     <PylonRoot Condition="'$(PYLON_ROOT)' != ''">$(PYLON_ROOT)</PylonRoot>
-    <PylonRoot Condition="'$(PylonRoot)' == '' and Exists('D:\Program Files\Basler\pylon')">D:\Program Files\Basler\pylon</PylonRoot>
     <PylonRoot Condition="'$(PylonRoot)' == '' and Exists('C:\Program Files\Basler\pylon')">C:\Program Files\Basler\pylon</PylonRoot>
     <PylonManagedDll Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Development\Assemblies\Basler.Pylon\net8.0\x64\Basler.Pylon.dll</PylonManagedDll>
     <PylonRuntimeDir Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Runtime\x64</PylonRuntimeDir>
@@ -53,6 +52,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="RobotVision.Tests" />
+    <InternalsVisibleTo Include="RobotVision.Teach" />
   </ItemGroup>
 
   <!-- 本机 System32 存在同名旧版 onnxruntime.dll 会抢先加载。

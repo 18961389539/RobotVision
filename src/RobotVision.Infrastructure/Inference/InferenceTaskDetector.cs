@@ -10,13 +10,13 @@ public static class InferenceTaskDetector
             return null;
 
         var name = Path.GetFileNameWithoutExtension(fileName).ToLowerInvariant();
-        if (name.Contains("-seg") || name.Contains("_seg") || name.EndsWith("seg"))
+        if (name.Contains("-seg", StringComparison.Ordinal) || name.Contains("_seg", StringComparison.Ordinal) || name.EndsWith("seg", StringComparison.Ordinal))
             return InferenceTask.Segmentation;
-        if (name.Contains("-pose") || name.Contains("_pose") || name.Contains("kpt"))
+        if (name.Contains("-pose", StringComparison.Ordinal) || name.Contains("_pose", StringComparison.Ordinal) || name.Contains("kpt", StringComparison.Ordinal))
             return InferenceTask.PoseEstimation;
-        if (name.Contains("-cls") || name.Contains("_cls"))
+        if (name.Contains("-cls", StringComparison.Ordinal) || name.Contains("_cls", StringComparison.Ordinal))
             return null;
-        if (name.Contains("-obb") || name.Contains("_obb"))
+        if (name.Contains("-obb", StringComparison.Ordinal) || name.Contains("_obb", StringComparison.Ordinal))
             return null;
         return null;
     }

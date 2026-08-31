@@ -1,6 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Teach;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -50,7 +51,7 @@ public sealed class ScenePlaybookTests
         var advice = ScenePlaybook.Recommend(new TaskConstraints(HasTwoLandmarks: true));
         Assert.Equal(AngleMode.DualCenterLine, advice.Primary.AngleMode);
         Assert.Null(advice.Primary.Refine);
-        Assert.Contains("连线", advice.Summary);
+        Assert.Contains("连线", advice.Summary, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -128,7 +129,7 @@ public sealed class ScenePlaybookTests
         ];
         var advice = ScenePlaybook.Recommend(new TaskConstraints(), scene, bakeoff);
         Assert.Equal(SegmentRefineMethod.Template, advice.Primary.Refine);
-        Assert.Contains("尚未示教", advice.Summary);
+        Assert.Contains("尚未示教", advice.Summary, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -152,7 +153,7 @@ public sealed class ScenePlaybookTests
             1.1, 0.85, 4.5, 0.03, false, 0, 900, "近圆");
         var advice = ScenePlaybook.Recommend(new TaskConstraints(), scene);
         Assert.Equal(SegmentRefineMethod.ShapeMatch, advice.Primary.Refine);
-        Assert.Contains("暗场", advice.Summary);
+        Assert.Contains("暗场", advice.Summary, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -162,7 +163,7 @@ public sealed class ScenePlaybookTests
             2.4, 0.35, 4.0, 0.04, false, 12, 1100, "凸起");
         var advice = ScenePlaybook.Recommend(new TaskConstraints(), scene);
         Assert.Equal(SegmentRefineMethod.CaliperTab, advice.Primary.Refine);
-        Assert.Contains("亮场", advice.Primary.Why);
+        Assert.Contains("亮场", advice.Primary.Why, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -249,8 +250,8 @@ public sealed class ScenePlaybookTests
         ];
         var advice = ScenePlaybook.Recommend(new TaskConstraints(), scene, bakeoff);
         Assert.True(advice.Confidence < 0.75, $"未示教置信应偏低，实际 {advice.Confidence:0.00}");
-        Assert.Contains("推荐置信", advice.ConfidenceNote);
-        Assert.Contains("尚未示教", advice.ConfidenceNote);
+        Assert.Contains("推荐置信", advice.ConfidenceNote, StringComparison.Ordinal);
+        Assert.Contains("尚未示教", advice.ConfidenceNote, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -259,7 +260,7 @@ public sealed class ScenePlaybookTests
         var prior = ScenePlaybook.FromHealth(true, false, false, SegmentRefineMethod.Template);
         Assert.NotNull(prior);
         Assert.Equal(SegmentRefineMethod.Template, prior!.Downrank);
-        Assert.Contains("1019", prior.Reason);
+        Assert.Contains("1019", prior.Reason, StringComparison.Ordinal);
 
         var winner = ScenePlaybook.PickWinnerForTask(
         [
@@ -298,7 +299,7 @@ public sealed class ScenePlaybookTests
         var split = ScenePlaybook.Recommend(new TaskConstraints(), scene, sceneVotes: mixed);
         Assert.True(split.Confidence < even.Confidence,
             $"分帧不一致应更低：{split.Confidence:0.00} vs {even.Confidence:0.00}");
-        Assert.Contains("不一致", split.ConfidenceNote);
+        Assert.Contains("不一致", split.ConfidenceNote, StringComparison.Ordinal);
     }
 
     [Fact]

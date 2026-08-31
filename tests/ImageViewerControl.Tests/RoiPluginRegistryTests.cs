@@ -74,16 +74,17 @@ public class RoiPluginRegistryTests
         var registry = CreateRegistry();
         var plugin = registry.FindByType(typeof(CircleRoi));
         plugin.Should().NotBeNull();
+        var circlePlugin = plugin!;
 
         try
         {
-            registry.Unregister(plugin!.TypeKey).Should().BeTrue();
+            registry.Unregister(circlePlugin.TypeKey).Should().BeTrue();
             registry.FindByType(typeof(CircleRoi)).Should().BeNull();
-            registry.Unregister(plugin.TypeKey).Should().BeFalse(); // 已移除
+            registry.Unregister(circlePlugin.TypeKey).Should().BeFalse(); // 已移除
         }
         finally
         {
-            registry.Register(plugin); // 恢复共享单例，避免污染其他测试
+            registry.Register(circlePlugin); // 恢复共享单例，避免污染其他测试
         }
     }
 

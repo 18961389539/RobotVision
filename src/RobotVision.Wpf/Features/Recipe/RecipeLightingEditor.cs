@@ -1,7 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
-using RobotVision.Infrastructure.Lighting;
+using RobotVision.Hosting;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
@@ -9,9 +9,9 @@ namespace RobotVision.WpfHost.Features.Recipe;
 public sealed class RecipeLightingEditor : ObservableObject
 {
     private readonly IRecipeWorkspace _host;
-    private readonly LightingManager _lighting;
+    private readonly ILightingRuntime _lighting;
 
-    internal RecipeLightingEditor(IRecipeWorkspace host, LightingManager lighting)
+    internal RecipeLightingEditor(IRecipeWorkspace host, ILightingRuntime lighting)
     {
         _host = host;
         _lighting = lighting;
@@ -19,7 +19,7 @@ public sealed class RecipeLightingEditor : ObservableObject
 
     private RecipeConfig Editor => _host.Editor;
 
-    public IReadOnlyList<string> LightControllerIds => _lighting.ControllerIds.ToList();
+    public IReadOnlyList<string> LightControllerIds => [.. _lighting.ControllerIds];
 
     public bool UseLighting
     {
@@ -29,7 +29,7 @@ public sealed class RecipeLightingEditor : ObservableObject
             if (value)
             {
                 Editor.Lighting ??= NewLightingConfig();
-                Editor.LightControllerId ??= LightControllerIds.FirstOrDefault();
+                Editor.LightControllerId ??= _lighting.ControllerIds.FirstOrDefault();
             }
             else
             {

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Encodings.Web;
@@ -42,17 +43,20 @@ public sealed class WebChatClient : IDisposable
         _ownsHttp = ownsHttp;
     }
 
+    private static readonly string[] QuerySchemaRequired = ["query"];
+    private static readonly string[] UrlSchemaRequired = ["url"];
+
     public IReadOnlyList<IChatTool> Tools =>
     [
         new DelegateChatTool(
             "web_search",
             "检索公开互联网（DuckDuckGo）。query 为搜索词。查标准/报错/第三方文档用；站内产量、相机、配方仍用站内工具。",
-            Schema(new { type = "object", properties = new { query = new { type = "string" } }, required = new[] { "query" } }),
+            Schema(new { type = "object", properties = new { query = new { type = "string" } }, required = QuerySchemaRequired }),
             Search),
         new DelegateChatTool(
             "web_fetch",
             "读取公开 https/http 网页正文。url 必须是公网地址，禁止本机与内网。",
-            Schema(new { type = "object", properties = new { url = new { type = "string" } }, required = new[] { "url" } }),
+            Schema(new { type = "object", properties = new { url = new { type = "string" } }, required = UrlSchemaRequired }),
             Fetch),
     ];
 
@@ -146,7 +150,7 @@ public sealed class WebChatClient : IDisposable
         if (i >= 0)
         {
             var encoded = raw[(i + marker.Length)..];
-            var amp = encoded.IndexOf('&');
+            var amp = encoded.IndexOf('&', StringComparison.Ordinal);
             if (amp >= 0)
                 encoded = encoded[..amp];
             return Uri.UnescapeDataString(encoded);
@@ -290,6 +294,8 @@ public sealed class WebChatClient : IDisposable
         return new string(buffer, 0, read);
     }
 
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "SocketsHttpHandler ownership transfers to HttpClient (disposeHandler: true).")]
     private static HttpClient CreateDefault()
     {
         var handler = new SocketsHttpHandler
@@ -298,7 +304,7 @@ public sealed class WebChatClient : IDisposable
             ConnectTimeout = TimeSpan.FromSeconds(8),
             PooledConnectionLifetime = TimeSpan.FromMinutes(2),
         };
-        var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(12) };
+        var http = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(12) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("RobotVision/1.0");
         http.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.5");
         return http;

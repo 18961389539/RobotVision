@@ -23,8 +23,8 @@ public sealed class WebChatClientTests
     public void HtmlToPlain_StripsTagsAndCaps()
     {
         var text = WebChatClient.HtmlToPlain("<html><script>bad()</script><p>合格率 &gt; 99%</p></html>");
-        Assert.Contains("合格率 > 99%", text);
-        Assert.DoesNotContain("bad()", text);
+        Assert.Contains("合格率 > 99%", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("bad()", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public sealed class WebChatClientTests
         Assert.Single(hits);
         Assert.Equal("OxyPlot 文档", hits[0].Title);
         Assert.Equal("https://learn.microsoft.com/oxyplot", hits[0].Url);
-        Assert.Contains("图表", hits[0].Snippet);
+        Assert.Contains("图表", hits[0].Snippet, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -53,8 +53,8 @@ public sealed class WebChatClientTests
             Content = new StringContent(html, Encoding.UTF8, "text/html"),
         });
         var result = await client.Tools[0].InvokeAsync("""{"query":"oxyplot"}""", CancellationToken.None);
-        Assert.Contains("标题甲", result.Text);
-        Assert.Contains("example.com/a", result.Text);
+        Assert.Contains("标题甲", result.Text, StringComparison.Ordinal);
+        Assert.Contains("example.com/a", result.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class WebChatClientTests
     {
         using var client = Create(_ => throw new InvalidOperationException("should not fetch"));
         var result = await client.Tools[1].InvokeAsync("""{"url":"http://127.0.0.1/secret"}""", CancellationToken.None);
-        Assert.Contains("内网", result.Text);
+        Assert.Contains("内网", result.Text, StringComparison.Ordinal);
     }
 
     private static WebChatClient Create(Func<HttpRequestMessage, HttpResponseMessage> handler)

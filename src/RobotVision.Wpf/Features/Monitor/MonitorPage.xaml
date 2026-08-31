@@ -320,9 +320,9 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <TextBlock TextTrimming="CharacterEllipsis">
-                                <Run Text="{Binding Time}" Foreground="#FFB8C0CC" />
-                                <Run Text="{Binding Level}" Foreground="#FF7EB6FF" />
-                                <Run Text="{Binding Message}" Foreground="#FFE8EDF4" />
+                                <Run Text="{Binding Time, Mode=OneWay}" Foreground="#FFB8C0CC" />
+                                <Run Text="{Binding Level, Mode=OneWay}" Foreground="#FF7EB6FF" />
+                                <Run Text="{Binding Message, Mode=OneWay}" Foreground="#FFE8EDF4" />
                             </TextBlock>
                         </DataTemplate>
                     </ListBox.ItemTemplate>

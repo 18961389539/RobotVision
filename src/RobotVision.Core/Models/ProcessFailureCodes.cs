@@ -13,5 +13,6 @@ public static class ProcessFailureCodes
         VisionErrorCode.Timeout or
         VisionErrorCode.CameraInitFailed or
         VisionErrorCode.InternalError or
-        VisionErrorCode.RefineFailed;
+        VisionErrorCode.RefineFailed or
+        VisionErrorCode.LightCommandFailed;
 }

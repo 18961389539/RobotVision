@@ -6,36 +6,32 @@ using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure;
-using RobotVision.Infrastructure.Calibration;
-using RobotVision.Infrastructure.Cameras;
-using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Infrastructure.Lighting;
+using RobotVision.Teach;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
 /// <summary>试触发与示教模板：管线快照、拍照位姿、分割示教。</summary>
-public sealed partial class RecipeTestSession : ObservableObject
+public sealed partial class RecipeTestSession : ObservableObject, IDisposable
 {
     private readonly IRecipeWorkspace _host;
     private readonly VisionService _vision;
-    private readonly CameraManager _cameras;
-    private readonly ModelManager _models;
-    private readonly CalibrationManager _calibration;
-    private readonly LightingManager _lighting;
-    private readonly TcpServerManager _tcp;
+    private readonly ICameraRuntime _cameras;
+    private readonly IModelRuntime _models;
+    private readonly ICalibrationRuntime _calibration;
+    private readonly ILightingRuntime _lighting;
+    private readonly IDialogService _dialogs;
 
     internal RecipeTestSession(
         IRecipeWorkspace host,
         VisionService vision,
-        CameraManager cameras,
-        ModelManager models,
-        CalibrationManager calibration,
-        LightingManager lighting,
-        TcpServerManager tcp)
+        ICameraRuntime cameras,
+        IModelRuntime models,
+        ICalibrationRuntime calibration,
+        ILightingRuntime lighting,
+        IDialogService dialogs)
     {
         _host = host;
         _vision = vision;
@@ -43,8 +39,10 @@ public sealed partial class RecipeTestSession : ObservableObject
         _models = models;
         _calibration = calibration;
         _lighting = lighting;
-        _tcp = tcp;
+        _dialogs = dialogs;
     }
+
+    internal IDialogService Dialogs => _dialogs;
 
     private RecipeConfig Editor => _host.Editor;
 
@@ -76,26 +74,24 @@ public sealed partial class RecipeTestSession : ObservableObject
     {
         TestTriggerCommand.NotifyCanExecuteChanged();
         TeachTemplateCommand.NotifyCanExecuteChanged();
-        ApplyRefineAdviceCommand.NotifyCanExecuteChanged();
     }
 
     public void ClearAdvice()
     {
         _lastAdvice = null;
         RefineAdviceText = "";
-        HasRefineAdvice = false;
-        CanApplyRefineAdvice = false;
+        ShowRefineAdviceReminder = false;
+        OnPropertyChanged(nameof(RefineMethodScoreHint));
     }
 
     [ObservableProperty]
     private string _refineAdviceText = "";
 
     [ObservableProperty]
-    private bool _hasRefineAdvice;
+    private string _lastRefineQualityHint = "";
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(ApplyRefineAdviceCommand))]
-    private bool _canApplyRefineAdvice;
+    private bool _showRefineAdviceReminder;
 
     private SegmentRefineAdvice? _lastAdvice;
 
@@ -147,18 +143,19 @@ public sealed partial class RecipeTestSession : ObservableObject
                 var h = shot.Template.Height;
                 var advice = shot.Advice;
                 Editor.Template.TemplateImageBase64 = b64;
-                ApplyTeachLocks(advice);
+                ApplyTeachLocks(advice, Editor.Template.RefineMethod);
                 ApplyTeachGeometry(advice);
-                ApplyDetectionGates(advice);
+                RecipeDetectionGatePrompt.TryConfirmAndApply(advice, Editor, _dialogs);
                 _host.NotifyEditorMutated();
                 SetAdvice(advice);
                 var fallbackHint = shot.FeatureFallback
                     ? " · 特征框未盖住目标，已改整颗示教"
                     : "";
-                var baseMsg = Editor.Template.Roi is not null && fallbackHint.Length == 0
-                    ? $"模板已示教（特征 {w}×{h}px）· 极性/阈值已写入编辑器，保存后上产线"
-                    : $"模板已示教（{w}×{h}px）· 极性/阈值已写入编辑器，保存后上产线";
-                _host.Message = baseMsg + fallbackHint;
+                var locksNote = TeachLocksAppliedNote(Editor.Template.RefineMethod);
+                var size = Editor.Template.Roi is not null && fallbackHint.Length == 0
+                    ? $"特征 {w}×{h}px"
+                    : $"{w}×{h}px";
+                _host.Message = $"模板已示教（{size}）{locksNote}，保存后上产线{fallbackHint}";
             }
             finally
             {
@@ -182,10 +179,19 @@ public sealed partial class RecipeTestSession : ObservableObject
     {
         _host.CommitEdits();
         if (!_host.CanTestTrigger)
+        {
+            if (_host.TestTriggerBlockReason is { } reason)
+                _host.Message = $"无法测试触发：{reason}";
+            return;
+        }
+        if (!_host.ConfirmGrabOriginIfNeeded("测试触发"))
+            return;
+        if (!_host.ConfirmFlatFeatureRoiIfNeeded("测试触发"))
             return;
 
         _host.IsBusy = true;
         _host.OnTestStarting();
+        LastRefineQualityHint = "";
         var clone = Editor.Clone();
         var snapshotName = RecipeLoader.IsValidRecipeName(clone.Name) ? clone.Name : "preview";
         clone.Name = snapshotName;
@@ -193,7 +199,8 @@ public sealed partial class RecipeTestSession : ObservableObject
         {
             var hint = _host.HasUnsavedChanges ? "编辑器（未保存）" : snapshotName;
             _host.Message = $"测试触发中：{hint} …";
-            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(500, _tcp.TimeoutMs)));
+            using var cts = new CancellationTokenSource(
+                TimeSpan.FromMilliseconds(Math.Max(5000, _host.RecipeTestTimeoutMs)));
             TcpClientPose? pose = IncludeTriggerPose
                 ? new TcpClientPose(TriggerPoseX, TriggerPoseY, TriggerPoseRz)
                 : null;
@@ -201,24 +208,31 @@ public sealed partial class RecipeTestSession : ObservableObject
             LastPreview = preview.Result;
             ApplyPreviewFrame(preview.Frame);
             var result = preview.Result;
-            string previewMsg;
-            if (result.Ok)
-                previewMsg = $"测试通过：{result.RecipeName} · {result.Poses.Count} 个目标 · {result.ElapsedMs:0}ms"
-                    + (_host.HasUnsavedChanges ? "（编辑器，未保存不上产线）" : "");
-            else if (result.ErrorCode == VisionErrorCode.RefineFailed)
-                previewMsg = $"测试失败：ERR 1019 精修未过门 · {result.Message}";
-            else
-                previewMsg = $"测试失败：ERR {result.ErrorCode} · {result.Message}";
-            _host.Message = previewMsg;
+            LastRefineQualityHint = ExtractRefineQualityHint(preview.Frame?.PixelPoses);
+            _host.Message = RecipeTestTriggerMessages.FormatPreviewResult(result, _host.HasUnsavedChanges);
         }
         catch (Exception ex)
         {
-            _host.Message = $"测试异常：{ex.Message}";
+            _host.Message = RecipeTestTriggerMessages.FormatException(ex, _host.RecipeTestTimeoutMs);
         }
         finally
         {
             _host.IsBusy = false;
         }
+    }
+
+    private static string ExtractRefineQualityHint(IReadOnlyList<PixelPose>? poses)
+    {
+        if (poses is null || poses.Count == 0)
+            return "";
+        for (var i = 0; i < poses.Count; i++)
+        {
+            var note = poses[i].Overlay?.RefineQualityNote;
+            if (!string.IsNullOrEmpty(note))
+                return note;
+        }
+
+        return "";
     }
 
     private void ApplyPreviewFrame(PreviewRunOutcome? frame)
@@ -258,8 +272,7 @@ public sealed partial class RecipeTestSession : ObservableObject
     private TeachShot GrabTeachShot(string cameraId)
     {
         using var grabbed = _cameras.GrabForTeach(cameraId);
-        var image = MaybeUndistort(cameraId, grabbed.Image, out var undistorted);
-        using var undistortedScope = undistorted;
+        using var image = RecipeEditorFrame.PrepareInferenceImage(_calibration, Editor, grabbed.Image);
         using var roiOwned = RoiHelper.CropToVisionImage(image, Editor.Roi, out var ox, out var oy);
         var roiView = roiOwned ?? image;
         var imgW = image.Width;
@@ -307,7 +320,7 @@ public sealed partial class RecipeTestSession : ObservableObject
                 points[i] = new Point2f((float)(p.X + box.X), (float)(p.Y + box.Y));
             }
 
-            using var roiMat = VisionImageCv.AsMat(roiView);
+            using var roiMat = VisionImageMat.AsMat(roiView);
             var crop = MaskTemplateMatcher.UprightCrop(roiMat, points, 0);
             using (crop.Upright)
             {
@@ -357,27 +370,41 @@ public sealed partial class RecipeTestSession : ObservableObject
         throw new InvalidOperationException("分割未检出有效目标，无法示教（请确认模型/阈值/画面内有目标）");
     }
 
-    private void ApplyTeachLocks(SegmentRefineAdvice advice)
+    private void ApplyTeachLocks(SegmentRefineAdvice advice, SegmentRefineMethod refineMethod)
     {
-        if (advice.TeachPeakScore >= 0.3)
+        var t = Editor.Template;
+        switch (refineMethod)
         {
-            Editor.Template.TeachPeakScore = advice.TeachPeakScore;
-            if (advice.SuggestedMatchThreshold > 0)
-                Editor.Template.MatchThreshold = advice.SuggestedMatchThreshold;
+            case SegmentRefineMethod.Template:
+                if (advice.TeachPeakScore >= 0.3)
+                {
+                    t.TeachPeakScore = advice.TeachPeakScore;
+                    if (advice.SuggestedMatchThreshold > 0)
+                        t.MatchThreshold = advice.SuggestedMatchThreshold;
+                }
+                if (advice.EdgePolarity != HousingEdgePolarity.Auto)
+                    t.HousingEdgePolarity = advice.EdgePolarity;
+                break;
+            case SegmentRefineMethod.CaliperTab:
+                if (advice.EdgePolarity != HousingEdgePolarity.Auto)
+                    t.HousingEdgePolarity = advice.EdgePolarity;
+                if (advice.TabPolarity != TabPolarityLock.Auto)
+                    t.TabPolarity = advice.TabPolarity;
+                break;
+            case SegmentRefineMethod.ShapeMatch:
+            case SegmentRefineMethod.Sift:
+            case SegmentRefineMethod.LineFit:
+            case SegmentRefineMethod.CentroidHoleLine:
+                break;
         }
-        if (advice.EdgePolarity != HousingEdgePolarity.Auto)
-            Editor.Template.HousingEdgePolarity = advice.EdgePolarity;
-        if (advice.TabPolarity != TabPolarityLock.Auto)
-            Editor.Template.TabPolarity = advice.TabPolarity;
     }
 
-    private void ApplyDetectionGates(SegmentRefineAdvice advice)
+    private static string TeachLocksAppliedNote(SegmentRefineMethod refineMethod) => refineMethod switch
     {
-        if (advice.SuggestedConfidence > 0)
-            Editor.Confidence = advice.SuggestedConfidence;
-        if (advice.SuggestedPixelConfidence > 0)
-            Editor.Segmentation.PixelConfidence = advice.SuggestedPixelConfidence;
-    }
+        SegmentRefineMethod.Template => " · 示教峰/匹配阈值/极性已写入",
+        SegmentRefineMethod.CaliperTab => " · 极性已写入",
+        _ => "",
+    };
 
     private void ApplyTeachGeometry(SegmentRefineAdvice advice)
     {
@@ -390,80 +417,70 @@ public sealed partial class RecipeTestSession : ObservableObject
     private void SetAdvice(SegmentRefineAdvice advice)
     {
         _lastAdvice = advice;
-        var orient = advice.CanResolveOrientation ? "可判头尾" : "头尾难分";
-        RefineAdviceText =
-            $"未点「采用推荐方法」则测试仍用当前下拉。推荐：{SegmentRefineAdvisor.MethodLabel(advice.Recommended)}（{orient}，轴比 {advice.Aspect:0.0}，0/180 分差 {advice.Separability:0.00}）。{advice.Summary}";
-        HasRefineAdvice = true;
-        CanApplyRefineAdvice =
-            Editor.AngleMode == AngleMode.MaskTemplate && AdviceDiffers(advice);
-        ApplyRefineAdviceCommand.NotifyCanExecuteChanged();
+        RefineAdviceText = SegmentRefineAdvisor.FormatBriefAdvice(advice, Editor.Template.RefineMethod);
+        ShowRefineAdviceReminder =
+            Editor.AngleMode == AngleMode.MaskTemplate && ShouldShowRefineAdviceReminder(advice, Editor);
+        OnPropertyChanged(nameof(RefineMethodScoreHint));
     }
 
-    private bool AdviceDiffers(SegmentRefineAdvice advice) =>
-        Editor.Template.RefineMethod != advice.Recommended ||
-        Editor.Template.UseEdgeMatch != advice.RecommendEdgeMatch ||
-        (advice.SuggestedMatchThreshold > 0 &&
-         Math.Abs(Editor.Template.MatchThreshold - advice.SuggestedMatchThreshold) > 0.01) ||
-        (advice.EdgePolarity != HousingEdgePolarity.Auto &&
-         Editor.Template.HousingEdgePolarity != advice.EdgePolarity) ||
-        (advice.TabPolarity != TabPolarityLock.Auto &&
-         Editor.Template.TabPolarity != advice.TabPolarity) ||
-        (advice.SuggestedFeatureRoi is not null &&
-         TemplateOptions.UsesFeatureTeachRoi(advice.Recommended) &&
-         Editor.Template.Roi is null) ||
-        (advice.TeachAreaPx > 1 && Editor.Template.ExpectedCount == 0) ||
-        (advice.SuggestedConfidence > 0 &&
-         Math.Abs(Editor.Confidence - advice.SuggestedConfidence) > 0.02) ||
-        (advice.SuggestedPixelConfidence > 0 &&
-         Math.Abs(Editor.Segmentation.PixelConfidence - advice.SuggestedPixelConfidence) > 0.02);
+    /// <summary>示教/分析后当前精修方法在赛马中的得分提示（详情窗用，非完整推荐）。</summary>
+    public string RefineMethodScoreHint =>
+        _lastAdvice is null
+            ? ""
+            : SegmentRefineAdvisor.FormatMethodScoreHint(_lastAdvice, Editor.Template.RefineMethod);
+
+    /// <summary>
+    /// 本页示教只提醒「当前方法下参数可调」。方法赛马与期望件数 0（不检查）不去催改。
+    /// </summary>
+    internal static bool ShouldShowRefineAdviceReminder(SegmentRefineAdvice advice, RecipeConfig editor)
+    {
+        var method = editor.Template.RefineMethod;
+        switch (method)
+        {
+            case SegmentRefineMethod.Template:
+                if (editor.Template.UseEdgeMatch != advice.RecommendEdgeMatch)
+                    return true;
+                if (advice.SuggestedMatchThreshold > 0 &&
+                    Math.Abs(editor.Template.MatchThreshold - advice.SuggestedMatchThreshold) > 0.01)
+                    return true;
+                if (advice.EdgePolarity != HousingEdgePolarity.Auto &&
+                    editor.Template.HousingEdgePolarity != advice.EdgePolarity)
+                    return true;
+                if (advice.SuggestedFeatureRoi is not null && editor.Template.Roi is null)
+                    return true;
+                break;
+            case SegmentRefineMethod.CaliperTab:
+                if (advice.EdgePolarity != HousingEdgePolarity.Auto &&
+                    editor.Template.HousingEdgePolarity != advice.EdgePolarity)
+                    return true;
+                if (advice.TabPolarity != TabPolarityLock.Auto &&
+                    editor.Template.TabPolarity != advice.TabPolarity)
+                    return true;
+                break;
+        }
+
+        if (advice.SuggestedConfidence > 0 &&
+            Math.Abs(editor.Confidence - advice.SuggestedConfidence) > 0.02)
+            return true;
+        if (advice.SuggestedPixelConfidence > 0 &&
+            Math.Abs(editor.Segmentation.PixelConfidence - advice.SuggestedPixelConfidence) > 0.02)
+            return true;
+        return false;
+    }
 
     public void RefreshAdviceCanApply()
     {
         if (_lastAdvice is null)
             return;
-        CanApplyRefineAdvice =
-            Editor.AngleMode == AngleMode.MaskTemplate && AdviceDiffers(_lastAdvice);
+        RefineAdviceText = SegmentRefineAdvisor.FormatBriefAdvice(_lastAdvice, Editor.Template.RefineMethod);
+        ShowRefineAdviceReminder =
+            Editor.AngleMode == AngleMode.MaskTemplate && ShouldShowRefineAdviceReminder(_lastAdvice, Editor);
+        OnPropertyChanged(nameof(RefineMethodScoreHint));
     }
 
-    private bool CanApplyRefineAdviceNow =>
-        !_host.IsBusy && _lastAdvice is not null && CanApplyRefineAdvice;
-
-    [RelayCommand(CanExecute = nameof(CanApplyRefineAdviceNow))]
-    private void ApplyRefineAdvice()
+    public void Dispose()
     {
-        if (_lastAdvice is null)
-            return;
-        Editor.Template.RefineMethod = _lastAdvice.Recommended;
-        Editor.Template.UseEdgeMatch = _lastAdvice.RecommendEdgeMatch;
-        ApplyTeachLocks(_lastAdvice);
-        ApplyTeachGeometry(_lastAdvice);
-        ApplyDetectionGates(_lastAdvice);
-        if (Editor.Template.ExpectedCount == 0)
-            Editor.Template.ExpectedCount = 1;
-        if (_lastAdvice.SuggestedFeatureRoi is { } roi &&
-            TemplateOptions.UsesFeatureTeachRoi(_lastAdvice.Recommended))
-            _host.ApplySuggestedFeatureRoi(roi);
-        _host.RefreshEditorBindings();
-        CanApplyRefineAdvice = false;
-        _host.Message = $"已采用推荐精修：{SegmentRefineAdvisor.MethodLabel(_lastAdvice.Recommended)}（试触发已用编辑器，保存后上产线）";
-    }
-
-    private VisionImage MaybeUndistort(string cameraId, VisionImage source, out VisionImage? undistorted)
-    {
-        undistorted = null;
-        if (string.IsNullOrEmpty(Editor.StationId) || !_calibration.HasPolynomial(Editor.StationId))
-        {
-            try
-            {
-                undistorted = _calibration.Undistort(cameraId, source);
-                return undistorted;
-            }
-            catch (VisionException)
-            {
-                return source;
-            }
-        }
-
-        return source;
+        ResultImage = null;
+        LastPreview = null;
     }
 }

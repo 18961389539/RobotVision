@@ -5,6 +5,7 @@ using RobotVision.Hosting;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.WpfHost.Features.Calibration;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.Wpf.Tests;
 
@@ -15,7 +16,8 @@ namespace RobotVision.Wpf.Tests;
 public class CalibrationViewModelTests
 {
     private static CalibrationViewModel CreateVm(CalibrationManager calibration) =>
-        new(calibration, TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()), new CameraManager());
+        new(TestInfra.CalibrationFacade(calibration), TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()),
+            TestInfra.CameraFacade(new CameraManager()), new TestDialogService(), TestLog.Null<CalibrationViewModel>());
 
     [Fact]
     public void Ctor_WithEmptyManager_ShowsEmptyState()
@@ -200,7 +202,7 @@ public class CalibrationViewModelTests
         var vm = CreateVm(calibration);
 
         vm.Scales[0].Quality.Should().Be("近似");
-        calibration.QualityWarnings.Should().Contain(w => w.Contains("各向异性"));
+        calibration.QualityWarnings.Should().Contain(w => w.Contains("各向异性", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -255,7 +257,9 @@ public class CalibrationViewModelTests
         var calibration = new CalibrationManager();
         var calibFolder = System.IO.Path.Combine(dir.Path, "calibration");
         calibration.LoadDirectory(calibFolder);
-        var vm = new CalibrationViewModel(calibration, TestInfra.CreateAppConfig(dir.Path), new CameraManager());
+        var vm = new CalibrationViewModel(
+            TestInfra.CalibrationFacade(calibration), TestInfra.CreateAppConfig(dir.Path),
+            TestInfra.CameraFacade(new CameraManager()), new TestDialogService(), TestLog.Null<CalibrationViewModel>());
 
         vm.ScaleStationId = "st1";
         vm.ScaleCameraId = "cam1";
@@ -283,7 +287,9 @@ public class CalibrationViewModelTests
         var calibFolder = System.IO.Path.Combine(dir.Path, "calibration");
         calibration.LoadDirectory(calibFolder);
         var cfg = TestInfra.CreateAppConfig(dir.Path);
-        var vm = new CalibrationViewModel(calibration, cfg, new CameraManager());
+        var vm = new CalibrationViewModel(
+            TestInfra.CalibrationFacade(calibration), cfg,
+            TestInfra.CameraFacade(new CameraManager()), new TestDialogService(), TestLog.Null<CalibrationViewModel>());
 
         vm.ScaleStationId = "st_manual";
         vm.ScaleCameraId = "cam1";
@@ -322,7 +328,10 @@ public class CalibrationViewModelTests
 
         var cameras = new CameraManager();
         cameras.Register(new FileCamera("cam_file", folder));
-        var vm = new CalibrationViewModel(new CalibrationManager(), TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()), cameras);
+        var vm = new CalibrationViewModel(
+            TestInfra.CalibrationFacade(new CalibrationManager()),
+            TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()),
+            TestInfra.CameraFacade(cameras), new TestDialogService(), TestLog.Null<CalibrationViewModel>());
         vm.ScaleCameraId = "cam_file";
 
         await vm.ReadCameraResolutionCommand.ExecuteAsync(null);
@@ -338,7 +347,10 @@ public class CalibrationViewModelTests
     {
         var cameras = new CameraManager();
         cameras.Register(new FailedCamera("cam_file", CameraKind.File, "回放目录中没有图片: data/replay"));
-        var vm = new CalibrationViewModel(new CalibrationManager(), TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()), cameras);
+        var vm = new CalibrationViewModel(
+            TestInfra.CalibrationFacade(new CalibrationManager()),
+            TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()),
+            TestInfra.CameraFacade(cameras), new TestDialogService(), TestLog.Null<CalibrationViewModel>());
         vm.ScaleCameraId = "cam_file";
 
         vm.ScaleCameraGrabHint.Should().Contain("回放目录中没有图片");
@@ -350,7 +362,10 @@ public class CalibrationViewModelTests
     {
         var cameras = new CameraManager();
         cameras.Register(new VirtualCamera("cam_v", 640, 480, "Bars"));
-        var vm = new CalibrationViewModel(new CalibrationManager(), TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()), cameras);
+        var vm = new CalibrationViewModel(
+            TestInfra.CalibrationFacade(new CalibrationManager()),
+            TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()),
+            TestInfra.CameraFacade(cameras), new TestDialogService(), TestLog.Null<CalibrationViewModel>());
         vm.ScaleCameraId = "cam_v";
 
         await vm.GrabScalePreviewCommand.ExecuteAsync(null);
@@ -427,7 +442,9 @@ public class CalibrationViewModelTests
             Width = 2448,
             Height = 2048,
         });
-        var vm = new CalibrationViewModel(calibration, TestInfra.CreateAppConfig(dir.Path), new CameraManager());
+        var vm = new CalibrationViewModel(
+            TestInfra.CalibrationFacade(calibration), TestInfra.CreateAppConfig(dir.Path),
+            TestInfra.CameraFacade(new CameraManager()), new TestDialogService(), TestLog.Null<CalibrationViewModel>());
 
         vm.Scales[0].ScaleX = 0.051;
         vm.Scales[0].ScaleY = 0.051;
@@ -436,6 +453,51 @@ public class CalibrationViewModelTests
         vm.ScaleFormMessage.Should().Contain("已更新");
         calibration.GetScale("st1")!.ScaleX.Should().BeApproximately(0.051, 1e-12);
         calibration.GetScale("st1")!.Width.Should().Be(2448);
+    }
+
+    [Fact]
+    public void DeleteScale_WithEmptyStationId_DoesNothing()
+    {
+        var calibration = new CalibrationManager();
+        calibration.LoadScale(new ScaleProfile
+        {
+            StationId = "st1",
+            CameraId = "cam1",
+            ScaleX = 0.05,
+            ScaleY = 0.05,
+        });
+        var vm = CreateVm(calibration);
+
+        vm.DeleteScaleCommand.Execute(null);
+        vm.DeleteScaleCommand.Execute("");
+
+        vm.Scales.Should().ContainSingle();
+        calibration.GetScale("st1").Should().NotBeNull();
+    }
+
+    [Fact]
+    public void LoadScaleToForm_WhenAlreadySelected_RefreshesFormFromCardEdits()
+    {
+        var calibration = new CalibrationManager();
+        calibration.LoadScale(new ScaleProfile
+        {
+            StationId = "st1",
+            CameraId = "cam1",
+            ScaleX = 0.05,
+            ScaleY = 0.05,
+            Width = 2448,
+            Height = 2048,
+        });
+        var vm = CreateVm(calibration);
+        vm.SelectedScale = vm.Scales[0];
+        vm.Scales[0].ScaleX = 0.08;
+        vm.Scales[0].ScaleY = 0.09;
+
+        vm.LoadScaleToFormCommand.Execute(vm.Scales[0]);
+
+        vm.ScaleX.Should().BeApproximately(0.08, 1e-12);
+        vm.ScaleY.Should().BeApproximately(0.09, 1e-12);
+        vm.ScaleFormMessage.Should().Contain("已载入");
     }
 
     [Fact]

@@ -33,6 +33,7 @@ public class KeyPointLineStrategyTests : IDisposable
 
     public void Dispose()
     {
+        _engine.Dispose();
         _manager.Dispose();
         try { Directory.Delete(_folder, true); }
         catch (IOException) { }

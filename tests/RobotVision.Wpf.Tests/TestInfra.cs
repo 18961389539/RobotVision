@@ -72,6 +72,18 @@ public static class TestInfra
 
     public static void RunSta(Action action) => RunSta<object?>(() => { action(); return null; });
 
+    /// <summary>在 UI 线程上等待并抽空 Dispatcher 队列（供 DispatcherTimer 等异步 UI 逻辑测试）。</summary>
+    public static void PumpDispatcherFor(TimeSpan duration)
+    {
+        var end = Environment.TickCount64 + (long)duration.TotalMilliseconds;
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        while (Environment.TickCount64 < end)
+        {
+            dispatcher.Invoke(DispatcherPriority.Background, static () => { });
+            Thread.Sleep(5);
+        }
+    }
+
     /// <summary>临时目录（测试后自动清理）。</summary>
     public sealed class TempDir : IDisposable
     {
@@ -145,4 +157,18 @@ public static class TestInfra
         FileLogging = new FileLoggingConfig { Folder = System.IO.Path.Combine(tempDir, "logs") },
         FailureImage = new FailureImageConfig { Folder = System.IO.Path.Combine(tempDir, "failures") },
     };
+
+    public static ICameraRuntime CameraFacade(CameraManager cameras) => cameras.AsRuntimeFacade();
+
+    public static ICalibrationRuntime CalibrationFacade(CalibrationManager calibration) =>
+        calibration.AsRuntimeFacade();
+
+    public static ILightingRuntime LightingFacade(LightingManager lighting) => lighting.AsRuntimeFacade();
+
+    public static IModelRuntime ModelFacade(ModelManager models) => models.AsRuntimeFacade();
+
+    public static ITcpRuntime TcpFacade(TcpServerManager tcp) => tcp.AsRuntimeFacade();
+
+    public static IAngleStrategyCatalog AngleCatalog(AngleStrategyTypeRegistry registry) =>
+        registry.AsRuntimeFacade();
 }

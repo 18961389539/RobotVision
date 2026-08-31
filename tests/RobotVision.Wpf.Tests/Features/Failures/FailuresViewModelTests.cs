@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OpenCvSharp;
 using RobotVision.Hosting;
 using RobotVision.WpfHost.Features.Failures;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.Wpf.Tests;
 
@@ -23,7 +24,7 @@ public class FailuresViewModelTests
                 new FailureImageConfig { Folder = System.IO.Path.Combine(dir.Path, "no_failures") },
                 NullLogger<FailureImageStore>.Instance);
 
-            var vm = new FailuresViewModel(store);
+            var vm = new FailuresViewModel(store, new TestDialogService(), TestLog.Null<FailuresViewModel>());
             vm.RefreshAsync().GetAwaiter().GetResult();
 
             vm.Items.Should().BeEmpty();
@@ -46,7 +47,7 @@ public class FailuresViewModelTests
             var store = new FailureImageStore(
                 new FailureImageConfig { Folder = failFolder },
                 NullLogger<FailureImageStore>.Instance);
-            var vm = new FailuresViewModel(store);
+            var vm = new FailuresViewModel(store, new TestDialogService(), TestLog.Null<FailuresViewModel>());
             vm.RefreshAsync().GetAwaiter().GetResult();
 
             vm.Items.Should().HaveCount(3);
@@ -76,7 +77,7 @@ public class FailuresViewModelTests
             var store = new FailureImageStore(
                 new FailureImageConfig { Folder = failFolder },
                 NullLogger<FailureImageStore>.Instance);
-            var vm = new FailuresViewModel(store);
+            var vm = new FailuresViewModel(store, new TestDialogService(), TestLog.Null<FailuresViewModel>());
             vm.RefreshAsync().GetAwaiter().GetResult();
 
             vm.RecipeFilter = "A01";
@@ -102,7 +103,7 @@ public class FailuresViewModelTests
             var store = new FailureImageStore(
                 new FailureImageConfig { Folder = failFolder },
                 NullLogger<FailureImageStore>.Instance);
-            var vm = new FailuresViewModel(store);
+            var vm = new FailuresViewModel(store, new TestDialogService(), TestLog.Null<FailuresViewModel>());
             vm.RefreshAsync().GetAwaiter().GetResult();
 
             vm.RecipeFilter = "A01";
@@ -127,7 +128,7 @@ public class FailuresViewModelTests
             var store = new FailureImageStore(
                 new FailureImageConfig { Folder = failFolder },
                 NullLogger<FailureImageStore>.Instance);
-            var vm = new FailuresViewModel(store);
+            var vm = new FailuresViewModel(store, new TestDialogService(), TestLog.Null<FailuresViewModel>());
             vm.RefreshAsync().GetAwaiter().GetResult();
 
             vm.RecipeFilter = "NOPE";
@@ -151,7 +152,7 @@ public class FailuresViewModelTests
             var store = new FailureImageStore(
                 new FailureImageConfig { Folder = failFolder },
                 NullLogger<FailureImageStore>.Instance);
-            var vm = new FailuresViewModel(store);
+            var vm = new FailuresViewModel(store, new TestDialogService(), TestLog.Null<FailuresViewModel>());
             vm.RefreshAsync().GetAwaiter().GetResult();
 
             vm.Items.Should().ContainSingle();

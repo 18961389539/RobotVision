@@ -1,5 +1,5 @@
 using RobotVision.Core.Recipe;
-using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Teach;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -19,7 +19,7 @@ public sealed class RefineParamTunerTests
         var sug = RefineParamTuner.Tune(SegmentRefineMethod.Template, frames, [1, 1, 1], current, 0.90);
         Assert.NotNull(sug);
         Assert.True(sug!.MatchThreshold >= 0.76, $"高分夹应收紧门，实际 {sug.MatchThreshold}");
-        Assert.Contains("匹配门", sug.Summary);
+        Assert.Contains("匹配门", sug.Summary, StringComparison.Ordinal);
         Assert.Contains(sug.Trials, t => t.Best);
     }
 
@@ -62,7 +62,7 @@ public sealed class RefineParamTunerTests
             taskExpectedCount: 0);
         Assert.NotNull(sug);
         Assert.Equal(2, sug!.ExpectedCount);
-        Assert.Contains("期望件数", sug.Summary);
+        Assert.Contains("期望件数", sug.Summary, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class RefineParamTunerTests
             taskExpectedCount: 1);
         Assert.NotNull(sug);
         Assert.Null(sug!.ExpectedCount);
-        Assert.Contains("不符", sug.Summary);
+        Assert.Contains("不符", sug.Summary, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -107,12 +107,12 @@ public sealed class RefineParamTunerTests
             frames, SegmentRefineMethod.Template, 0.60, directed: true);
         Assert.Equal(0.30, score, 2);
         Assert.False(ok);
-        Assert.Contains("1/3", note);
+        Assert.Contains("1/3", note, StringComparison.Ordinal);
     }
 
     private static SegmentRefineCandidate Hit(double score, double angle) =>
         new(SegmentRefineMethod.Template, score >= 0.6, true, score, "hit", angle);
 
-    private static IReadOnlyList<IReadOnlyList<SegmentRefineCandidate>> EmptyFrames(int n) =>
+    private static IReadOnlyList<SegmentRefineCandidate>[] EmptyFrames(int n) =>
         Enumerable.Range(0, n).Select(_ => (IReadOnlyList<SegmentRefineCandidate>)[]).ToArray();
 }

@@ -16,7 +16,7 @@ public sealed class FrameOverlayComposerTests
         var hints = new RecipeDisplayHints(
             DrawDetectionRoi: true,
             DetectionRoi: new Roi(0.1, 0.1, 0.5, 0.5),
-            ShowCaliperDebug: false);
+            ShowRefineDebug: false);
 
         FrameOverlayComposer.Compose(image, [], hints);
 

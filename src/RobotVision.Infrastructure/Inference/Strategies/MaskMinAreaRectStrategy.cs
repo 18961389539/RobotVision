@@ -4,7 +4,6 @@ using RobotVision.Core.Geometry;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Geometry;
-using RobotVision.Infrastructure.Inference;
 
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
@@ -20,40 +19,36 @@ public sealed class MaskMinAreaRectStrategy(ModelManager models) : IAngleStrateg
         using var roiOwned = RoiHelper.CropToVisionImage(undistorted, recipe.Roi, out var ox, out var oy);
         var input = roiOwned ?? undistorted;
         var session = models.Open(recipe.Models[0], InferenceTask.Segmentation);
-        var results = InferenceStageClock.MeasureSegment(() =>
-            session.Run(y =>
-                y.RunSegmentation(input, recipe.Confidence, recipe.Segmentation.PixelConfidence, recipe.Iou), ct));
+        var results = session.Run(y =>
+            y.RunSegmentation(input, recipe.Confidence, recipe.Segmentation.PixelConfidence, recipe.Iou), ct);
 
-        return InferenceStageClock.MeasureRefine(() =>
+        var poses = new List<PixelPose>();
+        foreach (var segmentation in results)
         {
-            var poses = new List<PixelPose>();
-            foreach (var segmentation in results)
+            var contour = segmentation.ContourLocal;
+            if (contour.Count < 4)
+                continue;
+
+            var box = segmentation.Box;
+            if ((double)box.Width * box.Height < MinMaskAreaPx)
+                continue;
+
+            var points = new Point2f[contour.Count];
+            for (var i = 0; i < contour.Count; i++)
+                points[i] = new Point2f((float)(contour[i].X + box.Left), (float)(contour[i].Y + box.Top));
+
+            var (center, angleDeg) = MinAreaRectGeometry.LongAxis(points);
+            poses.Add(new PixelPose(center.X + ox, center.Y + oy, angleDeg, segmentation.Confidence)
             {
-                var contour = segmentation.ContourLocal;
-                if (contour.Count < 4)
-                    continue;
-
-                var box = segmentation.Box;
-                if ((double)box.Width * box.Height < MinMaskAreaPx)
-                    continue;
-
-                var points = new Point2f[contour.Count];
-                for (var i = 0; i < contour.Count; i++)
-                    points[i] = new Point2f((float)(contour[i].X + box.Left), (float)(contour[i].Y + box.Top));
-
-                var (center, angleDeg) = MinAreaRectGeometry.LongAxis(points);
-                poses.Add(new PixelPose(center.X + ox, center.Y + oy, angleDeg, segmentation.Confidence)
+                Overlay = new PoseOverlay
                 {
-                    Overlay = new PoseOverlay
-                    {
-                        Contour = points.Select(p => new PixelPoint(p.X + ox, p.Y + oy)).ToArray(),
-                        Boxes = [new PixelRect(box.Left + ox, box.Top + oy, box.Width, box.Height)],
-                        Label = segmentation.Label,
-                    },
-                });
-            }
+                    Contour = points.Select(p => new PixelPoint(p.X + ox, p.Y + oy)).ToArray(),
+                    Boxes = [new PixelRect(box.Left + ox, box.Top + oy, box.Width, box.Height)],
+                    Label = segmentation.Label,
+                },
+            });
+        }
 
-            return poses.OrderByDescending(p => p.Score).ToList();
-        });
+        return poses.OrderByDescending(p => p.Score).ToList();
     }
 }

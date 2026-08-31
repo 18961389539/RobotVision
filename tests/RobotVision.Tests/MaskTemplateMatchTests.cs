@@ -187,6 +187,58 @@ public sealed class MaskTemplateMatchTests : IDisposable
     }
 
     [Fact]
+    public void RotationCache_Remove_WhileLeased_DoesNotDisposeUntilRelease()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "Lease",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["m.onnx"],
+            Template = new TemplateOptions
+            {
+                TemplateImageBase64 = MaskTemplateMatcher.EncodeTemplatePng(_template),
+                RefineRangeDeg = 5,
+            },
+        };
+        using var cache = new MaskTemplateRotationCache();
+        var pack = cache.GetOrCreate(recipe);
+        Assert.NotNull(pack);
+        cache.Remove(recipe.Name);
+        Assert.False(pack.Gray.Source.IsDisposed);
+        Assert.Equal(22, pack.Gray.Count);
+
+        cache.Release(pack);
+        Assert.True(pack.Gray.Source.IsDisposed);
+    }
+
+    [Fact]
+    public void RotationCache_DisposeWhileLeased_DoesNotDisposeUntilRelease()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "LeaseDispose",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["m.onnx"],
+            Template = new TemplateOptions
+            {
+                TemplateImageBase64 = MaskTemplateMatcher.EncodeTemplatePng(_template),
+                RefineRangeDeg = 5,
+            },
+        };
+        var cache = new MaskTemplateRotationCache();
+        var pack = cache.GetOrCreate(recipe);
+        Assert.NotNull(pack);
+
+        cache.Dispose();
+        Assert.False(pack.Gray.Source.IsDisposed);
+
+        cache.Release(pack);
+        Assert.True(pack.Gray.Source.IsDisposed);
+    }
+
+    [Fact]
     public void PreferOrientationBranch_RealOsdpTemplate_FlippedIs180()
     {
         var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

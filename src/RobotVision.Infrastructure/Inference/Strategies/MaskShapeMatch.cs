@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Recipe;
@@ -65,14 +63,15 @@ public static class MaskShapeMatch
     [ThreadStatic]
     internal static DebugInfo LastDebug;
 
-    private static readonly object CacheGate = new();
-    private static readonly Dictionary<string, CachedModel> Cache = new(StringComparer.OrdinalIgnoreCase);
-
-    private sealed class CachedModel(string fingerprint, ShapeModel model)
-    {
-        public string Fingerprint { get; } = fingerprint;
-        public ShapeModel Model { get; } = model;
-    }
+    private static readonly RecipeTeachCache<ShapeModel> TeachCache = new(
+        ShouldCache,
+        RecipeTeachFingerprints.TemplateImage,
+        recipe =>
+        {
+            using var decoded = MaskTemplateMatcher.DecodeTemplatePng(recipe.Template.TemplateImageBase64);
+            return BuildTeach(decoded);
+        },
+        _ => { });
 
     public static Result? Refine(
         Mat image, IReadOnlyList<Point2f> contour, ShapeModel model, double refineRangeDeg = 8) =>
@@ -162,41 +161,14 @@ public static class MaskShapeMatch
             left, right, delta);
     }
 
-    public static void Warm(RecipeConfig recipe)
-    {
-        if (!ShouldCache(recipe))
-            return;
-        GetOrCreate(recipe);
-    }
+    public static void Warm(RecipeConfig recipe) => TeachCache.Warm(recipe);
 
-    public static void Remove(string recipeName)
-    {
-        lock (CacheGate)
-            Cache.Remove(recipeName);
-    }
+    public static void Remove(string recipeName) => TeachCache.Remove(recipeName);
 
-    public static ShapeModel? GetOrCreate(RecipeConfig recipe)
-    {
-        if (!ShouldCache(recipe))
-            return null;
+    /// <summary>归还 <see cref="GetOrCreate"/> 租约。与旋转/SIFT 缓存语义一致。</summary>
+    public static void Release(ShapeModel? model) => TeachCache.Release(model);
 
-        var fingerprint = Fingerprint(recipe.Template);
-        lock (CacheGate)
-        {
-            if (Cache.TryGetValue(recipe.Name, out var cached) && cached.Fingerprint == fingerprint)
-                return cached.Model;
-
-            if (cached is not null)
-                Cache.Remove(recipe.Name);
-
-            using var decoded = MaskTemplateMatcher.DecodeTemplatePng(recipe.Template.TemplateImageBase64);
-            var model = BuildTeach(decoded);
-            if (model is null)
-                return null;
-            Cache[recipe.Name] = new CachedModel(fingerprint, model);
-            return model;
-        }
-    }
+    public static ShapeModel? GetOrCreate(RecipeConfig recipe) => TeachCache.GetOrCreate(recipe);
 
     internal static double QualityScore(double meanDist, double hitRate)
     {
@@ -204,16 +176,13 @@ public static class MaskShapeMatch
         return Math.Clamp(0.55 * hitRate + 0.45 * dist, 0.15, 1);
     }
 
+    internal static string FormatQualityNote(double score, double matchThreshold, DebugInfo debug) =>
+        $"命中 {debug.HitRate:P0} · 均距 {debug.MeanDist:0.1f}px · 分 {score:0.00} (门 {matchThreshold:0.00})";
+
     private static bool ShouldCache(RecipeConfig recipe) =>
         recipe.AngleMode == AngleMode.MaskTemplate
         && recipe.Template.RefineMethod == SegmentRefineMethod.ShapeMatch
         && !string.IsNullOrEmpty(recipe.Template.TemplateImageBase64);
-
-    private static string Fingerprint(TemplateOptions template)
-    {
-        var hash = SHA256.HashData(Encoding.ASCII.GetBytes(template.TemplateImageBase64));
-        return Convert.ToHexString(hash);
-    }
 
     private sealed record MatchHit(
         double RotationDeg, Point2d CenterInUpright, double MeanDistPx, double HitRate, ShapeViz Viz);

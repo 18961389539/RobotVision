@@ -493,6 +493,7 @@
           "Microsoft.Extensions.Logging": "[8.0.1, )",
           "Microsoft.Extensions.Logging.Console": "[8.0.1, )",
           "RobotVision.Infrastructure": "[1.0.0, )",
+          "RobotVision.Teach": "[1.0.0, )",
           "Serilog": "[4.0.2, )",
           "Serilog.Extensions.Logging": "[8.0.0, )",
           "Serilog.Sinks.File": "[6.0.0, )"
@@ -501,6 +502,7 @@
       "robotvision.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "Basler.Pylon.NET.x64": "[10.3.2.636, )",
           "GigEVision.Net": "[1.0.0, )",
           "Intel.ML.OnnxRuntime.OpenVino": "[1.22.0, )",
           "LDVisionCamera.Net": "[1.0.0-rc.37, )",
@@ -512,6 +514,21 @@
           "YoloDotNet": "[4.2.0, )",
           "YoloDotNet.ExecutionProvider.OpenVino": "[1.1.0, )"
         }
+      },
+      "robotvision.teach": {
+        "type": "Project",
+        "dependencies": {
+          "OpenCvSharp4": "[4.10.0.20240615, )",
+          "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
+          "RobotVision.Core": "[1.0.0, )",
+          "RobotVision.Infrastructure": "[1.0.0, )"
+        }
+      },
+      "Basler.Pylon.NET.x64": {
+        "type": "CentralTransitive",
+        "requested": "[10.3.2.636, )",
+        "resolved": "10.3.2.636",
+        "contentHash": "J8WJjGF85KdoPceERP+DFblPbK2PGAqIxzHRtuC31TGC8QgZSiiMJsNv7sWMnrkysuirtTC0IPJ1jPPTus5/jw=="
       },
       "GigEVision.Net": {
         "type": "CentralTransitive",

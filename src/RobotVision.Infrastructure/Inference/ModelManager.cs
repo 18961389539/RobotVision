@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using RobotVision.Core;
 using RobotVision.Core.Assets;
 using RobotVision.Core.Models;
@@ -117,6 +118,7 @@ public sealed class ModelManager(
             finally
             {
                 Gate.Release();
+                // Gate 故意不 Dispose：ModelSession 可能在卸载后仍排队 Wait，见类注释。
             }
         }
     }
@@ -386,6 +388,8 @@ public sealed class ModelManager(
         return lazy is not null;
     }
 
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "SemaphoreSlim ownership transfers to LoadedModel.")]
     private LoadedModel Load(string path, InferenceTask task)
     {
         if (!File.Exists(path) || new FileInfo(path).Length == 0)

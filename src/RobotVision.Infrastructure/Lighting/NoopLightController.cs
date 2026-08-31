@@ -13,9 +13,10 @@ public sealed class NoopLightController(string id) : ILightController
 
     public LightControllerKind Kind => LightControllerKind.None;
 
-    public void Apply(LightingConfig lighting)
+    public bool Apply(LightingConfig lighting)
     {
-        // 无操作：不点亮任何硬件
+        // 无操作：不点亮任何硬件，视为成功（未接灯的调试兜底）
+        return true;
     }
 
     public void TurnOff()

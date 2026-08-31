@@ -284,7 +284,7 @@ public class CalibrationManagerTests
             DistCoeffs = [0, 0, 0, 0, 0],
         }));
         Assert.Equal(VisionErrorCode.InternalError, ex.ErrorCode);
-        Assert.Contains("9 元素", ex.Message);
+        Assert.Contains("9 元素", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -301,7 +301,7 @@ public class CalibrationManagerTests
             CameraMatrix = [0, 0, 50, 0, 1000, 50, 0, 0, 1],
             DistCoeffs = [],
         }));
-        Assert.Contains("焦距", zeroFocal.Message);
+        Assert.Contains("焦距", zeroFocal.Message, StringComparison.Ordinal);
 
         var infinite = Assert.Throws<VisionException>(() => manager.LoadIntrinsic(new IntrinsicProfile
         {
@@ -311,7 +311,7 @@ public class CalibrationManagerTests
             CameraMatrix = [double.PositiveInfinity, 0, 50, 0, 1000, 50, 0, 0, 1],
             DistCoeffs = [],
         }));
-        Assert.Contains("非有限值", infinite.Message);
+        Assert.Contains("非有限值", infinite.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -339,7 +339,7 @@ public class CalibrationManagerTests
         var ex = Assert.Throws<VisionException>(
             () => manager.PixelToRobot("st1", new PixelPose(10, 20, 0, 1.0), cameraId: "cam1"));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains("不一致", ex.Message);
+        Assert.Contains("不一致", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -420,8 +420,8 @@ public class CalibrationManagerTests
             Rms = 0.8, // > 0.5 可用上限
         });
 
-        Assert.Contains(manager.QualityWarnings, w => w.Contains("外参 st_bad"));
-        Assert.Contains(manager.QualityWarnings, w => w.Contains("旋转中心 st_bad"));
+        Assert.Contains(manager.QualityWarnings, w => w.Contains("外参 st_bad", StringComparison.Ordinal));
+        Assert.Contains(manager.QualityWarnings, w => w.Contains("旋转中心 st_bad", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -444,7 +444,7 @@ public class CalibrationManagerTests
             manager.LoadDirectory(folder);
 
             Assert.Equal(1, manager.ExtrinsicCount); // 档案仍按 Id 生效
-            Assert.Contains(manager.QualityWarnings, w => w.Contains("不一致"));
+            Assert.Contains(manager.QualityWarnings, w => w.Contains("不一致", StringComparison.Ordinal));
         }
         finally
         {
@@ -465,7 +465,7 @@ public class CalibrationManagerTests
 
         var ex = Assert.Throws<VisionException>(() =>
             NinePointExtrinsicCalibrator.Calibrate("st1", "cam1", pixel, robotSame));
-        Assert.Contains("机器人点", ex.Message);
+        Assert.Contains("机器人点", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -527,7 +527,7 @@ public class CalibrationManagerTests
                 MountType = "Flying",
             });
         });
-        Assert.Contains("MountType", ex.Message);
+        Assert.Contains("MountType", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -591,7 +591,7 @@ public class CalibrationManagerTests
 
         var ex = Assert.Throws<VisionException>(
             () => manager.VerifyRotationDirection("st1", rc, points, angles));
-        Assert.Contains("方向自检失败", ex.Message);
+        Assert.Contains("方向自检失败", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -706,7 +706,7 @@ public class CalibrationManagerTests
         var ex = Assert.Throws<VisionException>(() =>
             manager.VerifyClientPose("st1", new TcpClientPose(101.0, 200.0, 45.0))); // 偏 1mm > 0.5
         Assert.Equal(VisionErrorCode.PoseMismatch, ex.ErrorCode);
-        Assert.Contains("拍照位姿不一致", ex.Message);
+        Assert.Contains("拍照位姿不一致", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -862,7 +862,89 @@ public class CalibrationManagerTests
             CoefX = [0, 1, 0, 0, 0, 0], CoefY = [0, 0, 1, 0, 0, 0],
             Width = 100, Height = 100, PointCount = 10,
         });
-        Assert.Contains(manager.QualityWarnings, w => w.Contains("同时存在多项式与外参"));
+        Assert.Contains(manager.QualityWarnings, w => w.Contains("同时存在多项式与外参", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SavePolynomial_WhenExtrinsicExists_Throws_AndDoesNotWrite()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "rv_cal_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var manager = new CalibrationManager();
+            manager.LoadDirectory(folder);
+            manager.LoadExtrinsic(new ExtrinsicProfile
+            {
+                StationId = "st1", CameraId = "cam1", Affine = [1, 0, 0, 0, 1, 0],
+            });
+
+            var ex = Assert.Throws<InvalidOperationException>(() => manager.SavePolynomial(new PolynomialProfile
+            {
+                StationId = "st1", CameraId = "cam1", Order = 2,
+                CoefX = [0, 1, 0, 0, 0, 0], CoefY = [0, 0, 1, 0, 0, 0],
+                Width = 100, Height = 100, PointCount = 10,
+            }));
+            Assert.Contains("已有外参", ex.Message, StringComparison.Ordinal);
+            Assert.Empty(Directory.GetFiles(folder, "*.polynomial.json"));
+        }
+        finally
+        {
+            try { Directory.Delete(folder, true); } catch { /* 测试清理 */ }
+        }
+    }
+
+    [Fact]
+    public void SaveScale_WhenPolynomialExists_Throws()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "rv_cal_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var manager = new CalibrationManager();
+            manager.LoadDirectory(folder);
+            manager.LoadPolynomial(new PolynomialProfile
+            {
+                StationId = "st1", CameraId = "cam1", Order = 2,
+                CoefX = [0, 1, 0, 0, 0, 0], CoefY = [0, 0, 1, 0, 0, 0],
+                Width = 100, Height = 100, PointCount = 10,
+            });
+
+            var ex = Assert.Throws<InvalidOperationException>(() => manager.SaveScale(new ScaleProfile
+            {
+                StationId = "st1", CameraId = "cam1", ScaleX = 0.05, ScaleY = 0.05,
+            }));
+            Assert.Contains("已有多项式", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            try { Directory.Delete(folder, true); } catch { /* 测试清理 */ }
+        }
+    }
+
+    [Fact]
+    public void SavePolynomial_SameKindOverwrite_Allowed()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "rv_cal_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var manager = new CalibrationManager();
+            manager.LoadDirectory(folder);
+            var poly = new PolynomialProfile
+            {
+                StationId = "st1", CameraId = "cam1", Order = 2,
+                CoefX = [0, 1, 0, 0, 0, 0], CoefY = [0, 0, 1, 0, 0, 0],
+                Width = 100, Height = 100, PointCount = 10,
+            };
+            manager.SavePolynomial(poly);
+            manager.SavePolynomial(poly with { PointCount = 12 });
+            Assert.True(File.Exists(Path.Combine(folder, "st1.polynomial.json")));
+        }
+        finally
+        {
+            try { Directory.Delete(folder, true); } catch { /* 测试清理 */ }
+        }
     }
 
     // ---- 第四轮复审修复的回归测试 ----
@@ -880,7 +962,7 @@ public class CalibrationManagerTests
             CameraMatrix = [1000, 0, 5000, 0, 1000, 480, 0, 0, 1],
             DistCoeffs = [],
         }));
-        Assert.Contains("主点越界", ex.Message);
+        Assert.Contains("主点越界", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -916,7 +998,7 @@ public class CalibrationManagerTests
 
         var ex = Assert.Throws<VisionException>(() =>
             NinePointExtrinsicCalibrator.Calibrate("st1", "cam1", clustered, robot, 1280, 960));
-        Assert.Contains("分布过小", ex.Message);
+        Assert.Contains("分布过小", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -949,7 +1031,7 @@ public class CalibrationManagerTests
             LeaveOneOutMax = 2.5, // 但留一误差大：疑似抄错点
         });
 
-        Assert.Contains(manager.QualityWarnings, w => w.Contains("留一最大误差"));
+        Assert.Contains(manager.QualityWarnings, w => w.Contains("留一最大误差", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -976,7 +1058,7 @@ public class CalibrationManagerTests
 
             Assert.Single(errors);
             Assert.Equal("z_dup.extrinsic.json", errors[0].File);
-            Assert.Contains("Id 重复", errors[0].Error);
+            Assert.Contains("Id 重复", errors[0].Error, StringComparison.Ordinal);
             // 生效的是排序在先的 a_dup（CameraId=cam_a），结果确定
             var loaded = manager.ExtrinsicProfiles.Single(p => p.StationId == "st1");
             Assert.Equal("cam_a", loaded.CameraId);

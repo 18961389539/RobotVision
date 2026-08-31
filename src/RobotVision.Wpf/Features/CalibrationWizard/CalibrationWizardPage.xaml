@@ -129,7 +129,7 @@
                 </Grid>
 
                 <TextBlock Text="{Binding Message}" Margin="0,8,0,0" TextWrapping="Wrap"
-                           Foreground="#FFD0D8E4" />
+                           Foreground="{DynamicResource Brush.AppTextSecondaryStrong}" />
             </StackPanel>
         </ui:Card>
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenCvSharp;
@@ -82,7 +83,7 @@ public sealed class SuccessCaptureStore
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "提交成功现场图留存时出错（不影响管线）");
+            SuccessCaptureStoreLog.EnqueueFailed(_log, ex);
         }
     }
 
@@ -93,7 +94,7 @@ public sealed class SuccessCaptureStore
         {
             lock (_sync)
             {
-                var dayDir = Path.Combine(_folder, savedAt.ToString("yyyy-MM-dd"));
+                var dayDir = Path.Combine(_folder, savedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
                 Directory.CreateDirectory(dayDir);
 
                 var baseName = $"{savedAt:yyyyMMdd_HHmmssfff}_{recipe}_OK";
@@ -111,7 +112,7 @@ public sealed class SuccessCaptureStore
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "留存成功现场图时出错（不影响管线）");
+            SuccessCaptureStoreLog.SaveFailed(_log, ex);
         }
         finally
         {
@@ -132,7 +133,7 @@ public sealed class SuccessCaptureStore
                     System.Globalization.DateTimeStyles.None, out var day) && day < cutoff)
             {
                 try { Directory.Delete(dir, recursive: true); }
-                catch (Exception ex) { _log.LogWarning(ex, "清理成功现场图目录失败: {Dir}", dir); }
+                catch (Exception ex) { SuccessCaptureStoreLog.CleanupDirFailed(_log, ex, dir); }
             }
         }
     }

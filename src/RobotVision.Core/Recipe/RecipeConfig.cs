@@ -184,6 +184,18 @@ public sealed class TemplateOptions
     public static bool UsesFeatureTeachRoi(SegmentRefineMethod method) =>
         method is SegmentRefineMethod.Template or SegmentRefineMethod.ShapeMatch;
 
+    /// <summary>宽高比达到该值（或倒数）视为过扁：模板/形状匹配十字会落在特征中心，齿列件可能跳齿。</summary>
+    public const double FlatFeatureRoiAspect = 3;
+
+    /// <summary>特征框过扁（宽÷高 ≥ <see cref="FlatFeatureRoiAspect"/> 或 ≤ 其倒数）。</summary>
+    public static bool IsFlatFeatureRoi(Roi? roi)
+    {
+        if (roi is null || roi.Width < 1e-9 || roi.Height < 1e-9)
+            return false;
+        var aspect = roi.Width / roi.Height;
+        return aspect >= FlatFeatureRoiAspect || aspect <= 1.0 / FlatFeatureRoiAspect;
+    }
+
     /// <summary>
     /// 示教特征框（相对全图 0~1，与检测 ROI 同口径）；null = 示教时裁整个分割目标。
     /// 仅「示教模板」使用：TRIGGER 仍用配方检测 ROI 找目标，匹配在目标转正窗口内滑窗。
@@ -257,28 +269,36 @@ public sealed class TemplateOptions
         return Math.Clamp(teachPeak * factor, 0.40, 0.92);
     }
 
-    public TemplateOptions Clone() => new()
+    public TemplateOptions Clone(bool includeTemplateImage = true)
     {
-        RefineMethod = RefineMethod,
-        TemplateImageBase64 = TemplateImageBase64,
-        Roi = Roi,
-        MatchThreshold = MatchThreshold,
-        RefineRangeDeg = RefineRangeDeg,
-        UseUprightCrop = UseUprightCrop,
-        UseEdgeMatch = UseEdgeMatch,
-        AllowCoarseFallback = AllowCoarseFallback,
-        TeachPeakScore = TeachPeakScore,
-        HousingEdgePolarity = HousingEdgePolarity,
-        TabPolarity = TabPolarity,
-        ExpectedCount = ExpectedCount,
-        RefinePolicyOrder = RefinePolicyOrder is { Count: > 0 } ? [..RefinePolicyOrder] : null,
-        TeachAreaPx = TeachAreaPx,
-        TeachAspect = TeachAspect,
-        AreaRatioLo = AreaRatioLo,
-        AreaRatioHi = AreaRatioHi,
-        AspectRatioLo = AspectRatioLo,
-        AspectRatioHi = AspectRatioHi,
-    };
+        var copy = new TemplateOptions();
+        CopyTo(copy, includeTemplateImage);
+        return copy;
+    }
+
+    /// <summary>把当前字段写入已有实例（取消弹窗恢复快照等场景用）。</summary>
+    public void CopyTo(TemplateOptions target, bool includeTemplateImage = true)
+    {
+        target.RefineMethod = RefineMethod;
+        target.TemplateImageBase64 = includeTemplateImage ? TemplateImageBase64 : "";
+        target.Roi = Roi;
+        target.MatchThreshold = MatchThreshold;
+        target.RefineRangeDeg = RefineRangeDeg;
+        target.UseUprightCrop = UseUprightCrop;
+        target.UseEdgeMatch = UseEdgeMatch;
+        target.AllowCoarseFallback = AllowCoarseFallback;
+        target.TeachPeakScore = TeachPeakScore;
+        target.HousingEdgePolarity = HousingEdgePolarity;
+        target.TabPolarity = TabPolarity;
+        target.ExpectedCount = ExpectedCount;
+        target.RefinePolicyOrder = RefinePolicyOrder is { Count: > 0 } ? [..RefinePolicyOrder] : null;
+        target.TeachAreaPx = TeachAreaPx;
+        target.TeachAspect = TeachAspect;
+        target.AreaRatioLo = AreaRatioLo;
+        target.AreaRatioHi = AreaRatioHi;
+        target.AspectRatioLo = AspectRatioLo;
+        target.AspectRatioHi = AspectRatioHi;
+    }
 }
 
 /// <summary>
@@ -434,7 +454,7 @@ public sealed class RecipeConfig
     public double PixelConfidence { set => Segmentation.PixelConfidence = value; }
 
     /// <summary>深拷贝（Models 列表独立），供编辑器副本与缓存隔离使用。</summary>
-    public RecipeConfig Clone() => new()
+    public RecipeConfig Clone(bool includeTemplateImage = true) => new()
     {
         SchemaVersion = SchemaVersion,
         Description = Description,
@@ -450,7 +470,7 @@ public sealed class RecipeConfig
         Keypoint = Keypoint.Clone(),
         DualModel = DualModel.Clone(),
         Segmentation = Segmentation.Clone(),
-        Template = Template.Clone(),
+        Template = Template.Clone(includeTemplateImage),
         Blob = Blob.Clone(),
         Roi = Roi,
         RotationCompensation = RotationCompensation,

@@ -50,18 +50,10 @@ public static class MaskHousing
         return Math.Clamp(Math.Min(configuredDeg, 5.0), 1.0, 45.0);
     }
 
-    public static HousingFrame Fit(IReadOnlyList<Point2f> contour) =>
-        FromRect(Cv2.MinAreaRect(StripProtrusion(contour)));
-
-    /// <summary>分割外接矩形（不剔凸起）。示教轴比/过门与掩码本身比，不能跟壳体剥离走。</summary>
-    public static HousingFrame FitObb(IReadOnlyList<Point2f> contour) =>
-        FromRect(Cv2.MinAreaRect(ToArray(contour)));
-
-    public static double Aspect(HousingFrame h) =>
-        h.LongLen / Math.Max(1.0, h.ShortLen);
-
-    private static HousingFrame FromRect(RotatedRect rect)
+    public static HousingFrame Fit(IReadOnlyList<Point2f> contour)
     {
+        var pts = CorePoints(contour);
+        var rect = Cv2.MinAreaRect(pts);
         var warp = rect.Size.Width >= rect.Size.Height ? rect.Angle : rect.Angle + 90.0;
         return new HousingFrame(
             rect.Center,
@@ -70,9 +62,24 @@ public static class MaskHousing
             Math.Min(rect.Size.Width, rect.Size.Height));
     }
 
-    /// <summary>壳体核心点（剔凸起后），供直线拟合等与 Fit 同源。</summary>
+    /// <summary>分割轮廓原始最小外接矩形（含凸起），供与壳体框对比。</summary>
+    public static HousingFrame FitObb(IReadOnlyList<Point2f> contour)
+    {
+        var rect = Cv2.MinAreaRect(contour);
+        var warp = rect.Size.Width >= rect.Size.Height ? rect.Angle : rect.Angle + 90.0;
+        return new HousingFrame(
+            rect.Center,
+            warp,
+            Math.Max(rect.Size.Width, rect.Size.Height),
+            Math.Min(rect.Size.Width, rect.Size.Height));
+    }
+
+    public static double Aspect(HousingFrame frame) =>
+        frame.LongLen / Math.Max(1.0, frame.ShortLen);
+
+    /// <summary>壳体核心点：先开运算去掉宽齿列，再按占空/带宽剔窄凸起。</summary>
     public static Point2f[] CorePoints(IReadOnlyList<Point2f> contour) =>
-        StripProtrusion(contour);
+        TryOpenProtrusion(contour) ?? StripProtrusion(contour);
 
     /// <summary>
     /// 沿短轴看长边宽度：壳体带宽、凸起窄。丢掉窄带上的点后再外接矩形。
@@ -87,6 +94,66 @@ public static class MaskHousing
         return StripNarrowBands(contour);
     }
 
+    /// <summary>
+    /// 开运算去掉宽而薄的齿列/凸起（占满长边时带宽法无效）。
+    /// 面积掉太多或几乎没变则放弃，避免把真壳体吃掉或无谓改中心。
+    /// </summary>
+    internal static Point2f[]? TryOpenProtrusion(IReadOnlyList<Point2f> contour)
+    {
+        if (contour.Count < 16)
+            return null;
+
+        var obb = Cv2.MinAreaRect(contour);
+        var shortLen = Math.Min(obb.Size.Width, obb.Size.Height);
+        if (shortLen < 16)
+            return null;
+
+        var k = (int)Math.Round(0.18 * shortLen);
+        if ((k & 1) == 0)
+            k++;
+        k = Math.Clamp(k, 3, Math.Max(3, (int)(0.30 * shortLen) | 1));
+        if (k < 5)
+            return null;
+
+        var bounds = Cv2.BoundingRect(contour);
+        if (bounds.Width < 8 || bounds.Height < 8)
+            return null;
+
+        using var mask = Mat.Zeros(bounds.Height, bounds.Width, MatType.CV_8UC1);
+        var local = new Point[contour.Count];
+        for (var i = 0; i < contour.Count; i++)
+        {
+            local[i] = new Point(
+                (int)Math.Round(contour[i].X - bounds.X),
+                (int)Math.Round(contour[i].Y - bounds.Y));
+        }
+
+        Cv2.FillPoly(mask, new[] { local }, Scalar.All(255));
+        var area0 = Cv2.CountNonZero(mask);
+        if (area0 < 32)
+            return null;
+
+        using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(k, k));
+        using var opened = new Mat();
+        Cv2.MorphologyEx(mask, opened, MorphTypes.Open, kernel);
+        var area1 = Cv2.CountNonZero(opened);
+        var ratio = area1 / (double)area0;
+        if (ratio < 0.50 || ratio > 0.96)
+            return null;
+
+        Cv2.FindContours(opened, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxNone);
+        if (contours.Length == 0)
+            return null;
+        var best = contours.MaxBy(c => Cv2.ContourArea(c))!;
+        if (best.Length < 12)
+            return null;
+
+        var pts = new Point2f[best.Length];
+        for (var i = 0; i < best.Length; i++)
+            pts[i] = new Point2f(best[i].X + bounds.X, best[i].Y + bounds.Y);
+        return pts;
+    }
+
     /// <summary>短轴分带：占空比明显低于壳体的齿列/缺口带丢掉。</summary>
     private static Point2f[]? StripSparseOccupancy(IReadOnlyList<Point2f> contour)
     {
@@ -97,6 +164,8 @@ public static class MaskHousing
         var rect = Cv2.MinAreaRect(contour);
         var theta0 = rect.Size.Width >= rect.Size.Height ? rect.Angle : rect.Angle + 90.0;
         var rad = theta0 * Math.PI / 180.0;
+        var lx = Math.Cos(rad);
+        var ly = Math.Sin(rad);
         var sx = -Math.Sin(rad);
         var sy = Math.Cos(rad);
         var cx = rect.Center.X;
@@ -109,7 +178,7 @@ public static class MaskHousing
         if (bounds.Width < 8 || bounds.Height < 8)
             return null;
 
-        using var mask = new Mat(bounds.Height, bounds.Width, MatType.CV_8UC1, Scalar.All(0));
+        using var mask = Mat.Zeros(bounds.Height, bounds.Width, MatType.CV_8UC1);
         var local = new Point[n];
         for (var i = 0; i < n; i++)
         {
@@ -118,22 +187,27 @@ public static class MaskHousing
                 (int)Math.Round(contour[i].Y - bounds.Y));
         }
 
-        Cv2.DrawContours(mask, new[] { local }, 0, Scalar.All(255), thickness: -1);
+        Cv2.FillPoly(mask, new[] { local }, Scalar.All(255));
+        using var nz = new Mat();
+        Cv2.FindNonZero(mask, nz);
+        if (nz.Empty() || nz.Rows < 32)
+            return null;
+
         const int bins = 16;
         var counts = new int[bins];
         var sMin = -shortLen / 2.0;
         var span = shortLen;
-        var indexer = mask.GetGenericIndexer<byte>();
-        for (var y = 0; y < mask.Rows; y++)
+        if (span < 8)
+            return null;
+
+        for (var i = 0; i < nz.Rows; i++)
         {
-            for (var x = 0; x < mask.Cols; x++)
-            {
-                if (indexer[y, x] == 0)
-                    continue;
-                var s = (x + bounds.X - cx) * sx + (y + bounds.Y - cy) * sy;
-                var b = (int)Math.Clamp(Math.Floor((s - sMin) / span * bins), 0, bins - 1);
-                counts[b]++;
-            }
+            var p = nz.At<Point>(i);
+            var x = p.X + bounds.X;
+            var y = p.Y + bounds.Y;
+            var s = (x - cx) * sx + (y - cy) * sy;
+            var b = (int)Math.Clamp(Math.Floor((s - sMin) / span * bins), 0, bins - 1);
+            counts[b]++;
         }
 
         var maxFill = 0;
@@ -150,24 +224,6 @@ public static class MaskHousing
         if (maxFill < 8 || used < 4)
             return null;
 
-        // 两端 bin 常因栅格切边半空，实心矩形也会被当成齿列。只认内部带的明显空洞。
-        var interiorSparse = 0;
-        var interiorFilled = 0;
-        var interiorMin = int.MaxValue;
-        for (var b = 1; b < bins - 1; b++)
-        {
-            if (counts[b] < 4)
-                continue;
-            interiorFilled++;
-            if (counts[b] < interiorMin)
-                interiorMin = counts[b];
-            if (counts[b] < 0.75 * maxFill)
-                interiorSparse++;
-        }
-
-        if (interiorFilled < 4 || interiorSparse < 2 || interiorMin >= 0.80 * maxFill)
-            return null;
-
         var dense = new bool[bins];
         var denseCount = 0;
         var filled = 0;
@@ -176,7 +232,7 @@ public static class MaskHousing
             if (counts[b] < 4)
                 continue;
             filled++;
-            dense[b] = counts[b] >= 0.88 * maxFill;
+            dense[b] = counts[b] >= 0.62 * maxFill;
             if (dense[b])
                 denseCount++;
         }
@@ -184,46 +240,15 @@ public static class MaskHousing
         if (denseCount < 3 || denseCount == filled)
             return null;
 
-        var bestLo = 0;
-        var bestHi = -1;
-        var bin = 0;
-        while (bin < bins)
-        {
-            if (!dense[bin])
-            {
-                bin++;
-                continue;
-            }
-
-            var j = bin;
-            while (j + 1 < bins && dense[j + 1])
-                j++;
-            if (j - bin > bestHi - bestLo)
-            {
-                bestLo = bin;
-                bestHi = j;
-            }
-
-            bin = j + 1;
-        }
-
-        var run = bestHi - bestLo + 1;
-        if (run < 5 || run < filled * 0.4)
-            return null;
-
-        var keepBand = new bool[bins];
-        for (var b = bestLo; b <= bestHi; b++)
-            keepBand[b] = true;
-
         var keep = new List<Point2f>(n);
-        for (var p = 0; p < n; p++)
+        for (var i = 0; i < n; i++)
         {
-            var dx = contour[p].X - cx;
-            var dy = contour[p].Y - cy;
+            var dx = contour[i].X - cx;
+            var dy = contour[i].Y - cy;
             var s = dx * sx + dy * sy;
             var b = (int)Math.Clamp(Math.Floor((s - sMin) / span * bins), 0, bins - 1);
-            if (keepBand[b])
-                keep.Add(contour[p]);
+            if (dense[b])
+                keep.Add(contour[i]);
         }
 
         if (keep.Count < Math.Max(12, n * 2 / 5))
@@ -298,7 +323,7 @@ public static class MaskHousing
         {
             if (wCount[b] < 2)
                 continue;
-            wide[b] = wMax[b] - wMin[b] >= 0.88 * maxWidth;
+            wide[b] = wMax[b] - wMin[b] >= 0.62 * maxWidth;
             if (wide[b])
                 wideCount++;
         }

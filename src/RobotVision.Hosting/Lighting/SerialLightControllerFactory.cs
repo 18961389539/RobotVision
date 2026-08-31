@@ -22,7 +22,8 @@ public sealed class SerialLightControllerFactory : ILightControllerFactory
             throw new ArgumentException($"串口光源控制器 {config.Id} 需配置 Port（如 COM3）", nameof(config));
 
         var baudRate = config.BaudRate is >= 1200 and <= 921600 ? config.BaudRate : 9600;
-        logger?.LogInformation("光源 {Id}：Serial → {Port} @ {BaudRate}", config.Id, config.Port, baudRate);
+        if (logger is { } log)
+            SerialLightControllerFactoryLog.Registered(log, config.Id, config.Port, baudRate);
         return new SerialLightController(config.Id, config.Port, baudRate, timeoutMs: config.TimeoutMs);
     }
 }

@@ -1,31 +1,29 @@
-using Microsoft.Extensions.DependencyInjection;
 using System.Windows.Controls;
-using RobotVision.WpfHost;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Analysis;
 
 public partial class AnalysisPage : Page
 {
-    public AnalysisPage()
+    private readonly AnalysisViewModel _vm;
+
+    public AnalysisPage(AnalysisViewModel viewModel)
     {
+        _vm = viewModel;
+        ViewModelPageLifetime.Attach(this, viewModel, onUnloading: () => _vm.StopTimer());
         InitializeComponent();
-        DataContext = App.Services.GetRequiredService(typeof(AnalysisViewModel));
         Loaded += (_, _) =>
         {
-            if (DataContext is AnalysisViewModel vm)
-            {
-                _ = vm.RefreshAsync();
-                vm.StartTimer();
-                _ = Dispatcher.InvokeAsync(vm.InvalidatePlots, System.Windows.Threading.DispatcherPriority.Loaded);
-            }
+            _vm.ScheduleRefresh();
+            _vm.StartTimer();
+            _ = Dispatcher.InvokeAsync(_vm.InvalidatePlots, System.Windows.Threading.DispatcherPriority.Loaded);
         };
-        Unloaded += (_, _) => (DataContext as AnalysisViewModel)?.StopTimer();
     }
 
     private void OnAnalysisTabChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!IsLoaded || DataContext is not AnalysisViewModel vm)
+        if (!IsLoaded)
             return;
-        _ = Dispatcher.InvokeAsync(vm.InvalidatePlots, System.Windows.Threading.DispatcherPriority.Render);
+        _ = Dispatcher.InvokeAsync(_vm.InvalidatePlots, System.Windows.Threading.DispatcherPriority.Render);
     }
 }

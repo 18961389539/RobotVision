@@ -1,14 +1,15 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
-using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Hosting;
 using RobotVision.Infrastructure.Calibration;
-using RobotVision.Infrastructure.Cameras;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Calibration;
 
@@ -67,7 +68,7 @@ public partial class ScaleCardItem : ObservableObject
         Height = p.Height,
         ScaleX = p.ScaleX,
         ScaleY = p.ScaleY,
-        CalibratedAt = p.CalibratedAt.ToString("yyyy-MM-dd HH:mm"),
+        CalibratedAt = p.CalibratedAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
     };
 }
 
@@ -75,9 +76,11 @@ public partial class ScaleCardItem : ObservableObject
 /// 以及比例标定（像素→毫米）的手动录入。</summary>
 public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdits
 {
-    private readonly CalibrationManager _calibration;
+    private readonly ICalibrationRuntime _calibration;
     private readonly AppConfig _cfg;
-    private readonly CameraManager _cameras;
+    private readonly ICameraRuntime _cameras;
+    private readonly IDialogService _dialogs;
+    private readonly ILogger<CalibrationViewModel> _log;
 
     public ObservableCollection<IntrinsicRow> Intrinsics { get; } = [];
 
@@ -175,11 +178,18 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
     /// <summary>页面把 NumberBox 未提交的值刷进 ViewModel。见 <see cref="NumberBoxCommit"/>。</summary>
     public Action? FlushPendingEdits { get; set; }
 
-    public CalibrationViewModel(CalibrationManager calibration, AppConfig cfg, CameraManager cameras)
+    public CalibrationViewModel(
+        ICalibrationRuntime calibration,
+        AppConfig cfg,
+        ICameraRuntime cameras,
+        IDialogService dialogs,
+        ILogger<CalibrationViewModel> log)
     {
         _calibration = calibration;
         _cfg = cfg;
         _cameras = cameras;
+        _dialogs = dialogs;
+        _log = log;
         Refresh();
     }
 
@@ -193,8 +203,8 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
                 $"{p.Width}×{p.Height}",
                 FormatNumbers(p.DistCoeffs),
                 $"{p.Rms:0.000} px",
-                QualityText(CalibrationManager.AssessIntrinsic(p)),
-                p.CalibratedAt.ToString("yyyy-MM-dd HH:mm")));
+                QualityText(_calibration.AssessIntrinsic(p)),
+                p.CalibratedAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)));
 
         Extrinsics.Clear();
         foreach (var p in _calibration.ExtrinsicProfiles)
@@ -205,8 +215,8 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
                 FormatNumbers(p.Affine.Length >= 6 ? p.Affine[3..6] : []),
                 $"{p.Rms:0.000}",
                 $"{p.MaxResidual:0.000}",
-                QualityText(CalibrationManager.AssessExtrinsic(p)),
-                p.CalibratedAt.ToString("yyyy-MM-dd HH:mm")));
+                QualityText(_calibration.AssessExtrinsic(p)),
+                p.CalibratedAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)));
 
         RotationCenters.Clear();
         foreach (var p in _calibration.RotationCenterProfiles)
@@ -218,8 +228,8 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
                 $"{p.Rms:0.000} px",
                 p.AxisRatio > 0 ? $"{p.AxisRatio:0.000}" : "-",
                 $"{p.PointCount}",
-                QualityText(CalibrationManager.AssessRotation(p)),
-                p.CalibratedAt.ToString("yyyy-MM-dd HH:mm")));
+                QualityText(_calibration.AssessRotation(p)),
+                p.CalibratedAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)));
 
         Polynomials.Clear();
         foreach (var p in _calibration.PolynomialProfiles)
@@ -233,8 +243,8 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
                     : "机器人系",
                 $"{p.Rms:0.000}",
                 $"{p.MaxResidual:0.000}",
-                QualityText(CalibrationManager.AssessPolynomial(p)),
-                p.CalibratedAt.ToString("yyyy-MM-dd HH:mm")));
+                QualityText(_calibration.AssessPolynomial(p)),
+                p.CalibratedAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)));
 
         Scales.Clear();
         foreach (var p in _calibration.ScaleProfiles)
@@ -479,13 +489,16 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
     [RelayCommand]
     private void ToggleScaleParamPanel() => IsScaleParamPanelVisible = !IsScaleParamPanelVisible;
 
-    /// <summary>将已有档案载入顶部表单，便于修改相机/分辨率等全量字段。</summary>
+    /// <summary>将已有档案载入右侧表单；已选中同一卡片时从卡片就地编辑值刷新表单。</summary>
     [RelayCommand]
     private void LoadScaleToForm(ScaleCardItem? item)
     {
         if (item is null)
             return;
-        ApplyScaleItemToForm(item);
+        if (ReferenceEquals(SelectedScale, item))
+            ApplyScaleItemToForm(item);
+        else
+            SelectedScale = item;
     }
 
     private void ApplyScaleItemToForm(ScaleCardItem item)
@@ -539,18 +552,17 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
         }
     }
 
-    private static bool ConfirmScaleDrift(ScaleProfile profile, ScaleProfile old)
+    private bool ConfirmScaleDrift(ScaleProfile profile, ScaleProfile old)
     {
         var drift = Math.Max(
             Math.Abs(profile.ScaleX / old.ScaleX - 1),
             Math.Abs(profile.ScaleY / old.ScaleY - 1));
         if (drift <= 0.1)
             return true;
-        return MessageBox.Show(
+        return _dialogs.ConfirmYesNo(
             $"工位 {profile.StationId} 已有比例档案，新值与旧值相差 {drift * 100:0.#}%：\n" +
             $"旧 X {old.ScaleX:0.######} / Y {old.ScaleY:0.######} → 新 X {profile.ScaleX:0.######} / Y {profile.ScaleY:0.######}\n\n" +
-            "确认录入无误？", "比例差异提醒",
-            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+            "确认录入无误？", "比例差异提醒");
     }
 
     /// <summary>删除比例档案（卡片内按钮，CommandParameter = StationId）。</summary>
@@ -626,8 +638,7 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
     {
         var path = Path.Combine(_cfg.ResolveCalibrationFolder(), fileName);
         var detail = File.Exists(path) ? "\n文件将从磁盘删除（不可恢复）。" : "";
-        return MessageBox.Show($"删除档案 {fileName}？{detail}", "删除标定档案",
-            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        return _dialogs.ConfirmYesNo($"删除档案 {fileName}？{detail}", "删除标定档案");
     }
 
     [RelayCommand]
@@ -641,5 +652,5 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
     };
 
     private static string FormatNumbers(double[] values) =>
-        string.Join(", ", values.Select(v => v.ToString("0.######")));
+        string.Join(", ", values.Select(v => v.ToString("0.######", CultureInfo.InvariantCulture)));
 }

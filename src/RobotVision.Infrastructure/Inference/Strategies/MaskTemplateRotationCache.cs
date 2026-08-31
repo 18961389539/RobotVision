@@ -1,5 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
+using System.Diagnostics.CodeAnalysis;
 using OpenCvSharp;
 using RobotVision.Core.Recipe;
 
@@ -61,74 +60,28 @@ public sealed record MaskTemplateRotationPack(RotatedTemplateBank Gray, RotatedT
 /// 按配方名缓存旋转模板。加载/保存时 <see cref="Warm"/>，匹配时 <see cref="GetOrCreate"/>。
 /// 进程内默认实例 <see cref="Shared"/> 供策略与配方加载器共用。
 /// </summary>
-public sealed class MaskTemplateRotationCache : IDisposable
+public sealed class MaskTemplateRotationCache : IRecipeTeachCache, IDisposable
 {
     public static MaskTemplateRotationCache Shared { get; } = new();
 
-    private readonly object _gate = new();
-    private readonly Dictionary<string, Cached> _byName = new(StringComparer.OrdinalIgnoreCase);
-    private bool _disposed;
+    private readonly RecipeTeachCache<MaskTemplateRotationPack> _items = new(
+        ShouldCache,
+        RecipeTeachFingerprints.RotationPack,
+        recipe => BuildPack(recipe.Template),
+        DisposePack);
 
-    private sealed class Cached(string fingerprint, MaskTemplateRotationPack pack)
-    {
-        public string Fingerprint { get; } = fingerprint;
-        public MaskTemplateRotationPack Pack { get; } = pack;
-    }
+    /// <summary>配方加载/保存时预热。非模板匹配或未示教则跳过。预热不占用匹配租约。</summary>
+    public void Warm(RecipeConfig recipe) => _items.Warm(recipe);
 
-    /// <summary>配方加载/保存时预热。非模板匹配或未示教则跳过。</summary>
-    public void Warm(RecipeConfig recipe)
-    {
-        if (!ShouldCache(recipe))
-            return;
-        GetOrCreate(recipe);
-    }
+    public void Remove(string recipeName) => _items.Remove(recipeName);
 
-    public void Remove(string recipeName)
-    {
-        lock (_gate)
-        {
-            if (_byName.Remove(recipeName, out var cached))
-                DisposePack(cached.Pack);
-        }
-    }
+    /// <summary>归还 <see cref="GetOrCreate"/> 租约。退役条目在租约归零后才释放 Mat。</summary>
+    public void Release(MaskTemplateRotationPack? pack) => _items.Release(pack);
 
-    /// <summary>命中已有指纹则复用；范围或模板变更则重建。调用方不得 Dispose 返回的 Mat。</summary>
-    public MaskTemplateRotationPack? GetOrCreate(RecipeConfig recipe)
-    {
-        if (!ShouldCache(recipe))
-            return null;
+    /// <summary>命中已有指纹则复用；范围或模板变更则重建。调用方必须 <see cref="Release"/>，不得 Dispose 返回的 Mat。</summary>
+    public MaskTemplateRotationPack? GetOrCreate(RecipeConfig recipe) => _items.GetOrCreate(recipe);
 
-        var fingerprint = Fingerprint(recipe.Template);
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_byName.TryGetValue(recipe.Name, out var cached) && cached.Fingerprint == fingerprint)
-                return cached.Pack;
-
-            if (cached is not null)
-            {
-                _byName.Remove(recipe.Name);
-                DisposePack(cached.Pack);
-            }
-
-            var pack = BuildPack(recipe.Template);
-            _byName[recipe.Name] = new Cached(fingerprint, pack);
-            return pack;
-        }
-    }
-
-    public void Dispose()
-    {
-        lock (_gate)
-        {
-            if (_disposed)
-                return;
-            _disposed = true;
-            foreach (var cached in _byName.Values)
-                DisposePack(cached.Pack);
-            _byName.Clear();
-        }
-    }
+    public void Dispose() => _items.Dispose();
 
     private static bool ShouldCache(RecipeConfig recipe) =>
         recipe.AngleMode == AngleMode.MaskTemplate
@@ -136,12 +89,8 @@ public sealed class MaskTemplateRotationCache : IDisposable
         && recipe.Template.UseUprightCrop
         && !string.IsNullOrEmpty(recipe.Template.TemplateImageBase64);
 
-    private static string Fingerprint(TemplateOptions template)
-    {
-        var hash = SHA256.HashData(Encoding.ASCII.GetBytes(template.TemplateImageBase64));
-        return $"{template.RefineRangeDeg:G17}|{(template.UseEdgeMatch ? 1 : 0)}|{Convert.ToHexString(hash)}";
-    }
-
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "Rotation bank ownership transfers to MaskTemplateRotationPack.")]
     private static MaskTemplateRotationPack BuildPack(TemplateOptions template)
     {
         using var decoded = MaskTemplateMatcher.DecodeTemplatePng(template.TemplateImageBase64);

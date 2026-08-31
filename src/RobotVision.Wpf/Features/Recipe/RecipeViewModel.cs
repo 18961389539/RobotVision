@@ -5,16 +5,13 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
+using OpenCvSharp;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure;
-using RobotVision.Infrastructure.Calibration;
-using RobotVision.Infrastructure.Cameras;
-using RobotVision.Infrastructure.Communication;
-using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Infrastructure.Lighting;
+using RobotVision.Teach;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Recipe;
@@ -35,13 +32,16 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 {
     private readonly RecipeLoader _loader;
     private readonly AppConfig _cfg;
-    private readonly CameraManager _cameras;
-    private readonly ModelManager _models;
-    private readonly CalibrationManager _calibration;
-    private readonly LightingManager _lighting;
-    private readonly AngleStrategyTypeRegistry _angleRegistry;
+    private readonly ICameraRuntime _cameras;
+    private readonly IModelRuntime _models;
+    private readonly ICalibrationRuntime _calibration;
+    private readonly ILightingRuntime _lighting;
+    private readonly IAngleStrategyCatalog _angleRegistry;
     private readonly AssetIntegrityChecker _assets;
+    private readonly IDialogService _dialogs;
+    private readonly IRecipeWindowService _recipeWindows;
     private readonly SqliteResultStore? _sqlite;
+    private readonly ILogger<RecipeViewModel> _log;
     private readonly DispatcherTimer _dirtyTimer;
 
     private RecipeConfig? _baseline;
@@ -50,8 +50,19 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private bool _switching;
     private RecipePrior? _playbookPrior;
     private string _templatePreviewKey = "\0";
+    private string _templateDiagnosticsKey = "\0";
+    private string _teachDiagnosticsHint = "";
+    private bool _hasUnsavedChanges;
+    private string _baselineBodyFingerprint = "";
+    private string _baselineTemplateImage = "";
+    private string? _testTriggerBlockReason;
+    private string _assetPinStatus = AssetPinStatusText.Unpinned;
 
     public Action? FlushPendingEdits { get; set; }
+
+    int IRecipeWorkspace.RecipeTestTimeoutMs => _cfg.RecipeTestTimeoutMs;
+
+    public string? TestTriggerBlockReason => _testTriggerBlockReason;
 
     public RecipeRoiEditor Roi { get; }
     public RecipeLightingEditor Lighting { get; }
@@ -74,6 +85,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     [ObservableProperty]
     private bool _isBusy;
 
+    /// <summary>与 <see cref="IsBusy"/> 相反，供 XAML 禁用列表/输入。</summary>
+    public bool IsIdle => !IsBusy;
+
     [ObservableProperty]
     private bool _isListPanelVisible = true;
 
@@ -92,14 +106,16 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     public RecipeViewModel(
         RecipeLoader loader,
         AppConfig cfg,
-        CameraManager cameras,
-        ModelManager models,
-        CalibrationManager calibration,
+        ICameraRuntime cameras,
+        IModelRuntime models,
+        ICalibrationRuntime calibration,
         VisionService vision,
-        LightingManager lighting,
-        AngleStrategyTypeRegistry angleRegistry,
-        TcpServerManager tcp,
+        ILightingRuntime lighting,
+        IAngleStrategyCatalog angleRegistry,
         AssetIntegrityChecker assets,
+        IDialogService dialogs,
+        IRecipeWindowService recipeWindows,
+        ILogger<RecipeViewModel> log,
         SqliteResultStore? sqlite = null)
     {
         _loader = loader;
@@ -110,14 +126,17 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         _lighting = lighting;
         _angleRegistry = angleRegistry;
         _assets = assets;
+        _dialogs = dialogs;
+        _recipeWindows = recipeWindows;
+        _log = log;
         _sqlite = sqlite;
-        Roi = new RecipeRoiEditor(this, cameras);
+        Roi = new RecipeRoiEditor(this, cameras, calibration, lighting);
         Lighting = new RecipeLightingEditor(this, lighting);
-        Test = new RecipeTestSession(this, vision, cameras, models, calibration, lighting, tcp);
+        Test = new RecipeTestSession(this, vision, cameras, models, calibration, lighting, dialogs);
         Roi.PropertyChanged += OnRoiOrTestChanged;
         Test.PropertyChanged += OnRoiOrTestChanged;
         _dirtyTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-        _dirtyTimer.Tick += (_, _) => NotifyEditorMutated();
+        _dirtyTimer.Tick += (_, _) => RefreshDirtyStateFromTimer();
         Refresh();
     }
 
@@ -145,70 +164,122 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private void OpenSetupWizard()
     {
         this.Commit();
-        var wizard = new RecipeSetupWizardViewModel(this, _cameras, _models, _calibration, _lighting);
-        var window = new RecipeSetupWizardWindow
-        {
-            Owner = Application.Current?.MainWindow,
-            DataContext = wizard,
-        };
-        window.ShowDialog();
-        if (wizard.Applied && wizard.NeedsTeachAfterApply)
-            Test.TeachTemplateCommand.Execute(null);
+        if (_recipeWindows.ShowSetupWizard(this, _cameras, _models, _calibration, _lighting, Roi, Test))
+            Test.ClearAdvice();
+    }
+
+    private bool CanOpenRefineDetails => IsMaskTemplateMode && !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanOpenRefineDetails))]
+    private void OpenRefineDetails()
+    {
+        this.Commit();
+        if (_recipeWindows.ShowRefineDetails(this, out var requestDraw) && requestDraw)
+            RequestTemplateRoiDraw?.Invoke();
     }
 
     public void StartDirtyWatch() => _dirtyTimer.Start();
 
     public void StopDirtyWatch() => _dirtyTimer.Stop();
 
-    public void NotifyEditorMutated()
+    public void NotifyEditorMutated() => NotifyEditorUiCore(refreshHealth: false);
+
+    private void NotifyEditorBindings(bool refreshHealth = true) => NotifyEditorUiCore(refreshHealth, syncChildEditors: true);
+
+    private void NotifyEditorUiCore(bool refreshHealth, bool syncChildEditors = false)
     {
-        OnPropertyChanged(nameof(HasUnsavedChanges));
-        OnPropertyChanged(nameof(UnsavedHint));
-        OnPropertyChanged(nameof(RotationCenterHint));
-        OnPropertyChanged(nameof(MappingHint));
-        OnPropertyChanged(nameof(AngleModeHint));
-        OnPropertyChanged(nameof(IsDualMode));
-        OnPropertyChanged(nameof(IsKeyPointMode));
-        OnPropertyChanged(nameof(IsSegmentationMode));
-        OnPropertyChanged(nameof(IsMaskTemplateMode));
-        OnPropertyChanged(nameof(IsDualBlobMode));
-        OnPropertyChanged(nameof(IsTemplateMethod));
-        OnPropertyChanged(nameof(UsesFeatureTeachRoi));
-        OnPropertyChanged(nameof(NeedsTaughtTemplate));
-        OnPropertyChanged(nameof(ShowRefineRange));
-        OnPropertyChanged(nameof(HasTemplate));
-        OnPropertyChanged(nameof(ShowBlobFixedThreshold));
-        OnPropertyChanged(nameof(ShowDualCropExpand));
-        OnPropertyChanged(nameof(RefineMethodHint));
-        OnPropertyChanged(nameof(PrimaryModel));
-        OnPropertyChanged(nameof(SecondaryModel));
-        OnPropertyChanged(nameof(AssetPinStatus));
-        OnPropertyChanged(nameof(CanTestTrigger));
-        OnPropertyChanged(nameof(TeachPeakHint));
-        OnPropertyChanged(nameof(PolarityLockHint));
-        OnPropertyChanged(nameof(TeachGeometryHint));
-        OnPropertyChanged(nameof(UndirectedEccentricHint));
-        OnPropertyChanged(nameof(OutputOffsetTeachHint));
+        if (syncChildEditors)
+            OnPropertyChanged(nameof(Editor));
+
+        PublishDirtyState();
+        RefreshTestTriggerGate();
+
+        if (syncChildEditors)
+        {
+            Lighting.NotifyFromEditor();
+            Roi.NotifyFromEditor();
+        }
+
+        RaiseEditorUiProperties();
+        RefreshViewerScale();
         RefreshTemplatePreview();
+        RefreshAssetPinStatus();
+        NotifyEditorCommands();
+
+        if (refreshHealth)
+            RefreshRecipeHealth();
+    }
+
+    private void RaiseEditorUiProperties()
+    {
+        foreach (var name in RecipeEditorUiRefresh.PropertyNames)
+            OnPropertyChanged(name);
+    }
+
+    private void NotifyEditorCommands()
+    {
         Test.RefreshAdviceCanApply();
         Test.NotifyCanExecuteChanged();
         RecordTeachOutputCommand.NotifyCanExecuteChanged();
         SuggestOutputOffsetCommand.NotifyCanExecuteChanged();
+        OpenSetupWizardCommand.NotifyCanExecuteChanged();
+        OpenRefineDetailsCommand.NotifyCanExecuteChanged();
     }
+
+    void IRecipeWorkspace.RefreshEditorBindings() => NotifyEditorBindings(refreshHealth: false);
 
     void IRecipeWorkspace.CommitEdits() => this.Commit();
 
     void IRecipeWorkspace.NotifyDirty()
     {
+        PublishDirtyState();
+        OnPropertyChanged(nameof(TemplateStatusText));
+        OnPropertyChanged(nameof(FeatureGrabOriginHint));
+        OnPropertyChanged(nameof(RefineDetailsSummary));
+        RefreshTestTriggerGate();
+    }
+
+    private void PublishDirtyState()
+    {
+        var dirty = EvaluateHasUnsavedChanges();
+        if (_hasUnsavedChanges == dirty)
+            return;
+        _hasUnsavedChanges = dirty;
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
         OnPropertyChanged(nameof(TemplateStatusText));
+        OnPropertyChanged(nameof(RefineDetailsSummary));
+        RefreshTestTriggerGate();
     }
 
-    void IRecipeWorkspace.RefreshEditorBindings()
+    private void ResetDirtyCache()
     {
-        OnPropertyChanged(nameof(Editor));
-        NotifyEditorMutated();
+        RefreshBaselineFingerprints();
+        _hasUnsavedChanges = EvaluateHasUnsavedChanges();
+    }
+
+    private void RefreshBaselineFingerprints()
+    {
+        if (_baseline is null)
+        {
+            _baselineBodyFingerprint = "";
+            _baselineTemplateImage = "";
+            return;
+        }
+
+        _baselineTemplateImage = _baseline.Template.TemplateImageBase64 ?? "";
+        _baselineBodyFingerprint = RecipeCompare.BodyFingerprint(_baseline);
+    }
+
+    private void RefreshDirtyStateFromTimer() => PublishDirtyState();
+
+    private bool EvaluateHasUnsavedChanges()
+    {
+        if (_baseline is null)
+            return false;
+        if (!string.Equals(Editor.Template.TemplateImageBase64, _baselineTemplateImage, StringComparison.Ordinal))
+            return true;
+        return RecipeCompare.BodyFingerprint(Editor) != _baselineBodyFingerprint;
     }
 
     void IRecipeWorkspace.OnTestStarting() => ShowTestImage = true;
@@ -300,7 +371,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     {
         AngleMode.MaskMinAreaRect => "最小外接矩形角度为 [0,180)，无头尾。与偏心工具同时保存会被拒绝。",
         AngleMode.DualCenterLine => "默认全局就近配对，多目标间距接近时可能配错；开「窗口配对」后 B 只在 A 外扩窗口内检测，多目标不配错",
-        AngleMode.MaskTemplate => "分割给粗框，精修过门才输出有向角。失败默认 1019。示教会写模板/极性到编辑器；测试走当前下拉（未点采用推荐则不变）。保存后才上产线。",
+        AngleMode.MaskTemplate => "分割给粗框，精修过门才输出有向角。失败默认 1019。方法推荐与赛马见配方向导；示教仅写极性/阈值。保存后才上产线。",
         AngleMode.DualBlobCenterLine => "主BLOB质心定位、主→次质心定向（有方向）；次BLOB缺失该目标不输出；无需模型",
         _ => "",
     };
@@ -317,10 +388,10 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
                 SegmentRefineMethod.CaliperTab =>
                     "卡尺放在壳体长边上（短轴中心取两线中线）；黄线指向暗凸起一侧。配方测试会叠加探针。失败默认 1019。切到此方法后抓取原点与模板中心不同，需重新对示教。",
                 SegmentRefineMethod.Sift =>
-                    "SIFT 把示教模板配到当前分割框内的原图，相似变换给出 XY 和有向角。需先示教整颗目标（不要只裁局部特征框）。弱纹理或外观变化大会配不上，失败默认 1019。切到此方法后抓取原点与卡尺中心不同，需重新对示教。",
+                    "SIFT 把示教模板配到当前分割框内的原图，相似变换给出 XY 和有向角。需先示教整颗目标（不要只裁局部特征框）。试触发/监控会叠青色内点、红色外点。弱纹理或外观变化大会配不上，失败默认 1019。切到此方法后抓取原点与卡尺中心不同，需重新对示教。",
                 SegmentRefineMethod.ShapeMatch =>
-                    "形状匹配把示教图的 Canny 轮廓配到当前分割目标的转正窗。可示教整颗，或与模板一样框选局部轮廓（齿/缺口）。切到此方法后抓取原点与卡尺中心不同，需重新对示教。",
-                _ => "模板匹配：十字是 NCC 匹配峰。结果图只画金框「匹配」（随峰）；橙框「特征」仅示教预览或框选时出现。转正裁剪窗默认开启。匹配失败默认 1019。",
+                    "形状匹配把示教图的 Canny 轮廓配到当前分割目标的转正窗。可示教整颗，或与模板一样框选局部轮廓（齿/缺口）。试触发/监控会叠青色命中点、红色未命中点。切到此方法后抓取原点与卡尺中心不同，需重新对示教。",
+                _ => "模板匹配：十字是 NCC 匹配峰（特征中心），不是壳体中心。结果图金框「匹配」随峰；橙框「特征」是示教裁剪窗。转正裁剪窗默认开启。匹配失败默认 1019。",
             };
 
     public IEnumerable<RecipeListItem> VisibleRecipes =>
@@ -330,10 +401,32 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
                 r.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
                 (r.Description?.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ?? false));
 
-    public bool HasUnsavedChanges =>
-        _baseline is not null && !RecipeCompare.Same(Editor, _baseline);
+    /// <summary>当前 <see cref="Selected"/> 是否出现在 <see cref="VisibleRecipes"/> 中（过滤后列表无高亮时为 false）。</summary>
+    public bool IsSelectedVisibleInFilter =>
+        Selected is not null && IsRecipeVisibleInFilter(Selected);
 
-    public string UnsavedHint => HasUnsavedChanges
+    public string SelectedFilterHint =>
+        Selected is not null && !string.IsNullOrWhiteSpace(SearchText) && !IsSelectedVisibleInFilter
+            ? $"当前编辑「{Selected.Name}」不在过滤结果中，列表未高亮；清空搜索或匹配到该项后可删除"
+            : "";
+
+    private bool IsRecipeVisibleInFilter(RecipeListItem item)
+    {
+        if (string.IsNullOrWhiteSpace(SearchText))
+            return true;
+        foreach (var visible in VisibleRecipes)
+        {
+            if (ReferenceEquals(visible, item))
+                return true;
+            if (string.Equals(visible.Name, item.Name, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    public bool HasUnsavedChanges => _hasUnsavedChanges;
+
+    public string UnsavedHint => _hasUnsavedChanges
         ? "有未保存的修改：测试触发已用当前编辑器，保存后才上产线；切换/刷新将丢弃"
         : "";
 
@@ -344,17 +437,40 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     public string TemplateStatusText =>
         !HasTemplate
             ? "未示教模板：点击「示教模板」自动生成（画面需有目标）"
-            : HasUnsavedChanges
+            : _hasUnsavedChanges
                 ? $"编辑器已有模板 {TemplatePreviewSize}（未保存不上产线）"
                 : $"已示教模板 {TemplatePreviewSize}";
 
     private string TemplatePreviewSize =>
         TemplatePreview is { } img ? $"{(int)img.Width}×{(int)img.Height}px" : "";
 
-    public bool CanTestTrigger =>
-        !string.IsNullOrWhiteSpace(Editor.CameraId) &&
-        (Editor.AngleMode == AngleMode.DualBlobCenterLine ||
-         (Editor.Models.Count > 0 && !string.IsNullOrWhiteSpace(Editor.Models[0])));
+    public bool CanTestTrigger => _testTriggerBlockReason is null;
+
+    public bool ShowTestTriggerBlockHint => !IsBusy && _testTriggerBlockReason is not null;
+
+    public string TestTriggerBlockHint =>
+        _testTriggerBlockReason is { } reason ? $"无法测试触发：{reason}" : "";
+
+    public string TestTriggerButtonToolTip =>
+        IsBusy
+            ? "测试进行中…"
+            : _testTriggerBlockReason is { } reason
+                ? $"无法测试触发：{reason}"
+                : "用当前编辑器（含未保存修改）跑一次完整链路，不写产量。保存后才上产线";
+
+    private void RefreshTestTriggerGate()
+    {
+        var reason = RecipeEditorValidator.TryValidateForTrigger(Editor, _loader);
+        if (_testTriggerBlockReason == reason)
+            return;
+        _testTriggerBlockReason = reason;
+        OnPropertyChanged(nameof(TestTriggerBlockReason));
+        OnPropertyChanged(nameof(CanTestTrigger));
+        OnPropertyChanged(nameof(ShowTestTriggerBlockHint));
+        OnPropertyChanged(nameof(TestTriggerBlockHint));
+        OnPropertyChanged(nameof(TestTriggerButtonToolTip));
+        Test.NotifyCanExecuteChanged();
+    }
 
     public IReadOnlyList<EnumItem<AngleMode>> AngleModeOptions =>
         _angleRegistry.Factories
@@ -421,10 +537,85 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     public bool ShowRefineRange =>
         Editor.Template.RefineMethod is SegmentRefineMethod.Template or SegmentRefineMethod.ShapeMatch;
 
+    public string RefineDetailsSummary
+    {
+        get
+        {
+            if (!IsMaskTemplateMode)
+                return "";
+            var t = Editor.Template;
+            var parts = new List<string>();
+            if (NeedsTaughtTemplate)
+                parts.Add(HasTemplate ? $"已示教 {TemplatePreviewSize}" : "未示教");
+            if (t.ExpectedCount > 0)
+                parts.Add($"期望 {t.ExpectedCount} 件");
+            switch (t.RefineMethod)
+            {
+                case SegmentRefineMethod.Template:
+                    parts.Add($"阈值 {t.MatchThreshold:0.00}");
+                    parts.Add($"±{t.RefineRangeDeg:0}°");
+                    if (t.UseEdgeMatch)
+                        parts.Add("边缘定角");
+                    if (!t.UseUprightCrop)
+                        parts.Add("不转正");
+                    break;
+                case SegmentRefineMethod.ShapeMatch:
+                    parts.Add($"阈值 {t.MatchThreshold:0.00}");
+                    parts.Add($"±{t.RefineRangeDeg:0}°");
+                    break;
+                case SegmentRefineMethod.Sift:
+                    parts.Add($"阈值 {t.MatchThreshold:0.00}");
+                    break;
+            }
+            AppendPolaritySummary(parts, t);
+            if (t.AllowCoarseFallback)
+                parts.Add("可回退粗角");
+            if (t.Roi is not null && TemplateOptions.UsesFeatureTeachRoi(t.RefineMethod))
+            {
+                parts.Add(t.RefineMethod == SegmentRefineMethod.Template
+                    ? "十字=特征中心"
+                    : "特征框示教");
+                if (TemplateOptions.IsFlatFeatureRoi(t.Roi))
+                    parts.Add("扁框易跳齿");
+            }
+            if (parts.Count == 0)
+                return "点击「详情…」配置精修参数";
+            return string.Join(" · ", parts) + " · 详情…";
+        }
+    }
+
+    private static void AppendPolaritySummary(List<string> parts, TemplateOptions t)
+    {
+        if (t.RefineMethod is not (SegmentRefineMethod.Template or SegmentRefineMethod.CaliperTab))
+            return;
+        var edge = t.HousingEdgePolarity switch
+        {
+            HousingEdgePolarity.BrightToDark => "亮场边",
+            HousingEdgePolarity.DarkToBright => "暗场边",
+            _ => "",
+        };
+        if (edge.Length > 0)
+            parts.Add(edge);
+        if (t.RefineMethod == SegmentRefineMethod.CaliperTab)
+        {
+            var tab = t.TabPolarity switch
+            {
+                TabPolarityLock.PlusShortAxis => "凸起+短轴",
+                TabPolarityLock.MinusShortAxis => "凸起−短轴",
+                _ => "",
+            };
+            if (tab.Length > 0)
+                parts.Add(tab);
+        }
+    }
+
+    /// <summary>详情窗关闭后由配方页接管，在结果图上框选特征 ROI。</summary>
+    public Action? RequestTemplateRoiDraw { get; set; }
+
     public string TeachGeometryHint =>
         Editor.Template.TeachAreaPx > 1
             ? $"示教几何：面积 {Editor.Template.TeachAreaPx:0} px²，轴比 {Editor.Template.TeachAspect:0.00}（面积 {Editor.Template.AreaRatioLo:0.00}~{Editor.Template.AreaRatioHi:0.00} 倍、轴比 {Editor.Template.AspectRatioLo:0.00}~{Editor.Template.AspectRatioHi:0.00} 倍过门）"
-            : "未记示教几何：示教模板或采用推荐后写入面积/轴比窗口；期望件数 0 表示不检查件数。";
+            : "未记示教几何：配方向导或示教模板后写入面积/轴比窗口；期望件数 0 表示不检查件数。";
 
     public string OutputOffsetTeachHint =>
         Editor.OutputOffset.HasTeachOutput
@@ -438,6 +629,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         Editor.Template.TeachPeakScore >= 0.3
             ? $"示教峰 NCC {Editor.Template.TeachPeakScore:0.00} → 建议匹配阈值 {TemplateOptions.MatchThresholdFromTeachPeak(Editor.Template.TeachPeakScore):0.00}"
             : "";
+
+    public string TeachDiagnosticsHint => _teachDiagnosticsHint;
 
     public string PolarityLockHint
     {
@@ -466,52 +659,116 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         }
     }
 
-    public bool ShowDualCropExpand => IsDualMode && Editor.DualModel.CropWindowPairing;
-
-    public void NotifyAngleModeChanged() => NotifyEditorMutated();
-
-    public string AssetPinStatus
+    public string FeatureGrabOriginHint
     {
         get
         {
-            var pinnedModels = Editor.ModelSha256.Count(h => !string.IsNullOrWhiteSpace(h));
-            var pinnedStation = !string.IsNullOrWhiteSpace(Editor.StationSha256);
-            if (pinnedModels == 0 && !pinnedStation)
-                return "未钉扎：拷错同名 ONNX 或覆盖标定档案时不会被拦截。验证通过后请钉死哈希。";
-
-            try
-            {
-                var (hashes, station) = _assets.Snapshot(Editor);
-                var modelOk = true;
-                for (var i = 0; i < Editor.ModelSha256.Count; i++)
-                {
-                    var pin = Editor.ModelSha256[i];
-                    if (string.IsNullOrWhiteSpace(pin))
-                        continue;
-                    var actual = i < hashes.Count ? hashes[i] : "";
-                    if (!RobotVision.Core.Assets.FileSha256.EqualsHex(pin, actual))
-                    {
-                        modelOk = false;
-                        break;
-                    }
-                }
-
-                var stationOk = !pinnedStation ||
-                    RobotVision.Core.Assets.FileSha256.EqualsHex(Editor.StationSha256, station);
-                if (modelOk && stationOk)
-                    return pinnedStation
-                        ? $"已钉扎 {pinnedModels} 个模型 + 工位，与当前文件一致"
-                        : $"已钉扎 {pinnedModels} 个模型，与当前文件一致";
-                return "钉扎与当前文件不一致：TRIGGER 将返回 1017。请核对文件或重新钉扎后保存。";
-            }
-            catch (Exception ex)
-            {
-                return $"无法核对当前哈希：{ex.Message}";
-            }
+            if (!IsMaskTemplateMode || !UsesFeatureTeachRoi || Editor.Template.Roi is null)
+                return "";
+            var flat = TemplateOptions.IsFlatFeatureRoi(Editor.Template.Roi)
+                ? "当前框过扁，齿列件可能跳齿，不要用扁框当 XY。"
+                : "";
+            var core = Editor.Template.RefineMethod == SegmentRefineMethod.Template
+                ? "模板匹配十字是特征中心（NCC 峰），不是壳体中心。"
+                : "特征框决定示教裁哪块；形状匹配十字也是该块中心，不是壳体中心。";
+            return string.IsNullOrEmpty(flat) ? core : core + " " + flat;
         }
     }
 
-    [RelayCommand]
+    public bool ShowDualCropExpand => IsDualMode && Editor.DualModel.CropWindowPairing;
+
+    public AngleMode EditorAngleMode
+    {
+        get => Editor.AngleMode;
+        set
+        {
+            if (Editor.AngleMode == value)
+                return;
+            Editor.AngleMode = value;
+            Test.ClearAdvice();
+            NotifyEditorMutated();
+        }
+    }
+
+    public SegmentRefineMethod EditorRefineMethod
+    {
+        get => Editor.Template.RefineMethod;
+        set
+        {
+            if (Editor.Template.RefineMethod == value)
+                return;
+            Editor.Template.RefineMethod = value;
+            Test.ClearAdvice();
+            NotifyEditorMutated();
+        }
+    }
+
+    public bool EditorCropWindowPairing
+    {
+        get => Editor.DualModel.CropWindowPairing;
+        set
+        {
+            if (Editor.DualModel.CropWindowPairing == value)
+                return;
+            Editor.DualModel.CropWindowPairing = value;
+            NotifyEditorMutated();
+        }
+    }
+
+    public bool EditorBlobUseOtsu
+    {
+        get => Editor.Blob.UseOtsu;
+        set
+        {
+            if (Editor.Blob.UseOtsu == value)
+                return;
+            Editor.Blob.UseOtsu = value;
+            NotifyEditorMutated();
+        }
+    }
+
+    public string? EditorStationId
+    {
+        get => Editor.StationId;
+        set
+        {
+            if (string.Equals(Editor.StationId, value, StringComparison.Ordinal))
+                return;
+            Editor.StationId = value;
+            RefreshViewerScale();
+            NotifyEditorMutated();
+        }
+    }
+
+    public double ViewerPixelSize { get; private set; } = 1.0;
+
+    public string ViewerPhysicalUnit { get; private set; } = "px";
+
+    private void RefreshViewerScale()
+    {
+        var scale = _calibration.GetScale(Editor.StationId);
+        ViewerPixelSize = scale?.ScaleX ?? 1.0;
+        ViewerPhysicalUnit = scale is null ? "px" : "mm";
+        OnPropertyChanged(nameof(ViewerPixelSize));
+        OnPropertyChanged(nameof(ViewerPhysicalUnit));
+    }
+
+    public void NotifyAngleModeChanged() => NotifyEditorMutated();
+
+    public string AssetPinStatus => _assetPinStatus;
+
+    private void RefreshAssetPinStatus()
+    {
+        var next = AssetPinStatusText.Compute(_assets, Editor);
+        if (string.Equals(_assetPinStatus, next, StringComparison.Ordinal))
+            return;
+        _assetPinStatus = next;
+        OnPropertyChanged(nameof(AssetPinStatus));
+    }
+
+    private bool CanRunWhenIdle => !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
     public void Refresh() => Refresh(preferName: null, reloadEditor: true);
 
     public void Refresh(string? preferName, bool reloadEditor, bool ignoreUnsaved = false)
@@ -535,75 +792,114 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             : Recipes.FirstOrDefault(r => string.Equals(r.Name, keepName, StringComparison.OrdinalIgnoreCase));
         _switching = false;
         _lastConfirmed = Selected;
-        if (reloadEditor && Selected is not null)
-            LoadIntoEditor(Selected.Name);
+        if (reloadEditor)
+        {
+            if (Selected is not null)
+                LoadIntoEditor(Selected.Name);
+            else if (Recipes.Count == 0)
+                ResetEditorForEmptyList();
+        }
         Message = $"共 {Recipes.Count} 个配方";
         OnPropertyChanged(nameof(VisibleRecipes));
-        OnPropertyChanged(nameof(CanTestTrigger));
-        Test.NotifyCanExecuteChanged();
+        RefreshTestTriggerGate();
+        RefreshAssetPinStatus();
+        DeleteCommand.NotifyCanExecuteChanged();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
     private void New()
     {
         if (HasUnsavedChanges && !ConfirmDiscard("新建配方"))
             return;
+        ClearListSelectionForDraft();
         IsNew = true;
         _originalName = "";
         Editor = new RecipeConfig
         {
             Name = "",
-            CameraId = CameraIds.FirstOrDefault() ?? "",
+            CameraId = CameraIds.Count > 0 ? CameraIds[0] : "",
             Models = [""],
         };
         _baseline = Editor.Clone();
+        ResetDirtyCache();
         NotifyEditorBindings();
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
-        OnPropertyChanged(nameof(CanTestTrigger));
+        RefreshTestTriggerGate();
         Test.ClearAdvice();
         Test.NotifyCanExecuteChanged();
+        DeleteCommand.NotifyCanExecuteChanged();
         RecipeHealthHint = "";
         Message = "新建配方：填写名称与参数后保存";
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
     private void Copy()
     {
-        if (HasUnsavedChanges && !ConfirmDiscard("复制配方"))
+        if (HasUnsavedChanges && !ConfirmCopyCurrentEditor())
             return;
         var source = Editor;
         var copy = source.Clone();
         copy.Name = source.Name.Length > 0 ? source.Name + "_copy" : "";
+        copy.SerialNumber = 0;
+        copy.OutputOffset = new();
+        ClearListSelectionForDraft();
         IsNew = true;
         _originalName = "";
         Editor = copy;
         _baseline = copy.Clone();
+        ResetDirtyCache();
         NotifyEditorBindings();
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
-        OnPropertyChanged(nameof(CanTestTrigger));
+        RefreshTestTriggerGate();
         Test.ClearAdvice();
         Test.NotifyCanExecuteChanged();
+        DeleteCommand.NotifyCanExecuteChanged();
         RecipeHealthHint = "";
-        Message = $"已复制 {source.Name}：改名后保存即新配方";
+        Message = source.Name.Length > 0
+            ? $"已复制 {source.Name}：已清序列号与输出补偿，改名后保存即新配方"
+            : "已复制为新配方：已清序列号与输出补偿，填写名称后保存";
     }
 
-    [RelayCommand]
+    /// <summary>复制保留当前编辑器（含未保存），不丢弃、不回读磁盘。</summary>
+    private bool ConfirmCopyCurrentEditor() =>
+        _dialogs.ConfirmYesNo(
+            "将把当前编辑器（含未保存修改）复制为新配方，原配方磁盘文件不变。新配方会清掉序列号和输出补偿。继续？",
+            "复制为新配方",
+            questionIcon: true);
+
+    /// <summary>新建/复制进入草稿：列表不高亮任何已存配方，避免删除误伤源文件。</summary>
+    private void ClearListSelectionForDraft()
+    {
+        _switching = true;
+        Selected = null;
+        _lastConfirmed = null;
+        _switching = false;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
     private void Save()
     {
         try
         {
             this.Commit();
 
+            var saveError = RecipeEditorValidator.TryValidateForSave(Editor, _loader);
+            if (saveError is not null)
+            {
+                ShowSaveBlocked(saveError);
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(Editor.Name))
             {
-                Message = "保存失败：请先填写配方名称";
+                ShowSaveBlocked("请先填写配方名称");
                 return;
             }
             if (!RecipeLoader.IsValidRecipeName(Editor.Name))
             {
-                Message = "保存失败：名称只允许字母、数字、下划线、中划线（长度 ≤ 64）";
+                ShowSaveBlocked("名称只允许字母、数字、下划线、中划线（长度 ≤ 64）");
                 return;
             }
 
@@ -612,23 +908,26 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             var isRename = IsNew ||
                 !string.Equals(Editor.Name, previousName, StringComparison.OrdinalIgnoreCase);
             if (isRename && _loader.FileExists(Editor.Name) &&
-                MessageBox.Show($"配方 {Editor.Name} 已存在，保存将覆盖现有内容。继续？",
-                    "覆盖确认", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                !_dialogs.ConfirmYesNo($"配方 {Editor.Name} 已存在，保存将覆盖现有内容。继续？",
+                    "覆盖确认"))
                 return;
 
-            var models = new[] { PrimaryModel, SecondaryModel }
-                .Where(m => !string.IsNullOrWhiteSpace(m))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            Editor.Models = models;
+            var modelError = RecipeModelSlots.TryCommitUiModels(Editor, PrimaryModel, SecondaryModel);
+            if (modelError is not null)
+            {
+                ShowSaveBlocked(modelError);
+                return;
+            }
 
             if (Editor.Lighting is not null && string.IsNullOrWhiteSpace(Editor.LightControllerId))
             {
-                Message = "保存失败：已启用光源但未选择光源控制器（appsettings LightControllers 未配置时先添加 None 类型）";
+                ShowSaveBlocked("已启用光源但未选择光源控制器（appsettings LightControllers 未配置时先添加 None 类型）");
                 return;
             }
 
             if (!ConfirmGrabOriginIfNeeded("保存"))
+                return;
+            if (!ConfirmFlatFeatureRoiIfNeeded("保存"))
                 return;
 
             _loader.Save(Editor, IsNew ? null : previousName);
@@ -641,43 +940,50 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             IsNew = false;
             _originalName = Editor.Name;
             _baseline = Editor.Clone();
+            ResetDirtyCache();
             OnPropertyChanged(nameof(HasUnsavedChanges));
             OnPropertyChanged(nameof(UnsavedHint));
             Refresh(Editor.Name, reloadEditor: false, ignoreUnsaved: true);
+            DeleteCommand.NotifyCanExecuteChanged();
             RefreshRecipeHealth();
             Message = savedMessage;
         }
         catch (Exception ex)
         {
-            Message = $"保存失败：{ex.Message}";
+            ShowSaveBlocked(ex.Message);
         }
     }
 
-    [RelayCommand]
+    private void ShowSaveBlocked(string reason)
+    {
+        Message = $"保存失败：{reason}";
+        _dialogs.ShowWarning(reason, "无法保存");
+    }
+
+    private bool CanDelete =>
+        Selected is not null && !IsNew && !IsBusy && IsSelectedVisibleInFilter;
+
+    [RelayCommand(CanExecute = nameof(CanDelete))]
     private void Delete()
     {
-        if (Selected is null)
+        if (Selected is null || IsNew)
             return;
 
         var prompt = HasUnsavedChanges && string.Equals(Selected.Name, _originalName, StringComparison.OrdinalIgnoreCase)
             ? $"配方 {Selected.Name} 有未保存的修改，删除将一并丢弃。确定删除？（不可恢复）"
             : $"确定删除配方 {Selected.Name}？（不可恢复）";
 
-        if (MessageBox.Show(prompt, "删除配方",
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (!_dialogs.ConfirmYesNo(prompt, "删除配方"))
             return;
 
+        var deletedName = Selected.Name;
         try
         {
-            _loader.Delete(Selected.Name);
-            Message = $"已删除 {Selected.Name}";
+            _loader.Delete(deletedName);
+            Message = $"已删除 {deletedName}";
             _lastConfirmed = null;
-            Refresh();
-            if (Selected is { } item)
-            {
-                LoadIntoEditor(item.Name);
-                _lastConfirmed = Selected;
-            }
+            Refresh(preferName: string.Empty, reloadEditor: true, ignoreUnsaved: true);
+            DeleteCommand.NotifyCanExecuteChanged();
         }
         catch (Exception ex)
         {
@@ -685,11 +991,33 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         }
     }
 
+    private void ResetEditorForEmptyList()
+    {
+        ClearListSelectionForDraft();
+        IsNew = true;
+        _originalName = "";
+        Editor = new RecipeConfig
+        {
+            Name = "",
+            CameraId = CameraIds.Count > 0 ? CameraIds[0] : "",
+            Models = [""],
+        };
+        _baseline = Editor.Clone();
+        ResetDirtyCache();
+        NotifyEditorBindings();
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(UnsavedHint));
+        RefreshTestTriggerGate();
+        Test.ClearAdvice();
+        Test.NotifyCanExecuteChanged();
+        RecipeHealthHint = "";
+    }
+
     [RelayCommand]
     private void OpenFolder() => Explorer.OpenFolder(_loader.Folder);
 
     private bool CanRecordTeachOutput =>
-        Test.LastPreview is { Ok: true, Poses.Count: > 0 };
+        !IsBusy && Test.LastPreview is { Ok: true, Poses.Count: > 0 };
 
     [RelayCommand(CanExecute = nameof(CanRecordTeachOutput))]
     private void RecordTeachOutput()
@@ -697,6 +1025,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         if (Test.LastPreview is not { Ok: true, Poses.Count: > 0 } preview)
             return;
         if (!ConfirmGrabOriginIfNeeded("记下示教输出"))
+            return;
+        if (!ConfirmFlatFeatureRoiIfNeeded("记下示教输出"))
             return;
         var p = preview.Poses[0];
         Editor.OutputOffset.TeachX = p.X;
@@ -707,7 +1037,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     }
 
     private bool CanSuggestOutputOffset =>
-        _sqlite is not null && Editor.OutputOffset.HasTeachOutput;
+        !IsBusy && _sqlite is not null && Editor.OutputOffset.HasTeachOutput;
 
     [RelayCommand(CanExecute = nameof(CanSuggestOutputOffset))]
     private void SuggestOutputOffset()
@@ -755,7 +1085,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
     private void PinAssets()
     {
         this.Commit();
@@ -776,7 +1106,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
     private void ClearAssetPins()
     {
         Editor.ModelSha256 = [];
@@ -790,14 +1120,23 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         _dirtyTimer.Stop();
         Roi.PropertyChanged -= OnRoiOrTestChanged;
         Test.PropertyChanged -= OnRoiOrTestChanged;
+        StopDirtyWatch();
+        Test.Dispose();
+        Roi.PreviewImage = null;
     }
 
-    partial void OnSearchTextChanged(string value) => OnPropertyChanged(nameof(VisibleRecipes));
+    partial void OnSearchTextChanged(string value)
+    {
+        OnPropertyChanged(nameof(VisibleRecipes));
+        OnPropertyChanged(nameof(IsSelectedVisibleInFilter));
+        OnPropertyChanged(nameof(SelectedFilterHint));
+        DeleteCommand.NotifyCanExecuteChanged();
+    }
 
     partial void OnEditorChanged(RecipeConfig value)
     {
         NotifyEditorMutated();
-        Roi.ClearReferenceFrame();
+        Roi.MaybeClearReferenceFrameForCamera(value.CameraId);
     }
 
     partial void OnShowTestImageChanged(bool value)
@@ -808,8 +1147,23 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     partial void OnIsBusyChanged(bool value)
     {
+        OnPropertyChanged(nameof(IsIdle));
         Test.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(ShowTestTriggerBlockHint));
+        OnPropertyChanged(nameof(TestTriggerBlockHint));
+        OnPropertyChanged(nameof(TestTriggerButtonToolTip));
         OpenSetupWizardCommand.NotifyCanExecuteChanged();
+        OpenRefineDetailsCommand.NotifyCanExecuteChanged();
+        NewCommand.NotifyCanExecuteChanged();
+        CopyCommand.NotifyCanExecuteChanged();
+        SaveCommand.NotifyCanExecuteChanged();
+        RefreshCommand.NotifyCanExecuteChanged();
+        DeleteCommand.NotifyCanExecuteChanged();
+        PinAssetsCommand.NotifyCanExecuteChanged();
+        ClearAssetPinsCommand.NotifyCanExecuteChanged();
+        RecordTeachOutputCommand.NotifyCanExecuteChanged();
+        SuggestOutputOffsetCommand.NotifyCanExecuteChanged();
+        Roi.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ShowTestImageViewer));
         OnPropertyChanged(nameof(ShowRoiImageViewer));
     }
@@ -819,9 +1173,18 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         if (_switching || value is null)
             return;
 
+        if (IsBusy)
+        {
+            _switching = true;
+            Selected = _lastConfirmed;
+            _switching = false;
+            return;
+        }
+
+        this.Commit();
+
         if (_lastConfirmed is not null && HasUnsavedChanges &&
-            MessageBox.Show($"配方 {_originalName} 有未保存的修改，切换将丢弃这些修改。继续？",
-                "未保存修改", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            !_dialogs.ConfirmDiscard($"配方 {_originalName} 有未保存的修改，切换将丢弃这些修改。继续？"))
         {
             _switching = true;
             Selected = _lastConfirmed;
@@ -832,7 +1195,12 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         LoadIntoEditor(value.Name);
         _lastConfirmed = value;
         Test.ClearAdvice();
+        OnPropertyChanged(nameof(IsSelectedVisibleInFilter));
+        OnPropertyChanged(nameof(SelectedFilterHint));
+        DeleteCommand.NotifyCanExecuteChanged();
     }
+
+    partial void OnIsNewChanged(bool value) => DeleteCommand.NotifyCanExecuteChanged();
 
     private void OnRoiOrTestChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -856,8 +1224,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     }
 
     private bool ConfirmDiscard(string action) =>
-        MessageBox.Show($"配方 {_originalName} 有未保存的修改，{action}将丢弃这些修改。继续？",
-            "未保存修改", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        _dialogs.ConfirmDiscard($"配方 {_originalName} 有未保存的修改，{action}将丢弃这些修改。继续？");
 
     private string ResolvePreviousDiskName()
     {
@@ -882,6 +1249,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             var loaded = _loader.Get(name);
             Editor = loaded.Clone();
             _baseline = Editor.Clone();
+            ResetDirtyCache();
             NotifyEditorBindings();
             Message = loaded.Enabled ? "" : $"配方 {name} 已停用（Enabled=false），触发将返回 1015";
         }
@@ -889,49 +1257,10 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         {
             Editor = new RecipeConfig { Name = name };
             _baseline = Editor.Clone();
+            ResetDirtyCache();
             NotifyEditorBindings();
             Message = $"读取失败：{ex.Message}";
         }
-        finally
-        {
-            OnPropertyChanged(nameof(HasUnsavedChanges));
-            OnPropertyChanged(nameof(UnsavedHint));
-            OnPropertyChanged(nameof(CanTestTrigger));
-            Test.NotifyCanExecuteChanged();
-            RefreshRecipeHealth();
-        }
-    }
-
-    private void NotifyEditorBindings()
-    {
-        OnPropertyChanged(nameof(PrimaryModel));
-        OnPropertyChanged(nameof(SecondaryModel));
-        Lighting.NotifyFromEditor();
-        Roi.NotifyFromEditor();
-        OnPropertyChanged(nameof(RotationCenterHint));
-        OnPropertyChanged(nameof(IsDualMode));
-        OnPropertyChanged(nameof(IsKeyPointMode));
-        OnPropertyChanged(nameof(IsSegmentationMode));
-        OnPropertyChanged(nameof(IsMaskTemplateMode));
-        OnPropertyChanged(nameof(IsDualBlobMode));
-        OnPropertyChanged(nameof(IsTemplateMethod));
-        OnPropertyChanged(nameof(UsesFeatureTeachRoi));
-        OnPropertyChanged(nameof(NeedsTaughtTemplate));
-        OnPropertyChanged(nameof(ShowRefineRange));
-        OnPropertyChanged(nameof(HasTemplate));
-        OnPropertyChanged(nameof(ShowBlobFixedThreshold));
-        OnPropertyChanged(nameof(ShowDualCropExpand));
-        OnPropertyChanged(nameof(AngleModeHint));
-        OnPropertyChanged(nameof(RefineMethodHint));
-        OnPropertyChanged(nameof(MappingHint));
-        OnPropertyChanged(nameof(AssetPinStatus));
-        OnPropertyChanged(nameof(TeachPeakHint));
-        OnPropertyChanged(nameof(PolarityLockHint));
-        OnPropertyChanged(nameof(TeachGeometryHint));
-        OnPropertyChanged(nameof(UndirectedEccentricHint));
-        OnPropertyChanged(nameof(OutputOffsetTeachHint));
-        OnPropertyChanged(nameof(CanTestTrigger));
-        RefreshTemplatePreview();
     }
 
     private void RefreshRecipeHealth()
@@ -970,13 +1299,20 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private void RefreshTemplatePreview()
     {
         var b64 = Editor.Template.TemplateImageBase64 ?? "";
+        var diagKey = b64 + "|" + Editor.Template.RefineMethod;
         if (b64 == _templatePreviewKey)
         {
             OnPropertyChanged(nameof(TemplateStatusText));
+            OnPropertyChanged(nameof(RefineDetailsSummary));
+            if (diagKey == _templateDiagnosticsKey)
+                return;
+            RefreshTeachDiagnostics(b64);
+            _templateDiagnosticsKey = diagKey;
             return;
         }
 
         _templatePreviewKey = b64;
+        _templateDiagnosticsKey = diagKey;
         TemplatePreview = null;
         if (b64.Length > 0)
         {
@@ -993,36 +1329,87 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             }
         }
 
+        RefreshTeachDiagnostics(b64);
         OnPropertyChanged(nameof(TemplatePreview));
         OnPropertyChanged(nameof(TemplateStatusText));
+        OnPropertyChanged(nameof(RefineDetailsSummary));
     }
+
+    private void RefreshTeachDiagnostics(string b64)
+    {
+        if (b64.Length == 0)
+        {
+            _teachDiagnosticsHint = "";
+            OnPropertyChanged(nameof(TeachDiagnosticsHint));
+            return;
+        }
+
+        try
+        {
+            using var mat = MaskTemplateMatcher.DecodeTemplatePng(b64);
+            _teachDiagnosticsHint = Editor.Template.RefineMethod switch
+            {
+                SegmentRefineMethod.ShapeMatch => MaskShapeMatch.BuildTeach(mat) is { } shape
+                    ? $"形状示教边缘点 {shape.PointCount} 个"
+                    : "形状示教边缘点不足（需 ≥24 个 Canny 采样点）",
+                SegmentRefineMethod.Sift => BuildSiftDiagnostics(mat),
+                _ => "",
+            };
+        }
+        catch (Exception)
+        {
+            _teachDiagnosticsHint = "";
+        }
+
+        OnPropertyChanged(nameof(TeachDiagnosticsHint));
+    }
+
+    private static string BuildSiftDiagnostics(Mat mat)
+    {
+        var model = MaskSiftRefine.BuildTeach(mat);
+        if (model is null)
+            return "SIFT 示教特征不足（需 ≥16 个关键点）";
+        using (model)
+            return $"SIFT 示教关键点 {model.KeypointCount} 个";
+    }
+
+    bool IRecipeWorkspace.ConfirmGrabOriginIfNeeded(string action) => ConfirmGrabOriginIfNeeded(action);
+
+    bool IRecipeWorkspace.ConfirmFlatFeatureRoiIfNeeded(string action) => ConfirmFlatFeatureRoiIfNeeded(action);
 
     private bool ConfirmGrabOriginIfNeeded(string action)
     {
-        if (_baseline is null || IsNew)
+        if (_baseline is null)
             return true;
-        if (!GrabOriginChanged(_baseline, Editor))
+        if (!RecipeCompare.GrabOriginChanged(_baseline, Editor))
             return true;
-        return MessageBox.Show(
-            $"{action}：精修方法或特征框已变，抓取原点可能与上次示教输出不同，需要重新对示教。继续？",
-            "抓取原点已变",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        var staleTeach = Editor.OutputOffset.HasTeachOutput;
+        var detail = staleTeach
+            ? "将清除已记示教输出，需重新对示教。"
+            : "测试/产线十字会换位置。";
+        if (!_dialogs.ConfirmYesNo(
+                $"{action}：精修方法或特征框已变，抓取原点可能与上次不同。{detail}继续？",
+                "抓取原点已变"))
+            return false;
+        if (staleTeach)
+        {
+            Editor.OutputOffset.ClearTeachOutput();
+            NotifyEditorMutated();
+        }
+        return true;
     }
 
-    private static bool GrabOriginChanged(RecipeConfig a, RecipeConfig b) =>
-        a.AngleMode != b.AngleMode ||
-        a.Template.RefineMethod != b.Template.RefineMethod ||
-        a.Template.UseUprightCrop != b.Template.UseUprightCrop ||
-        !SameRoi(a.Template.Roi, b.Template.Roi);
-
-    private static bool SameRoi(Roi? a, Roi? b) =>
-        a is null && b is null ||
-        a is not null && b is not null &&
-        Math.Abs(a.X - b.X) < 1e-4 &&
-        Math.Abs(a.Y - b.Y) < 1e-4 &&
-        Math.Abs(a.Width - b.Width) < 1e-4 &&
-        Math.Abs(a.Height - b.Height) < 1e-4;
+    private bool ConfirmFlatFeatureRoiIfNeeded(string action)
+    {
+        if (!TemplateOptions.UsesFeatureTeachRoi(Editor.Template.RefineMethod))
+            return true;
+        if (!TemplateOptions.IsFlatFeatureRoi(Editor.Template.Roi))
+            return true;
+        return _dialogs.ConfirmYesNo(
+                $"{action}：特征框过扁（宽高比 ≥ {TemplateOptions.FlatFeatureRoiAspect:0}），"
+                + "匹配十字是特征中心不是壳体中心，齿列件可能跳齿。继续？",
+                "特征框过扁");
+    }
 
     private RecipeListItem DescribeItem(string name)
     {

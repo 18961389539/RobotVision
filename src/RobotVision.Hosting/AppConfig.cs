@@ -22,7 +22,7 @@ public sealed class AppConfig
     public long IdleTimeoutMs { get; set; }
 
     /// <summary>并发 TCP 连接上限，0 表示不限。</summary>
-    public int MaxConnections { get; set; } = 0;
+    public int MaxConnections { get; set; }
 
     /// <summary>监听 backlog（内核排队待 accept 的连接数）。</summary>
     public int TcpBacklog { get; set; } = 16;
@@ -75,8 +75,14 @@ public sealed class AppConfig
     /// <summary>本机 CPU 对话助手（连接 llama-server，不在视觉进程内加载权重）。</summary>
     public ChatConfig Chat { get; set; } = new();
 
+    /// <summary>配方页试触发超时（ms）；与 TCP 触发超时解耦。</summary>
+    public int RecipeTestTimeoutMs { get; set; } = 120_000;
+
     /// <summary>运行监控页叠加模式：默认与配方试触发一致。</summary>
     public MonitorOverlayMode MonitorOverlayMode { get; set; } = MonitorOverlayMode.MatchRecipeTest;
+
+    /// <summary>PLC TCP 调试：应答线一律改写为 OK（视觉仍执行；产线务必关闭）。</summary>
+    public PlcDebugConfig PlcDebug { get; set; } = new();
 
     public List<CameraConfig> Cameras { get; set; } = [];
 
@@ -133,6 +139,22 @@ public sealed class InferenceConfig
 
     /// <summary>LRU 会话上限：超过后卸载最久未使用的会话（0 或负数 = 不限制）。</summary>
     public int MaxSessions { get; set; } = 8;
+}
+
+/// <summary>PLC TCP 调试：失败/拒绝时仍向 PLC 回 OK（视觉照常执行，仅协议线伪装）。</summary>
+public sealed class PlcDebugConfig
+{
+    /// <summary>开启后 TCP 应答不含 ERR。仅会话内生效：启动不从磁盘恢复，避免产线默认伪装成功。</summary>
+    public bool AlwaysOk { get; set; }
+
+    /// <summary>伪装成功时回给 PLC 的默认 X（mm）。</summary>
+    public double DefaultX { get; set; }
+
+    /// <summary>伪装成功时回给 PLC 的默认 Y（mm）。</summary>
+    public double DefaultY { get; set; }
+
+    /// <summary>伪装成功时回给 PLC 的默认 RZ（deg）。</summary>
+    public double DefaultRz { get; set; }
 }
 
 /// <summary>拍照位姿校验配置：OnArm（相机装末端）工位的 TRIGGER 位姿一致性检查。</summary>
@@ -308,7 +330,7 @@ public sealed class CameraConfig
     public string Folder { get; set; } = "";
 
     /// <summary>File 相机：回放帧间隔（ms），0 = 不限速。与 Virtual 的 IntervalMs 共用字段。</summary>
-    public int IntervalMs { get; set; } = 0;
+    public int IntervalMs { get; set; }
 
     /// <summary>Basler / GigEVision：序列号或 IP。留空仅当现场恰好一台时绑定；多台必须填写，对不上不会回落第一台。</summary>
     public string DeviceId { get; set; } = "";
@@ -332,7 +354,7 @@ public sealed class CameraConfig
     public string Pattern { get; set; } = "Chessboard";
 
     /// <summary>Virtual 相机：高斯噪声 sigma，0 = 无噪声。</summary>
-    public double NoiseSigma { get; set; } = 0;
+    public double NoiseSigma { get; set; }
 
     /// <summary>Virtual 相机：棋盘格单元边长（px），内角点数 = 宽/格/2-1 × 高/格/2-1。</summary>
     public int ChessCellPx { get; set; } = 40;

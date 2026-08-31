@@ -129,6 +129,6 @@ public static class ChatDangerousActionGuard
         }
     }
 
-    private static IReadOnlyList<string> Collect(params string?[] values) =>
+    private static List<string> Collect(params string?[] values) =>
         values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 }

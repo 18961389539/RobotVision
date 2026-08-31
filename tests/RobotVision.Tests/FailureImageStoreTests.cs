@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenCvSharp;
 using RobotVision.Core.Models;
 using RobotVision.Hosting;
@@ -72,10 +72,10 @@ public class FailureImageStoreTests : IDisposable
         Assert.Equal(12, roundTrip.Height);
 
         var json = File.ReadAllText(jsons[0]);
-        Assert.Contains("\"Recipe\": \"A01\"", json);
-        Assert.Contains("\"ErrorCode\": 1007", json);
-        Assert.Contains("未检出目标", json); // 中文不转义，现场工程师可直接读
-        Assert.Contains("\"ElapsedMs\": 123.4", json);
+        Assert.Contains("\"Recipe\": \"A01\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"ErrorCode\": 1007", json, StringComparison.Ordinal);
+        Assert.Contains("未检出目标", json, StringComparison.Ordinal); // 中文不转义，现场工程师可直接读
+        Assert.Contains("\"ElapsedMs\": 123.4", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public class FailureImageStoreTests : IDisposable
             () => store.TotalSaved == 5 &&
                   Directory.Exists(_folder) &&
                   Directory.GetFiles(_folder, "*.png").Length == 3 &&
-                  Directory.GetFiles(_folder, "*.png").Any(p => p.Contains("100004000")),
+                  Directory.GetFiles(_folder, "*.png").Any(p => p.Contains("100004000", StringComparison.Ordinal)),
             "滚动清理后保留最新 3 张");
 
         var pngs = Directory.GetFiles(_folder, "*.png").Select(Path.GetFileName).OrderBy(n => n).ToList();
@@ -261,15 +261,15 @@ public class FailureImageStoreTests : IDisposable
         WaitForCondition(
             () => Directory.Exists(_folder) &&
                   Directory.GetFiles(_folder, "*.png").Length == 2 &&
-                  Directory.GetFiles(_folder, "*.png").Any(p => p.Contains("100002000")),
+                  Directory.GetFiles(_folder, "*.png").Any(p => p.Contains("100002000", StringComparison.Ordinal)),
             "清理后保留 1099 与 A02_1007");
 
         var pngs = Directory.GetFiles(_folder, "*.png").Select(Path.GetFileName).ToList();
         Assert.Equal(2, pngs.Count);
         // 配额 2：删 1007 中最旧（A01_1007），保留 1099 与 A02_1007
-        Assert.Contains(pngs, n => n!.Contains("_1099.png"));
-        Assert.DoesNotContain(pngs, n => n!.Contains("A01_1007.png"));
-        Assert.Contains(pngs, n => n!.Contains("A02_1007.png"));
+        Assert.Contains(pngs, n => n!.Contains("_1099.png", StringComparison.Ordinal));
+        Assert.DoesNotContain(pngs, n => n!.Contains("A01_1007.png", StringComparison.Ordinal));
+        Assert.Contains(pngs, n => n!.Contains("A02_1007.png", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -339,10 +339,10 @@ public class FailureImageStoreTests : IDisposable
 
         var json = Directory.GetFiles(_folder, "*.json").Single();
         var text = File.ReadAllText(json);
-        Assert.Contains("\"CameraId\": \"cam1\"", text);
-        Assert.Contains("\"StationId\": \"st1\"", text);
-        Assert.Contains("\"Models\": \"a.onnx|b.onnx\"", text);
-        Assert.Contains("\"Source\": \"pipeline\"", text);
+        Assert.Contains("\"CameraId\": \"cam1\"", text, StringComparison.Ordinal);
+        Assert.Contains("\"StationId\": \"st1\"", text, StringComparison.Ordinal);
+        Assert.Contains("\"Models\": \"a.onnx|b.onnx\"", text, StringComparison.Ordinal);
+        Assert.Contains("\"Source\": \"pipeline\"", text, StringComparison.Ordinal);
     }
 }
 

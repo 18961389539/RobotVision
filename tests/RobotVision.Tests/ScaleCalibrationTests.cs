@@ -101,7 +101,7 @@ public class ScaleCalibrationTests : IDisposable
         manager.LoadScale(Scale("st_both"));
 
         manager.GetMappingMode("st_both").Should().Be(StationMappingMode.Extrinsic);
-        manager.QualityWarnings.Should().Contain(w => w.Contains("比例") && w.Contains("外参/多项式"));
+        manager.QualityWarnings.Should().Contain(w => w.Contains("比例", StringComparison.Ordinal) && w.Contains("外参/多项式", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -1,0 +1,30 @@
+<UserControl x:Class="RobotVision.WpfHost.Shared.ProtocolDebugPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <!-- 光源协议调试面板：Network / Serial 两个参数卡片中原为逐字节相同的 24 行区块。
+         不声明 DataContext，绑定继承自使用处（两个页面的 DataContext 均为 LightingsViewModel）。 -->
+    <Border Margin="0,14,0,0" Padding="10"
+            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+            BorderThickness="1" CornerRadius="6">
+        <StackPanel>
+            <ui:TextBlock Text="协议调试（发送原始指令）" FontTypography="BodyStrong"
+                          Margin="0,0,0,6" />
+            <TextBox Text="{Binding DebugCommand, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="输入原始指令，支持 \r \n \t 转义（如 SET 1 128\r\n）"
+                     Margin="0,0,0,6" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ui:Button Content="发" Command="{Binding SendDebugCommand}" />
+                <TextBlock Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"
+                           Text="{Binding DebugResult, StringFormat=最近发送：{0}}"
+                           FontSize="11" TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Grid>
+        </StackPanel>
+    </Border>
+</UserControl>

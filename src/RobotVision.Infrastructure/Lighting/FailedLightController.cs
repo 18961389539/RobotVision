@@ -18,7 +18,7 @@ public sealed class FailedLightController(string id, string message) : ILightCon
 
     public LightControllerKind Kind => LightControllerKind.Virtual;
 
-    public void Apply(LightingConfig lighting)
+    public bool Apply(LightingConfig lighting)
     {
         throw new VisionException(VisionErrorCode.LightNotRegistered, _message);
     }

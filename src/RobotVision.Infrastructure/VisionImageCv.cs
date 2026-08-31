@@ -24,6 +24,9 @@ public static class VisionImageCv
             ownsMat ? mat : null);
     }
 
+    /// <summary>取得 Mat 所有权并包装为 VisionImage；调用方不得再 Dispose mat。</summary>
+    public static VisionImage Adopt(Mat mat) => FromMat(mat, ownsMat: true);
+
     /// <summary>不拥有像素的 Mat 头。Dispose 只释放头，不释放 VisionImage 缓冲。</summary>
     public static Mat AsMat(VisionImage image)
     {

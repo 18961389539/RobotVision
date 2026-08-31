@@ -29,8 +29,7 @@ public sealed record PoseDetectionResult(
 
 /// <summary>
 /// 实例分割结果（框架无关）。
-/// <see cref="ContourLocal"/> 为相对包围盒左上角的局部坐标（像素）；
-/// YoloDotNet <c>GetContourPoints()</c> 返回全图坐标，由 <see cref="YoloDotNetEngine"/> 减 box 原点归一化。
+/// <see cref="ContourLocal"/> 为相对包围盒的局部坐标（与旧 Yolo GetContourPoints 同口径）；
 /// <see cref="BitPackedMask"/> 为包围盒尺寸、LSB-first 位打包掩码。
 /// </summary>
 public sealed record InstanceSegmentation(

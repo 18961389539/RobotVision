@@ -17,7 +17,13 @@ public sealed class TcpSession
     public DateTime ConnectedAt { get; init; }
 
     /// <summary>手动断开标记：随后的关闭异常按信息级记录，避免误报连接异常。</summary>
-    public volatile bool ManualClose;
+    private volatile bool _manualClose;
+
+    public bool ManualClose
+    {
+        get => _manualClose;
+        set => _manualClose = value;
+    }
 
     public long Requests => Volatile.Read(ref _requests);
     public long BytesReceived => Volatile.Read(ref _bytesIn);

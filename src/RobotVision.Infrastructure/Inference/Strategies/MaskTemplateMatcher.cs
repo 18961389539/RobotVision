@@ -1,29 +1,10 @@
+using System.Diagnostics.CodeAnalysis;
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
 
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
-/// <summary>模板匹配结果：匹配分数、相对转正模板的旋转角（度）、匹配中心在转正图坐标系的位置。</summary>
-public sealed record MaskTemplateMatchResult(double Score, double RotationDeg, Point2d CenterInUpright);
-
-/// <summary>
-/// 转正裁剪结果。匹配中心在 <see cref="Upright"/> 坐标系，映射回原图须加裁剪原点后再
-/// 用与 WarpAffine 相同的 <see cref="WarpAngleDeg"/> 做逆变换——不能对裁剪坐标直接 Invert。
-/// </summary>
-public sealed record UprightCropResult(
-    Mat Upright,
-    double WarpAngleDeg,
-    Point2f RotationCenter,
-    double CropOriginX,
-    double CropOriginY);
-
-/// <summary>
-/// 分割+模板匹配（MaskTemplate 模式）的共享几何/匹配辅助：
-/// 策略（运行时精修）与配方页「示教模板」（转正裁剪生成模板）共用同一套变换，
-/// 保证示教坐标系与运行时坐标系完全一致。
-/// 约定：所有角度遵循 AngleGeometry（y 轴向下，度，逆时针为正）。
-/// </summary>
-public static class MaskTemplateMatcher
+public static partial class MaskTemplateMatcher
 {
     /// <summary>
     /// 按最小外接矩形把目标转正并裁剪（warpAffine 旋转 -θ 后取矩形区域）。
@@ -304,13 +285,6 @@ public static class MaskTemplateMatcher
         return new MaskTemplateMatchResult(best.Score, best.Deg + delta, best.Center);
     }
 
-    internal readonly record struct MatchOrientationDebug(
-        double Score0, double Score180, int? TemplateSign, int? SceneSign, double PeakDistPx,
-        double PeakSharpness = 0);
-
-    [ThreadStatic]
-    internal static MatchOrientationDebug LastDebug;
-
     private readonly record struct AngleSample(double Deg, double Score, Point2d Center, int TplW, int TplH);
 
     /// <summary>
@@ -372,6 +346,8 @@ public static class MaskTemplateMatcher
     }
 
     /// <summary>单通道 Canny（形状匹配 / 边缘 NCC 共用）。</summary>
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "Returned Mat ownership transfers to caller.")]
     public static Mat ToCanny8u(Mat src)
     {
         using var gray = new Mat();
@@ -845,9 +821,6 @@ public static class MaskTemplateMatcher
         return d == -90.0 ? 90.0 : d;
     }
 
-    /// <summary>质心-内孔连线结果：连线角（指向孔，(-180,180]）、掩码质心（输出位置）。</summary>
-    public sealed record CentroidHoleResult(double AngleDeg, Point2d Centroid, double Quality = 0.85);
-
     /// <summary>内孔判定的最小面积（px²）：更小的孔对掩码噪声敏感，不参与连线。</summary>
     private const double MinHoleAreaPx = 30;
 
@@ -872,19 +845,16 @@ public static class MaskTemplateMatcher
         if (bitPackedMask.Length == 0 || width <= 0 || height <= 0)
             return null;
 
-        // 位掩码 → CV_8UC1（255=前景）。像素索引 = y*width + x，LSB-first
         var buf = new byte[width * height];
         for (var i = 0; i < buf.Length; i++)
             buf[i] = (byte)(((bitPackedMask[i >> 3] >> (i & 7)) & 1) * 255);
         using var mask = Mat.FromPixelData(height, width, MatType.CV_8UC1, buf);
 
-        // 掩码质心（全填充像素的一阶矩）
         var m = Cv2.Moments(mask, true);
         if (Math.Abs(m.M00) < 1e-9)
             return null;
         var centroid = new Point2d(m.M10 / m.M00, m.M01 / m.M00);
 
-        // 两层轮廓：RETR_CCOMP 下 Parent ≥ 0 的是孔（内轮廓）
         Cv2.FindContours(mask, out var contours, out var hierarchy, RetrievalModes.CComp,
             ContourApproximationModes.ApproxSimple);
         double bestArea = 0;
@@ -892,7 +862,7 @@ public static class MaskTemplateMatcher
         for (var i = 0; i < contours.Length; i++)
         {
             if (hierarchy[i].Parent < 0)
-                continue; // 外轮廓
+                continue;
             var area = Cv2.ContourArea(contours[i]);
             if (area < MinHoleAreaPx || area <= bestArea)
                 continue;
@@ -900,32 +870,27 @@ public static class MaskTemplateMatcher
             bestHole = contours[i];
         }
         if (bestHole is null || bestHole.Length < 5)
-            return null; // FitEllipse 至少 5 点
+            return null;
 
-        var ellipse = Cv2.FitEllipse(InputArray.Create(bestHole));
+        using var holeArray = InputArray.Create(bestHole);
+        var ellipse = Cv2.FitEllipse(holeArray);
         var holeCenter = new Point2d(ellipse.Center.X, ellipse.Center.Y);
 
-        // 基线检查：孔几乎在质心上 → 连线方向随机（槽的头尾判决同样依赖此偏置）
         var dx = holeCenter.X - centroid.X;
         var dy = holeCenter.Y - centroid.Y;
         if (dx * dx + dy * dy < MinBaselinePx * MinBaselinePx)
             return null;
 
-        // 孔/槽自适应：轴比 ≥ 阈值走"长轴定角 + 偏置侧定头尾"
         var major = Math.Max(ellipse.Size.Width, ellipse.Size.Height);
         var minor = Math.Min(ellipse.Size.Width, ellipse.Size.Height);
         double angleDeg;
         if (major >= SlotAspectThreshold * minor)
         {
-            // 长轴角（OpenCV angle ∈ (0,90] 且 Width 未必是长边，与 LongAxisFromMinAreaRect 同口径换算）
             var axisDeg = AngleGeometry.NormalizeDeg(
                 ellipse.Size.Width >= ellipse.Size.Height ? ellipse.Angle : ellipse.Angle + 90.0);
             var rad = axisDeg * Math.PI / 180.0;
             var ax = Math.Cos(rad);
             var ay = Math.Sin(rad);
-
-            // 偏置 v 在轴向/法向的分量：零件刚体连接下两分量都随 180° 旋转反号；
-            // 取绝对值较大者定符号——径向槽用轴向分量，切向槽用法向分量，判决余量最大化
             var along = dx * ax + dy * ay;
             var across = -dx * ay + dy * ax;
             var bit = Math.Abs(along) >= Math.Abs(across) ? Math.Sign(along) : Math.Sign(across);
@@ -933,7 +898,6 @@ public static class MaskTemplateMatcher
         }
         else
         {
-            // 圆孔：质心→孔心连线（指向孔）
             var (_, ang) = AngleGeometry.FromTwoPoints(centroid.X, centroid.Y, holeCenter.X, holeCenter.Y);
             angleDeg = ang;
         }
@@ -945,9 +909,7 @@ public static class MaskTemplateMatcher
         return new CentroidHoleResult(angleDeg, centroid, quality);
     }
 
-    /// <summary>绕模板中心旋转（边缘色填充外扩角），小幅旋转用线性插值。
-    /// 填充色取模板四边像素均值（与运行时转正图边缘背景一致）——
-    /// 黑色填充会让四角面积随角度对称变化，把匹配峰钉死在 0°，精修失效。</summary>
+    /// <summary>绕模板中心旋转（边缘色填充外扩角），小幅旋转用线性插值。</summary>
     private static Mat RotateTemplate(Mat template, double deg)
     {
         if (Math.Abs(deg) < 1e-9)
@@ -955,17 +917,14 @@ public static class MaskTemplateMatcher
 
         var center = new Point2f(template.Width / 2f, template.Height / 2f);
         using var m = Cv2.GetRotationMatrix2D(center, deg, 1.0);
-        // 旋转后外接尺寸，避免四角裁掉
         var rad = deg * Math.PI / 180.0;
         var cos = Math.Abs(Math.Cos(rad));
         var sin = Math.Abs(Math.Sin(rad));
         var w = (int)Math.Ceiling(template.Width * cos + template.Height * sin);
         var h = (int)Math.Ceiling(template.Width * sin + template.Height * cos);
-        // 平移补偿：保持旋转中心在新图中心
         m.Set(0, 2, m.At<double>(0, 2) + (w - template.Width) / 2.0);
         m.Set(1, 2, m.At<double>(1, 2) + (h - template.Height) / 2.0);
 
-        // 边缘均值填充：与转正图背景同色，避免填充色差随角度引入伪峰
         using var top = template.Row(0);
         using var bottom = template.Row(template.Rows - 1);
         using var left = template.Col(0);
@@ -998,7 +957,6 @@ public static class MaskTemplateMatcher
         return false;
     }
 
-    /// <summary>三点抛物线顶点偏移（亚度插值）：s(p)、s(0)、s(n) 的对称抛物线顶点，限制在 ±0.5 步长内。</summary>
     private static double SubDegreeOffset(double prev, double best, double next)
     {
         var denom = prev - 2 * best + next;

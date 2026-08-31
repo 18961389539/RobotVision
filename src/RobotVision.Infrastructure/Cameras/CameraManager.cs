@@ -193,13 +193,35 @@ public sealed class CameraManager : IDisposable
     {
         if (_disposed)
             return;
+
         _disposed = true;
-        foreach (var camera in _cameras.Values)
-            camera.Dispose();
-        _cameras.Clear();
-        foreach (var gate in _gates.Values)
-            gate.Dispose();
-        _gates.Clear();
-        InvalidateIds();
+
+        var gateIds = _gates.Keys.ToArray();
+        Array.Sort(gateIds, StringComparer.OrdinalIgnoreCase);
+        foreach (var id in gateIds)
+        {
+            if (_gates.TryGetValue(id, out var gate))
+                gate.Wait();
+        }
+
+        try
+        {
+            foreach (var camera in _cameras.Values)
+                camera.Dispose();
+            _cameras.Clear();
+            InvalidateIds();
+        }
+        finally
+        {
+            foreach (var gate in _gates.Values)
+            {
+                try { gate.Release(); }
+                catch (ObjectDisposedException) { }
+            }
+
+            foreach (var gate in _gates.Values)
+                gate.Dispose();
+            _gates.Clear();
+        }
     }
 }

@@ -72,7 +72,7 @@ public class NinePointExtrinsicCalibratorTests
         var ex = Assert.Throws<VisionException>(() =>
             NinePointExtrinsicCalibrator.Calibrate("S1", "C1", pixels, robots));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains("3", ex.Message);
+        Assert.Contains("3", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public class NinePointExtrinsicCalibratorTests
         var ex = Assert.Throws<VisionException>(() =>
             NinePointExtrinsicCalibrator.Calibrate("S1", "C1", pixels, robots));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains("共线", ex.Message);
+        Assert.Contains("共线", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class NinePointExtrinsicCalibratorTests
         var ex = Assert.Throws<VisionException>(() =>
             NinePointExtrinsicCalibrator.Calibrate("S1", "C1", pixels, robots));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains("共线", ex.Message);
+        Assert.Contains("共线", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public class NinePointExtrinsicCalibratorTests
         var ex = Assert.Throws<VisionException>(() =>
             NinePointExtrinsicCalibrator.Calibrate("S1", "C1", pixels, robots, width: 2000, height: 2000));
         Assert.Equal(VisionErrorCode.NotCalibrated, ex.ErrorCode);
-        Assert.Contains("分布过小", ex.Message);
+        Assert.Contains("分布过小", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

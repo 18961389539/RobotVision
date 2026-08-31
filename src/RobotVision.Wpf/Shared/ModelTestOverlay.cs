@@ -1,3 +1,4 @@
+using System.Globalization;
 using OpenCvSharp;
 using RobotVision.Infrastructure.Inference;
 
@@ -57,7 +58,7 @@ public static class ModelTestOverlay
                 {
                     var color = p.KeyPoints[k].Confidence >= keypointConfidence ? Scalar.Lime : Scalar.Gray;
                     Cv2.Circle(image, points[k], 4, color, -1, LineTypes.AntiAlias);
-                    DrawLabel(image, points[k].X + 6, points[k].Y - 4, k.ToString());
+                    DrawLabel(image, points[k].X + 6, points[k].Y - 4, k.ToString(CultureInfo.InvariantCulture));
                 }
             }
             DrawLabel(image, rect.X, rect.Y - 6, $"#{i} {p.Label} {p.Confidence:F2}");

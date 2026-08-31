@@ -18,15 +18,14 @@ public sealed class TcpHostedService(TcpServerManager tcp, ILogger<TcpHostedServ
         }
         catch (Exception ex)
         {
-            log.LogError(ex, "TCP 服务启动失败（端口 {Port} 可能被占用），机器人链路不可用；视觉服务继续运行",
-                tcp.Port);
+            TcpHostedServiceLog.StartFailed(log, ex, tcp.Port);
         }
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        log.LogInformation("正在停止 TCP 服务...");
+        TcpHostedServiceLog.Stopping(log);
         tcp.Stop();
         return Task.CompletedTask;
     }
