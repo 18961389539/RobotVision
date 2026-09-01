@@ -17,7 +17,12 @@ public static class GigEForceIp
     public const byte GvcpMagic = 0x42;
     public const ushort ForceIpCommand = 0x0004;
 
-    /// <summary>把 GVCP FORCEIP 报文打成 28 字节（8 头 + 20 负载）。</summary>
+    /// <summary>
+    /// 把 GVCP FORCEIP 报文打成 64 字节（8 头 + 56 负载，符合 GigE Vision spec）。
+    /// 注意：1e8fca9 曾误改成 28 字节紧凑布局（MAC@8、flags=0x00、length=20），
+    /// 不符合规范的 reserved 偏移与 ACK/broadcast flags，相机固件会直接丢弃报文，
+    /// 导致 FORCEIP 静默失效——已恢复规范布局（与 GigEForceIpTests 断言一致）。
+    /// </summary>
     public static byte[] BuildPacket(ReadOnlySpan<byte> mac6, IPAddress ip, IPAddress subnetMask, IPAddress gateway,
         ushort requestId = 1)
     {
@@ -27,19 +32,19 @@ public static class GigEForceIp
         if (mac6.Length < 6)
             throw new ArgumentException("MAC 至少 6 字节", nameof(mac6));
 
-        var packet = new byte[28];
+        var packet = new byte[64];
         packet[0] = GvcpMagic;
-        packet[1] = 0x00;
+        packet[1] = 0x11; // ACK required + broadcast
         packet[2] = (byte)(ForceIpCommand >> 8);
         packet[3] = (byte)ForceIpCommand;
         packet[4] = 0x00;
-        packet[5] = 20;
+        packet[5] = 56;
         packet[6] = (byte)(requestId >> 8);
         packet[7] = (byte)requestId;
-        mac6[..6].CopyTo(packet.AsSpan(8, 6));
-        WriteIpv4(packet, 16, ip);
-        WriteIpv4(packet, 20, subnetMask);
-        WriteIpv4(packet, 24, gateway);
+        mac6[..6].CopyTo(packet.AsSpan(10, 6));
+        WriteIpv4(packet, 28, ip);
+        WriteIpv4(packet, 44, subnetMask);
+        WriteIpv4(packet, 60, gateway);
         return packet;
     }
 

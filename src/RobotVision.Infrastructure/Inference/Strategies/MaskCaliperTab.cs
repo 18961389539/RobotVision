@@ -1,7 +1,6 @@
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Recipe;
-using RobotVision.Infrastructure.Geometry;
 
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
@@ -40,9 +39,6 @@ public sealed record CaliperRefineOptions(
 /// </summary>
 public static class MaskCaliperTab
 {
-    private const int ProbeCount = 15;
-    private const double EndInsetRatio = 0.18;
-
     /// <summary>沿长轴平均半宽（px），压剖面噪声。</summary>
     private const int SamplingHalfWidth = 2;
 
@@ -96,6 +92,7 @@ public static class MaskCaliperTab
         public static CaliperAttempt Miss(CaliperViz? viz = null) => new(null, viz ?? CaliperViz.Empty);
     }
 
+    /// <summary>最近一次精修的内部指标（探针数 / 平行差 / 宽度 / 凸起判定），测试与赛马打分用。</summary>
     public readonly record struct DebugInfo(
         int ValidProbes,
         double ParallelDeg,
@@ -109,33 +106,38 @@ public static class MaskCaliperTab
     internal static DebugInfo LastDebug;
 
     /// <summary>
-    /// 在原图上按粗外接矩形自动放置双边卡尺。失败返回 null（策略走粗角 [0,180)）。
+    /// 在原图上按壳体框自动放置双边卡尺。失败返回 null（策略默认 1019，不再输出无向粗角）。
     /// 输入轮廓与图像均为同一坐标系（ROI 内）。
     /// </summary>
     public static Result? Refine(Mat image, IReadOnlyList<Point2f> contour) =>
         TryRefine(image, contour).Pose;
 
-    /// <summary>与 <see cref="Refine"/> 相同，但失败也带回探针/抓边/拟合边，供画面调试。</summary>
     public static Result? Refine(Mat image, IReadOnlyList<Point2f> contour, CaliperRefineOptions options) =>
         TryRefine(image, contour, options).Pose;
 
-    public static CaliperAttempt TryRefine(Mat image, IReadOnlyList<Point2f> contour, CaliperRefineOptions options) =>
-        TryRefine(image, contour);
-
-    public static double QualityScore(DebugInfo debug)
+    /// <summary>两线平行度 + 凸起灰度差，供赛马打分。</summary>
+    public static double QualityScore(DebugInfo d)
     {
-        if (debug.ValidProbes <= 0)
-            return 0;
-        var parallel = Math.Max(0, 1.0 - debug.ParallelDeg / 4.0);
-        var width = debug.WidthPx > 0 ? 1.0 : 0.5;
-        return Math.Clamp(0.35 * parallel + 0.35 * width + 0.3 * (debug.TabSign is not null ? 1 : 0), 0, 1);
+        var parallel = Math.Clamp(1.0 - d.ParallelDeg / 4.0, 0, 1);
+        var tab = Math.Clamp(Math.Abs(d.TabGrayDiff) / 20.0, 0, 1);
+        return Math.Clamp(0.55 * parallel + 0.45 * tab, 0.15, 1);
     }
 
-    public static CaliperAttempt TryRefine(Mat image, IReadOnlyList<Point2f> contour)
+    /// <summary>与 <see cref="Refine"/> 相同，但失败也带回探针/抓边/拟合边，供画面调试。</summary>
+    public static CaliperAttempt TryRefine(Mat image, IReadOnlyList<Point2f> contour) =>
+        TryRefineCore(image, contour, null);
+
+    public static CaliperAttempt TryRefine(Mat image, IReadOnlyList<Point2f> contour, CaliperRefineOptions options) =>
+        TryRefineCore(image, contour, options);
+
+    private static CaliperAttempt TryRefineCore(
+        Mat image, IReadOnlyList<Point2f> contour, CaliperRefineOptions? options)
     {
         LastDebug = default;
         if (image.Empty() || contour.Count < 4)
             return CaliperAttempt.Miss();
+
+        options ??= CaliperRefineOptions.Default;
 
         Mat gray = image;
         var owned = false;
@@ -150,7 +152,17 @@ public static class MaskCaliperTab
 
         try
         {
-            return RefineGray(gray, contour);
+            if (options.EdgePolarity == HousingEdgePolarity.Auto)
+            {
+                var bright = RefineWithLayout(gray, contour, brightToDark: true, options.ProbeLayout);
+                if (bright.Pose is not null)
+                    return bright;
+                var dark = RefineWithLayout(gray, contour, brightToDark: false, options.ProbeLayout);
+                return dark.Pose is not null ? dark : bright;
+            }
+
+            var brightToDark = options.EdgePolarity != HousingEdgePolarity.DarkToBright;
+            return RefineWithLayout(gray, contour, brightToDark, options.ProbeLayout);
         }
         finally
         {
@@ -159,64 +171,201 @@ public static class MaskCaliperTab
         }
     }
 
-    private static CaliperAttempt RefineGray(Mat gray, IReadOnlyList<Point2f> contour)
+    private static CaliperAttempt RefineWithLayout(
+        Mat gray, IReadOnlyList<Point2f> contour, bool brightToDark, CaliperProbeLayout layout)
     {
-        var rect = Cv2.MinAreaRect(contour);
-        var longLen = Math.Max(rect.Size.Width, rect.Size.Height);
-        var shortLen = Math.Min(rect.Size.Width, rect.Size.Height);
+        var work = NormalizeRoiContrast(gray, contour);
+        try
+        {
+            return layout switch
+            {
+                CaliperProbeLayout.AcrossShortAxis => RefineGrayCore(work, contour, brightToDark, probeAlongLong: true),
+                CaliperProbeLayout.AcrossLongAxis => RefineGrayCore(work, contour, brightToDark, probeAlongLong: false),
+                _ => PickAutoLayout(work, contour, brightToDark),
+            };
+        }
+        finally
+        {
+            if (!ReferenceEquals(work, gray))
+                work.Dispose();
+        }
+    }
+
+    private static CaliperAttempt PickAutoLayout(Mat gray, IReadOnlyList<Point2f> contour, bool brightToDark)
+    {
+        var housing = MaskHousing.Fit(contour);
+        var topBottom = RefineGrayCore(gray, contour, brightToDark, probeAlongLong: true);
+        var debugTb = LastDebug;
+        var scoreTb = topBottom.Pose is null ? 0 : LayoutScore(debugTb, housing.ShortLen);
+
+        var leftRight = RefineGrayCore(gray, contour, brightToDark, probeAlongLong: false);
+        var debugLr = LastDebug;
+        var scoreLr = leftRight.Pose is null ? 0 : LayoutScore(debugLr, housing.LongLen);
+
+        if (topBottom.Pose is null && leftRight.Pose is not null)
+        {
+            LastDebug = debugLr;
+            return leftRight;
+        }
+
+        if (leftRight.Pose is not null)
+        {
+            var rough = LongEdgeRoughness(contour, housing);
+            // 只在上下长边失败，或长边明显是齿列/缺口时，才改抓左右短边。
+            var preferLateral = topBottom.Pose is null
+                                || rough >= 0.22 && scoreLr >= 0.82 * Math.Max(0.15, scoreTb);
+            if (preferLateral)
+            {
+                LastDebug = debugLr;
+                return leftRight;
+            }
+        }
+
+        LastDebug = debugTb;
+        return topBottom;
+    }
+
+    private static double LayoutScore(DebugInfo d, double expectedWidth)
+    {
+        var q = QualityScore(d);
+        if (expectedWidth < 8 || d.WidthPx < 1)
+            return q;
+        var ratio = d.WidthPx / expectedWidth;
+        var match = Math.Clamp(1.0 - Math.Abs(ratio - 1.0), 0.15, 1);
+        return q * (0.55 + 0.45 * match);
+    }
+
+
+    /// <summary>ROI 内百分位拉伸，减轻现场亮度跌落对剖面梯度的影响。</summary>
+    private static Mat NormalizeRoiContrast(Mat gray, IReadOnlyList<Point2f> contour)
+    {
+        if (gray.Empty() || contour.Count < 4)
+            return gray;
+
+        var rect = Cv2.BoundingRect(contour);
+        rect.X = Math.Clamp(rect.X, 0, gray.Width - 1);
+        rect.Y = Math.Clamp(rect.Y, 0, gray.Height - 1);
+        rect.Width = Math.Min(rect.Width, gray.Width - rect.X);
+        rect.Height = Math.Min(rect.Height, gray.Height - rect.Y);
+        if (rect.Width < 8 || rect.Height < 8)
+            return gray;
+
+        using var roi = new Mat(gray, rect);
+        var values = new List<byte>(roi.Rows * roi.Cols);
+        for (var y = 0; y < roi.Rows; y++)
+        for (var x = 0; x < roi.Cols; x++)
+            values.Add(roi.At<byte>(y, x));
+        values.Sort();
+        var maxVal = values[^1];
+        if (maxVal < 20)
+            return gray;
+
+        var lo = PercentileSorted(values, 0.05);
+        var hi = PercentileSorted(values, 0.98);
+        if (hi - lo < 12)
+            return gray;
+
+        var dst = new Mat();
+        gray.ConvertTo(dst, MatType.CV_8UC1, 255.0 / (hi - lo), -lo * 255.0 / (hi - lo));
+        return dst;
+    }
+
+    private static double PercentileSorted(List<byte> sorted, double p)
+    {
+        var idx = (int)Math.Clamp(Math.Round(p * (sorted.Count - 1)), 0, sorted.Count - 1);
+        return sorted[idx];
+    }
+
+    /// <param name="probeAlongLong">true=上下长边；false=左右长边（探针沿短轴、搜索沿长轴）。</param>
+    private static CaliperAttempt RefineGrayCore(
+        Mat gray, IReadOnlyList<Point2f> contour, bool brightToDark, bool probeAlongLong)
+    {
+        var housing = MaskHousing.Fit(contour);
+        var longLen = housing.LongLen;
+        var shortLen = housing.ShortLen;
         if (longLen < 16 || shortLen < 8)
             return CaliperAttempt.Miss();
 
-        // 与 UprightCrop / LongAxis 同一套未折 180° 的长边角：0° 时长边沿 +x，+短轴朝下
-        var theta0 = AngleGeometry.NormalizeDeg(
-            rect.Size.Width >= rect.Size.Height ? rect.Angle : rect.Angle + 90.0);
-        var c0x = rect.Center.X;
-        var c0y = rect.Center.Y;
+        // 壳体框（已剔凸起）上放卡尺；0° 时长边沿 +x，+短轴朝下
+        var theta0 = AngleGeometry.NormalizeDeg(housing.WarpAngleDeg);
+        var c0x = housing.Center.X;
+        var c0y = housing.Center.Y;
+        var probeSpanLen = probeAlongLong ? longLen : shortLen;
+        var searchSpanLen = probeAlongLong ? shortLen : longLen;
+        var probeCount = MaskHousing.ProbeCount(probeSpanLen);
+        var endInset = MaskHousing.ProbeInsetRatio(probeSpanLen, searchSpanLen, probeAlongLong);
+        LastDebug = LastDebug with { ProbeCount = probeCount };
         var rad = theta0 * Math.PI / 180.0;
         var lx = Math.Cos(rad);
         var ly = Math.Sin(rad);
         var sx = -Math.Sin(rad);
         var sy = Math.Cos(rad);
 
-        var halfLong = longLen / 2.0;
-        var tSpan = halfLong * (1.0 - 2.0 * EndInsetRatio);
-        if (tSpan < 8)
+        var halfProbe = probeSpanLen / 2.0;
+        var uSpan = halfProbe * (1.0 - 2.0 * endInset);
+        if (uSpan < 8)
             return CaliperAttempt.Miss();
 
-        var search = shortLen / 2.0 + Math.Max(16.0, 0.40 * shortLen);
+        var search = searchSpanLen / 2.0 + Math.Max(16.0, 0.40 * searchSpanLen);
         var searchI = Math.Max(8, (int)Math.Ceiling(search));
 
-        var searchBars = new List<Segment>(ProbeCount);
-        var invalidBars = new List<Segment>(ProbeCount);
-        var minus = new List<(double T, double S)>(ProbeCount);
-        var plus = new List<(double T, double S)>(ProbeCount);
+        var searchBars = new List<Segment>(probeCount);
+        var invalidBars = new List<Segment>(probeCount);
+        var minus = new List<(double T, double S)>(probeCount);
+        var plus = new List<(double T, double S)>(probeCount);
 
         Point2d At(double t, double s) => new(c0x + t * lx + s * sx, c0y + t * ly + s * sy);
-        Segment ProbeBar(double t) => new(At(t, -searchI), At(t, searchI));
 
-        for (var i = 0; i < ProbeCount; i++)
+        for (var i = 0; i < probeCount; i++)
         {
-            var u = ProbeCount == 1 ? 0.5 : (double)i / (ProbeCount - 1);
-            var t = -tSpan + 2.0 * tSpan * u;
-            var bar = ProbeBar(t);
-            if (!TryProbeEdges(gray, At(t, 0).X, At(t, 0).Y, lx, ly, sx, sy, searchI, shortLen,
-                    out var sMinus, out var sPlus))
+            var u = probeCount == 1 ? 0.5 : (double)i / (probeCount - 1);
+            var probeCoord = -uSpan + 2.0 * uSpan * u;
+            double px, py, dirX, dirY, orthX, orthY;
+            if (probeAlongLong)
+            {
+                px = At(probeCoord, 0).X;
+                py = At(probeCoord, 0).Y;
+                dirX = lx; dirY = ly;
+                orthX = sx; orthY = sy;
+            }
+            else
+            {
+                px = At(0, probeCoord).X;
+                py = At(0, probeCoord).Y;
+                dirX = sx; dirY = sy;
+                orthX = lx; orthY = ly;
+            }
+
+            var bar = new Segment(
+                new Point2d(px - searchI * orthX, py - searchI * orthY),
+                new Point2d(px + searchI * orthX, py + searchI * orthY));
+            if (!TryProbeEdges(gray, px, py, dirX, dirY, orthX, orthY, searchI, searchSpanLen,
+                    brightToDark, out var eMinus, out var ePlus))
             {
                 invalidBars.Add(bar);
                 continue;
             }
 
             searchBars.Add(bar);
-            minus.Add((t, sMinus));
-            plus.Add((t, sPlus));
+            if (probeAlongLong)
+            {
+                minus.Add((probeCoord, eMinus));
+                plus.Add((probeCoord, ePlus));
+            }
+            else
+            {
+                minus.Add((probeCoord, eMinus));
+                plus.Add((probeCoord, ePlus));
+            }
         }
 
-        var inMinus = FilterMedian(minus, shortLen);
-        var inPlus = FilterMedian(plus, shortLen);
+        var inMinus = FilterMedian(minus, searchSpanLen);
+        var inPlus = FilterMedian(plus, searchSpanLen);
         var inliers = new List<Point2d>(minus.Count + plus.Count);
         var rejected = new List<Point2d>();
-        ClassifyHits(minus, inMinus, At, inliers, rejected);
-        ClassifyHits(plus, inPlus, At, inliers, rejected);
+        Point2d Hit((double T, double S) p) => probeAlongLong ? At(p.T, p.S) : At(p.S, p.T);
+        ClassifyHits(minus, inMinus, Hit, inliers, rejected);
+        ClassifyHits(plus, inPlus, Hit, inliers, rejected);
         LastDebug = LastDebug with { ValidProbes = Math.Min(inMinus.Count, inPlus.Count) };
 
         CaliperViz Viz(Segment? fittedMinus = null, Segment? fittedPlus = null) =>
@@ -240,17 +389,28 @@ public static class MaskCaliperTab
             AngleUndirectedDeg = AngleGeometry.NormalizeDeg(theta0 + delta),
         };
 
-        var fittedMinus = FitEdge(tSpan, a1, b1, At);
-        var fittedPlus = FitEdge(tSpan, a2, b2, At);
+        var fittedMinus = FitEdge(uSpan, a1, b1, probeAlongLong, At);
+        var fittedPlus = FitEdge(uSpan, a2, b2, probeAlongLong, At);
         if (parallel > MaxParallelDeg)
             return CaliperAttempt.Miss(Viz(fittedMinus, fittedPlus));
-        var ratio = width / shortLen;
+        var ratio = width / searchSpanLen;
         if (ratio < WidthRatioLo || ratio > WidthRatioHi)
             return CaliperAttempt.Miss(Viz(fittedMinus, fittedPlus));
 
-        var sMid = (b1 + b2) / 2.0;
-        var cx = c0x + sMid * sx;
-        var cy = c0y + sMid * sy;
+        double cx, cy;
+        if (probeAlongLong)
+        {
+            var sMid = (b1 + b2) / 2.0;
+            cx = c0x + sMid * sx;
+            cy = c0y + sMid * sy;
+        }
+        else
+        {
+            var tMid = (b1 + b2) / 2.0;
+            cx = c0x + tMid * lx;
+            cy = c0y + tMid * ly;
+        }
+
         var thetaFit = theta0 + delta;
 
         var radF = thetaFit * Math.PI / 180.0;
@@ -259,10 +419,26 @@ public static class MaskCaliperTab
         var fsx = -Math.Sin(radF);
         var fsy = Math.Cos(radF);
 
-        // 凸起在壳体边缘外侧：用测得半宽在拟合系 ±width/2 外取样，不依赖掩码是否画出凸起
-        var tab = TryTabSign(gray, cx, cy, flx, fly, fsx, fsy, longLen, -width / 2.0, width / 2.0);
+        // 头尾相对壳体短轴：拟合宽度在左右卡尺下是长边，不能当半宽。
+        var bodyHalf = housing.ShortLen / 2.0;
+        var tabHouse = TabSignFromContour(contour, housing.Center.X, housing.Center.Y, fsx, fsy, bodyHalf);
+        var halfCal = probeAlongLong ? width / 2.0 : bodyHalf;
+        var tabCal = TabSignFromContour(contour, cx, cy, fsx, fsy, halfCal);
+        var tab = tabHouse.Sign is not null && tabCal.Sign is not null
+            ? (Math.Abs(tabHouse.Diff) >= Math.Abs(tabCal.Diff) ? tabHouse : tabCal)
+            : tabHouse.Sign is not null ? tabHouse : tabCal;
         if (tab.Sign is null)
-            tab = TabSignFromContour(contour, cx, cy, fsx, fsy, width / 2.0);
+            tab = TabSignFromCombTexture(gray, housing.Center.X, housing.Center.Y, flx, fly, fsx, fsy,
+                housing.LongLen / 2.0, bodyHalf);
+        if (tab.Sign is null)
+            tab = TabSignFromRoughness(contour, housing.Center.X, housing.Center.Y, flx, fly, fsx, fsy,
+                housing.LongLen / 2.0, bodyHalf);
+        if (tab.Sign is null)
+        {
+            var sLo = probeAlongLong ? -width / 2.0 : -bodyHalf;
+            var sHi = probeAlongLong ? width / 2.0 : bodyHalf;
+            tab = TryTabSign(gray, cx, cy, flx, fly, fsx, fsy, longLen, sLo, sHi);
+        }
 
         LastDebug = LastDebug with
         {
@@ -294,14 +470,14 @@ public static class MaskCaliperTab
     private static void ClassifyHits(
         List<(double T, double S)> samples,
         List<(double T, double S)> kept,
-        Func<double, double, Point2d> at,
+        Func<(double T, double S), Point2d> hit,
         List<Point2d> inliers,
         List<Point2d> rejected)
     {
         var keep = kept.ToHashSet();
         foreach (var p in samples)
         {
-            var pt = at(p.T, p.S);
+            var pt = hit(p);
             if (keep.Contains(p))
                 inliers.Add(pt);
             else
@@ -309,10 +485,11 @@ public static class MaskCaliperTab
         }
     }
 
-    private static Segment FitEdge(double tSpan, double a, double b, Func<double, double, Point2d> at)
+    private static Segment FitEdge(
+        double uSpan, double a, double b, bool probeAlongLong, Func<double, double, Point2d> at)
     {
-        Point2d End(double t) => at(t, a * t + b);
-        return new Segment(End(-tSpan), End(tSpan));
+        Point2d End(double u) => probeAlongLong ? at(u, a * u + b) : at(a * u + b, u);
+        return new Segment(End(-uSpan), End(uSpan));
     }
 
     private static CaliperViz BuildViz(
@@ -330,11 +507,11 @@ public static class MaskCaliperTab
             fittedMinus,
             fittedPlus);
 
-    /// <summary>沿短轴采剖面：从两侧外侧向中心找第一条壳体边（亮场亮→暗），避免内孔/槽抢峰。</summary>
+    /// <summary>沿短轴采剖面：从两侧外侧向中心找第一条壳体边，避免内孔/槽抢峰。</summary>
     private static bool TryProbeEdges(
         Mat gray, double px, double py,
         double lx, double ly, double sx, double sy,
-        int search, double shortLen,
+        int search, double shortLen, bool brightToDark,
         out double sMinus, out double sPlus)
     {
         sMinus = 0;
@@ -347,13 +524,13 @@ public static class MaskCaliperTab
             profile[i] = SampleAveraged(gray, px + s * sx, py + s * sy, lx, ly);
         }
 
-        var iMinus = FindFirstEdgeFromOutside(profile, fromLow: true, search);
-        var iPlus = FindFirstEdgeFromOutside(profile, fromLow: false, search);
+        var iMinus = FindFirstEdgeFromOutside(profile, fromLow: true, search, brightToDark);
+        var iPlus = FindFirstEdgeFromOutside(profile, fromLow: false, search, brightToDark);
         if (iMinus < 0 || iPlus < 0)
             return false;
 
-        sMinus = (iMinus - search) + SubpixelOffset(profile, iMinus, peakIsNegativeGradient: true);
-        sPlus = (iPlus - search) + SubpixelOffset(profile, iPlus, peakIsNegativeGradient: false);
+        sMinus = (iMinus - search) + SubpixelOffset(profile, iMinus, peakIsNegativeGradient: brightToDark);
+        sPlus = (iPlus - search) + SubpixelOffset(profile, iPlus, peakIsNegativeGradient: !brightToDark);
         if (!double.IsFinite(sMinus) || !double.IsFinite(sPlus))
             return false;
         var w = sPlus - sMinus;
@@ -363,10 +540,11 @@ public static class MaskCaliperTab
     }
 
     /// <summary>
-    /// fromLow：从 -s（图像上侧，θ≈0）往中心走，抓亮→暗；
-    /// 否则从 +s 往中心走，抓暗→亮（等价于从背景走进壳体）。
+    /// fromLow：从 -s（图像上侧，θ≈0）往中心走；
+    /// 否则从 +s 往中心走。亮场抓从背景走进壳体的亮→暗，暗场抓暗→亮。
     /// </summary>
-    private static int FindFirstEdgeFromOutside(Span<double> profile, bool fromLow, int search)
+    private static int FindFirstEdgeFromOutside(
+        Span<double> profile, bool fromLow, int search, bool brightToDark)
     {
         var n = profile.Length;
         if (fromLow)
@@ -375,7 +553,8 @@ public static class MaskCaliperTab
             {
                 if (!HasFiniteTriplet(profile, i))
                     continue;
-                var score = -(profile[i + 1] - profile[i - 1]);
+                var g = profile[i + 1] - profile[i - 1];
+                var score = brightToDark ? -g : g;
                 if (score >= MinGradient)
                     return i;
             }
@@ -386,7 +565,8 @@ public static class MaskCaliperTab
             {
                 if (!HasFiniteTriplet(profile, i))
                     continue;
-                var score = profile[i + 1] - profile[i - 1];
+                var g = profile[i + 1] - profile[i - 1];
+                var score = brightToDark ? g : -g;
                 if (score >= MinGradient)
                     return i;
             }
@@ -526,6 +706,127 @@ public static class MaskCaliperTab
         return (diff > 0 ? 1 : -1, diff);
     }
 
+    private static double DarkestQuartile(List<double> values)
+    {
+        values.Sort();
+        var n = Math.Max(1, values.Count / 4);
+        var sum = 0.0;
+        for (var i = 0; i < n; i++)
+            sum += values[i];
+        return sum / n;
+    }
+
+    /// <summary>灰度外侧差不够时：看轮廓哪一侧比壳体半宽多伸出一截（分割若画出凸起即可用）。</summary>
+    private static (int? Sign, double Diff) TabSignFromContour(
+        IReadOnlyList<Point2f> contour, double cx, double cy, double sx, double sy, double halfW)
+    {
+        var minS = double.MaxValue;
+        var maxS = double.MinValue;
+        foreach (var p in contour)
+        {
+            var s = (p.X - cx) * sx + (p.Y - cy) * sy;
+            if (s < minS) minS = s;
+            if (s > maxS) maxS = s;
+        }
+
+        var plusOver = maxS - halfW;
+        var minusOver = -halfW - minS;
+        var diff = plusOver - minusOver;
+        if (plusOver < 4 && minusOver < 4)
+            return (null, diff);
+        if (Math.Abs(diff) < 4)
+            return (null, diff);
+        return (diff > 0 ? 1 : -1, diff);
+    }
+
+    /// <summary>暗场齿列：沿两条长边外侧扫灰度峰，齿多的一侧为凸起。</summary>
+    private static (int? Sign, double Diff) TabSignFromCombTexture(
+        Mat gray, double cx, double cy,
+        double lx, double ly, double sx, double sy,
+        double halfLong, double halfShort)
+    {
+        var plus = CountEdgeTeeth(gray, cx, cy, lx, ly, sx, sy, +1, halfLong, halfShort);
+        var minus = CountEdgeTeeth(gray, cx, cy, lx, ly, sx, sy, -1, halfLong, halfShort);
+        var diff = plus - minus;
+        if (Math.Max(plus, minus) < 6)
+            return (null, diff);
+        if (Math.Min(plus, minus) > 2)
+            return (null, diff);
+        if (Math.Abs(diff) < 4)
+            return (null, diff);
+        return (diff > 0 ? 1 : -1, diff);
+    }
+
+    private static int CountEdgeTeeth(
+        Mat gray, double cx, double cy,
+        double lx, double ly, double sx, double sy,
+        int side, double halfLong, double halfShort)
+    {
+        var nT = Math.Clamp((int)Math.Round(halfLong * 1.2), 32, 96);
+        var tSpan = 0.42 * halfLong;
+        var sLo = 0.30 * halfShort;
+        var sHi = 1.35 * halfShort;
+        var nS = Math.Max(4, (int)Math.Ceiling(sHi - sLo));
+        Span<double> profile = nT <= 128 ? stackalloc double[nT] : new double[nT];
+        var finite = 0;
+        for (var i = 0; i < nT; i++)
+        {
+            var t = nT == 1 ? 0.0 : -tSpan + 2.0 * tSpan * i / (nT - 1);
+            var best = double.NegativeInfinity;
+            for (var k = 0; k < nS; k++)
+            {
+                var s = side * (sLo + (sHi - sLo) * k / Math.Max(1, nS - 1));
+                var g = SampleBilinear(gray, cx + t * lx + s * sx, cy + t * ly + s * sy);
+                if (!double.IsFinite(g))
+                    continue;
+                if (g > best)
+                    best = g;
+            }
+
+            profile[i] = best;
+            if (double.IsFinite(best))
+                finite++;
+        }
+
+        if (finite < nT / 2)
+            return 0;
+
+        var sum = 0.0;
+        var peak = double.NegativeInfinity;
+        var valley = double.PositiveInfinity;
+        for (var i = 0; i < nT; i++)
+        {
+            if (!double.IsFinite(profile[i]))
+                continue;
+            sum += profile[i];
+            if (profile[i] > peak) peak = profile[i];
+            if (profile[i] < valley) valley = profile[i];
+        }
+
+        var mean = sum / finite;
+        if (mean > 160)
+            return 0;
+
+        var thresh = mean + 0.22 * Math.Max(8, peak - valley);
+        var minGap = Math.Max(2, nT / 28);
+        var last = -minGap;
+        var teeth = 0;
+        for (var i = 1; i < nT - 1; i++)
+        {
+            if (!double.IsFinite(profile[i - 1]) || !double.IsFinite(profile[i]) || !double.IsFinite(profile[i + 1]))
+                continue;
+            if (profile[i] < thresh)
+                continue;
+            if (profile[i] >= profile[i - 1] && profile[i] >= profile[i + 1] && i - last >= minGap)
+            {
+                teeth++;
+                last = i;
+            }
+        }
+
+        return teeth;
+    }
+
     /// <summary>长边外侧弧长：齿列周长远大于缺口，可作头尾；也用于 Auto 判断要不要改抓左右边。</summary>
     private static (int? Sign, double Diff) TabSignFromRoughness(
         IReadOnlyList<Point2f> contour,
@@ -601,37 +902,5 @@ public static class MaskCaliperTab
         }
 
         return (minus, plus);
-    }
-
-    private static double DarkestQuartile(List<double> values)
-    {
-        values.Sort();
-        var n = Math.Max(1, values.Count / 4);
-        var sum = 0.0;
-        for (var i = 0; i < n; i++)
-            sum += values[i];
-        return sum / n;
-    }
-
-    private static (int? Sign, double Diff) TabSignFromContour(
-        IReadOnlyList<Point2f> contour, double cx, double cy, double sx, double sy, double halfW)
-    {
-        var minS = double.MaxValue;
-        var maxS = double.MinValue;
-        foreach (var p in contour)
-        {
-            var s = (p.X - cx) * sx + (p.Y - cy) * sy;
-            if (s < minS) minS = s;
-            if (s > maxS) maxS = s;
-        }
-
-        var plusOver = maxS - halfW;
-        var minusOver = -halfW - minS;
-        var diff = plusOver - minusOver;
-        if (plusOver < 4 && minusOver < 4)
-            return (null, diff);
-        if (Math.Abs(diff) < 4)
-            return (null, diff);
-        return (diff > 0 ? 1 : -1, diff);
     }
 }

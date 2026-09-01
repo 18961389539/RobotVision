@@ -119,7 +119,9 @@ public static class MaskHousing
         if (bounds.Width < 8 || bounds.Height < 8)
             return null;
 
-        using var mask = Mat.Zeros(bounds.Height, bounds.Width, MatType.CV_8UC1);
+        // 注意:不能用 Mat.Zeros——OpenCvSharp 中 Mat.Zeros 返回的 Mat 上 FillPoly/FillConvexPoly 写入无效
+        //（area 恒为 0,曾导致开运算/占空比剔除静默失效）。必须用 new Mat + Scalar.All(0)。
+        using var mask = new Mat(bounds.Height, bounds.Width, MatType.CV_8UC1, Scalar.All(0));
         var local = new Point[contour.Count];
         for (var i = 0; i < contour.Count; i++)
         {
@@ -133,9 +135,15 @@ public static class MaskHousing
         if (area0 < 32)
             return null;
 
+        // FindContours→FillPoly 往返会把形状每边放大约 1px(轮廓点是前景像素,填充含边界),
+        // 凸起宽度因此被抬高 2px,可能与开运算核等宽而无法剔除。先收 1px 抵消。
+        using var tightened = new Mat();
+        using var tightenKernel = Cv2.GetStructuringElement(MorphShapes.Cross, new Size(3, 3));
+        Cv2.Erode(mask, tightened, tightenKernel);
+
         using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(k, k));
         using var opened = new Mat();
-        Cv2.MorphologyEx(mask, opened, MorphTypes.Open, kernel);
+        Cv2.MorphologyEx(tightened, opened, MorphTypes.Open, kernel);
         var area1 = Cv2.CountNonZero(opened);
         var ratio = area1 / (double)area0;
         if (ratio < 0.50 || ratio > 0.96)
@@ -178,7 +186,8 @@ public static class MaskHousing
         if (bounds.Width < 8 || bounds.Height < 8)
             return null;
 
-        using var mask = Mat.Zeros(bounds.Height, bounds.Width, MatType.CV_8UC1);
+        // 同上:Mat.Zeros 上 FillPoly 写入无效,须用 new Mat。
+        using var mask = new Mat(bounds.Height, bounds.Width, MatType.CV_8UC1, Scalar.All(0));
         var local = new Point[n];
         for (var i = 0; i < n; i++)
         {

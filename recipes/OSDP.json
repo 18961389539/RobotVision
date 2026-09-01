@@ -1,0 +1,15 @@
+// 合成测试配方：仅供 RobotVision.Tests/MaskCaliperTabTimingTests 计时对比使用（无真实模型/相机）。
+// 模板为程序生成的 240x120 灰底纹理 PNG；models[0] 为占位符（ReferenceValidator 默认不校验模型存在）。
+{
+  "serialNumber": 0,
+  "cameraId": "test",
+  "angleMode": "MaskTemplate",
+  "models": [
+    "dummy.onnx"
+  ],
+  "template": {
+    "templateImageBase64": "iVBORw0KGgoAAAANSUhEUgAAAPAAAAB4CAIAAABD1OhwAAABf0lEQVR42u3SQREAIAwDwdrAEP6lIAEHvOhAO3sSko0pNSpMIKAloCWgJaAFtAS0BLQEtAS0gJaAloCWHoAeOgYQ0EALaKAFNNBAAw000EALaKAFNNACGmiggQYaaKAFNNACGmgBDTTQQAMNNNACGmgBDbSABhpoAQ000AIaaAENtIAGGmgBDTTQAhpoAQ20gAYaaAENNNBVWpcCGmiggQYaaKCBBlpAAw000EADDTTQQAMNNNBAC2iggQYaaKCBBhpooIEGGmgBDTTQQAMNNNBAAw000EADLaCBBhpooIEGGmiggQYaaKCB1j8BDTTQAhpooAU00AIaaKCBBhpoAQ000AIaaAENNNBAAw000AIaaAENtIAGGmiggQYaaAENtIAGWkADDTTQQAMNtIAGWkB3Am1DoIG2IdBAAy2ggXYG0EADbUOggbYh0EADLaCBdgbQQANtQ6CBBhpooIEW0JVBS7UCWkBLQEtAS0ALaAloCWgJaAloAS0BLQEtpbQB2KMrTfDNZ08AAAAASUVORK5CYII=",
+    "refineRangeDeg": 5,
+    "matchThreshold": 0.6
+  }
+}
