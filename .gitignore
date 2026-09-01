@@ -4,6 +4,10 @@ obj/
 .vs/
 TestResults/
 [Ll]ogs/
+# 注意:上方模式会吞掉任意深度的 Logs/logs 目录(曾误杀 src/.../Features/Logs 导致克隆编译失败)
+# 源码中的 Logs 功能目录必须入库,以下规则显式放行
+!src/**/Logs/
+!tests/**/Logs/
 
 # AI 会话草稿（UI 截图、评审记录、方案提案）
 artifacts/
