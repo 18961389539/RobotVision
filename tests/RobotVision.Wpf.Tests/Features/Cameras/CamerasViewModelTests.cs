@@ -115,19 +115,16 @@ public class CamerasViewModelTests : IDisposable
     }
 
     [Fact]
-    public void TestGrab_ShowsResolutionElapsedAndCaptureTime()
+    public async Task TestGrab_ShowsResolutionElapsedAndCaptureTime()
     {
-        TestInfra.RunSta(() =>
-        {
-            var vm = CreateVm();
-            vm.TestGrabCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+        var vm = CreateVm();
+        await vm.TestGrabCommand.ExecuteAsync(null);
 
-            vm.PreviewCaption.Should().Contain("测试取图");
-            vm.PreviewCaption.Should().Contain("64×64");
-            vm.PreviewCaption.Should().Contain("ms");
-            vm.PreviewToolTip.Should().StartWith("采集时刻");
-            vm.Message.Should().Contain("ms");
-        });
+        vm.PreviewCaption.Should().Contain("测试取图");
+        vm.PreviewCaption.Should().Contain("64×64");
+        vm.PreviewCaption.Should().Contain("ms");
+        vm.PreviewToolTip.Should().StartWith("采集时刻");
+        vm.Message.Should().Contain("ms");
     }
 
     [Fact]

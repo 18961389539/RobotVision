@@ -109,70 +109,82 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public void LogSink_Entries_AppearInLogs()
     {
-        var vm = CreateVm();
-        try
+        TestInfra.RunSta(() =>
         {
-            var logger = _sink.CreateLogger("Test.Category");
-            MainViewModelTestsLog.HelloInfo(logger);
-            MainViewModelTestsLog.HelloWarn(logger);
+            var vm = CreateVm();
+            try
+            {
+                var logger = _sink.CreateLogger("Test.Category");
+                MainViewModelTestsLog.HelloInfo(logger);
+                MainViewModelTestsLog.HelloWarn(logger);
 
-            vm.Logs.Should().HaveCount(2);
-            vm.Logs[0].Message.Should().Contain("hello info");
-        }
-        finally { vm.Dispose(); }
+                vm.Logs.Should().HaveCount(2);
+                vm.Logs[0].Message.Should().Contain("hello info");
+            }
+            finally { vm.Dispose(); }
+        });
     }
 
     [Fact]
     public void LogFilter_OnlyErrors_FiltersDisplayedLogs()
     {
-        var vm = CreateVm();
-        try
+        TestInfra.RunSta(() =>
         {
-            var logger = _sink.CreateLogger("Test.Category");
-            MainViewModelTestsLog.InfoLine(logger);
-            MainViewModelTestsLog.ErrorLine(logger);
+            var vm = CreateVm();
+            try
+            {
+                var logger = _sink.CreateLogger("Test.Category");
+                MainViewModelTestsLog.InfoLine(logger);
+                MainViewModelTestsLog.ErrorLine(logger);
 
-            vm.Logs.Should().HaveCount(2);
+                vm.Logs.Should().HaveCount(2);
 
-            vm.LogFilter = "仅错误";
-            vm.Logs.Should().ContainSingle();
-            vm.Logs[0].Message.Should().Contain("error line");
+                vm.LogFilter = "仅错误";
+                vm.Logs.Should().ContainSingle();
+                vm.Logs[0].Message.Should().Contain("error line");
 
-            vm.LogFilter = "全部";
-            vm.Logs.Should().HaveCount(2);
-        }
-        finally { vm.Dispose(); }
+                vm.LogFilter = "全部";
+                vm.Logs.Should().HaveCount(2);
+            }
+            finally { vm.Dispose(); }
+        });
     }
 
     [Fact]
     public void LogCapacity_IsBounded()
     {
-        var vm = CreateVm();
-        try
+        TestInfra.RunSta(() =>
         {
-            var logger = _sink.CreateLogger("Test.Category");
-            for (var i = 0; i < 600; i++)
-                MainViewModelTestsLog.LineIndex(logger, i);
+            var vm = CreateVm();
+            try
+            {
+                var logger = _sink.CreateLogger("Test.Category");
+                for (var i = 0; i < 600; i++)
+                    MainViewModelTestsLog.LineIndex(logger, i);
 
-            vm.Logs.Count.Should().BeLessThanOrEqualTo(500); // LogCapacity = 500
-        }
-        finally { vm.Dispose(); }
+                vm.Logs.Count.Should().BeLessThanOrEqualTo(500); // LogCapacity = 500
+            }
+            finally { vm.Dispose(); }
+        });
     }
 
     [Fact]
     public void ClearLog_EmptiesBothBuffers()
     {
-        var vm = CreateVm();
-        try
+        TestInfra.RunSta(() =>
         {
-            MainViewModelTestsLog.SimpleX(_sink.CreateLogger("T"));
-            vm.Logs.Should().NotBeEmpty();
+            var vm = CreateVm();
+            try
+            {
+                MainViewModelTestsLog.SimpleX(_sink.CreateLogger("T"));
+                vm.Logs.Should().NotBeEmpty();
 
-            vm.ClearLogCommand.Execute(null);
+                vm.ClearLogCommand.Execute(null);
 
-            vm.Logs.Should().BeEmpty();
-        }
-        finally { vm.Dispose(); }
+                vm.Logs.Should().BeEmpty();
+            }
+            finally { vm.Dispose(); }
+        });
     }
 
     [Fact]

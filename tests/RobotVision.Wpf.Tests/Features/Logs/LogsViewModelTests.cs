@@ -143,6 +143,8 @@ public class LogsViewModelTests
     public void ReloadAsync_KeywordFilter_MatchesMessageOrSource()
     {
         // 关键词过滤经 300ms 防抖 DispatcherTimer 应用：STA 线程 + PushFrame 消息循环才能可靠触发
+        // 注意：ReloadAsync 内部有 await Task.Run，不能在 UI 线程 GetAwaiter().GetResult()（与 continuation 互等死锁），
+        // 改为 fire-and-forget + PumpUntil 泵队列等待加载完成。
         TestInfra.RunSta(() =>
         {
             using var dir = new TestInfra.TempDir("rv_logs_kw");
@@ -157,7 +159,8 @@ public class LogsViewModelTests
             cfg.FileLogging.Folder = logs;
 
             var vm = new LogsViewModel(cfg);
-            vm.ReloadCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+            _ = vm.ReloadCommand.ExecuteAsync(null);
+            PumpUntil(() => vm.Rows.Count == 3);
             vm.Rows.Should().HaveCount(3);
 
             vm.Keyword = "recipe";
