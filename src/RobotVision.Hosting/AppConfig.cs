@@ -260,11 +260,18 @@ public sealed class ChatConfig
     /// <summary>true = 对话页自动拉起 llama-server（CPU）。</summary>
     public bool AutoStart { get; set; } = true;
 
-    /// <summary>llama-server.exe；空则按常见目录查找。</summary>
-    public string LlamaServerPath { get; set; } = @"E:\光模块\llm\llama-cpp\llama-server.exe";
+    /// <summary>
+    /// llama-server.exe 路径。留空则自动查找（随程序目录 / 用户数据目录）；
+    /// 也可设环境变量 ROBOTVISION_LLAMA_SERVER 覆盖。
+    /// 默认值必须保持为空——硬编码开发机绝对路径会让其他机器一启动就指向不存在的 exe。
+    /// </summary>
+    public string LlamaServerPath { get; set; } = "";
 
-    /// <summary>Q4 GGUF 路径。</summary>
-    public string GgufPath { get; set; } = @"E:\光模块\llm\Qwen3.5-4B-Q4_K_M.gguf";
+    /// <summary>
+    /// Q4 GGUF 路径。留空则自动查找（随程序目录 / 用户数据目录）；
+    /// 也可设环境变量 ROBOTVISION_GGUF 覆盖。
+    /// </summary>
+    public string GgufPath { get; set; } = "";
 
     public int Port { get; set; } = 8080;
 

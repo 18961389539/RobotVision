@@ -598,21 +598,42 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
         Interlocked.Exchange(ref _pendingFrame, null)?.TrySetCanceled();
         _connected = false;
 
+        // 断连阶段任何一步失败都不得阻断后续清理，但每条失败都要留痕，
+        // 否则现场"相机断连后资源没释放干净"这类问题无从追查。
         if (_session is not null)
         {
             try { RunSync(ct => _session.StopAcquisitionAsync(ct), TimeSpan.FromSeconds(3)); }
-            catch (Exception) { }
+            catch (Exception ex)
+            {
+                if (_log is { } log)
+                    GigEVisionCameraLog.DisconnectStopAcquisitionFailed(log, ex, Id);
+            }
         }
 
         if (_stream is not null)
         {
             _stream.FrameReceived -= OnFrameReceived;
-            try { _stream.Stop(); } catch (Exception) { }
-            try { _stream.Dispose(); } catch (Exception) { }
+            try
+            {
+                _stream.Stop();
+                _stream.Dispose();
+            }
+            catch (Exception ex)
+            {
+                if (_log is { } log)
+                    GigEVisionCameraLog.DisconnectStreamCleanupFailed(log, ex, Id);
+            }
+
             _stream = null;
         }
 
-        try { _session?.Dispose(); } catch (Exception) { }
+        try { _session?.Dispose(); }
+        catch (Exception ex)
+        {
+            if (_log is { } log)
+                GigEVisionCameraLog.DisconnectSessionDisposeFailed(log, ex, Id);
+        }
+
         _session = null;
     }
 

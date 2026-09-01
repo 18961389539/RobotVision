@@ -96,20 +96,30 @@ public partial class FailuresViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var files = Directory.GetFiles(_store.Folder, "*.png")
-            .OrderByDescending(p => p, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        // 目录枚举是同步 IO，放在 UI 线程会随失败图数量线性卡顿，挪到后台一次完成。
+        var files = await Task.Run(
+            () => Directory.GetFiles(_store.Folder, "*.png")
+                .OrderByDescending(p => p, StringComparer.OrdinalIgnoreCase)
+                .Select(p => (Png: p, Json: Path.ChangeExtension(p, ".json")))
+                .ToList(),
+            token);
 
         Message = $"加载中：{files.Count} 张…";
         var loaded = new List<FailureItem>(files.Count);
-        foreach (var png in files)
+        foreach (var (png, json) in files)
         {
             if (token.IsCancellationRequested)
                 return;
 
-            var json = Path.ChangeExtension(png, ".json");
-            var (recipe, code, meta) = ReadMeta(json);
-            var thumb = await Task.Run(() => LoadBitmap(png, 220) ?? PlaceholderThumb, token);
+            // 元数据读取（同步文件 IO）与缩略图解码（CPU 密集）合并为一次后台调用：
+            // 原先 ReadMeta 留在 UI 线程，每张图一次同步读盘，大量失败图时明显卡顿。
+            var (recipe, code, meta, thumb) = await Task.Run(
+                () =>
+                {
+                    var (r, c, t) = ReadMeta(json);
+                    return (r, c, t, LoadBitmap(png, 220) ?? PlaceholderThumb);
+                },
+                token);
             if (token.IsCancellationRequested)
                 return;
             loaded.Add(new FailureItem(
@@ -316,11 +326,15 @@ public partial class FailuresViewModel : ObservableObject, IDisposable
     private static string GetString(JsonElement root, string name) =>
         root.TryGetProperty(name, out var v) ? v.ToString() : "-";
 
-    private static void TryDelete(string path)
+    /// <summary>
+    /// 尽力删除；失败不阻断批量清理，但必须留痕。
+    /// 否则用户点删除后静默失败，会误以为留存已清掉。
+    /// </summary>
+    private void TryDelete(string path)
     {
         try { File.Delete(path); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException ex) { WpfUiLog.FailureDeleteFailed(_log, ex, path); }
+        catch (UnauthorizedAccessException ex) { WpfUiLog.FailureDeleteFailed(_log, ex, path); }
     }
 
     public void Dispose()

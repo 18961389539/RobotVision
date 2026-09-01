@@ -206,11 +206,22 @@ public sealed class LlamaServerHost : IHostedService, IDisposable
         _logWriter = null;
     }
 
+    /// <summary>
+    /// llama-server.exe 查找顺序：环境变量 → 随程序目录 → 用户数据目录。
+    /// 不含任何开发机绝对路径；本机自定义目录请用 ROBOTVISION_LLAMA_SERVER 环境变量。
+    /// </summary>
     private static IEnumerable<string> LlamaServerCandidates()
     {
-        yield return Path.Combine(@"E:\光模块\llm\llama-cpp", "llama-server.exe");
+        var env = Environment.GetEnvironmentVariable("ROBOTVISION_LLAMA_SERVER");
+        if (!string.IsNullOrWhiteSpace(env))
+            yield return env;
+
         yield return Path.Combine(AppContext.BaseDirectory, "llama-server.exe");
         yield return Path.Combine(AppContext.BaseDirectory, "llama-cpp", "llama-server.exe");
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrEmpty(localAppData))
+            yield return Path.Combine(localAppData, "RobotVision", "llm", "llama-server.exe");
     }
 
     internal static bool IsLocalPortOpen(int port)
@@ -227,9 +238,41 @@ public sealed class LlamaServerHost : IHostedService, IDisposable
         }
     }
 
+    /// <summary>
+    /// GGUF 查找顺序：环境变量 → 随程序目录 → 用户数据目录（含子目录扫描）。
+    /// 不含任何开发机绝对路径；本机自定义目录请用 ROBOTVISION_GGUF 环境变量。
+    /// </summary>
     private static IEnumerable<string> GgufCandidates()
     {
-        yield return Path.Combine(@"E:\光模块\llm", "Qwen3.5-4B-Q4_K_M.gguf");
+        var env = Environment.GetEnvironmentVariable("ROBOTVISION_GGUF");
+        if (!string.IsNullOrWhiteSpace(env))
+            yield return env;
+
         yield return Path.Combine(AppContext.BaseDirectory, "Qwen3.5-4B-Q4_K_M.gguf");
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrEmpty(localAppData))
+            yield break;
+
+        var llmDir = Path.Combine(localAppData, "RobotVision", "llm");
+        yield return Path.Combine(llmDir, "Qwen3.5-4B-Q4_K_M.gguf");
+
+        // 用户数据目录下可能放了其它 Q4 GGUF，按文件名排序取第一个，避免依赖具体模型版本
+        if (!Directory.Exists(llmDir))
+            yield break;
+
+        string[] found;
+        try
+        {
+            found = Directory.GetFiles(llmDir, "*.gguf");
+        }
+        catch (Exception)
+        {
+            yield break;
+        }
+
+        Array.Sort(found, StringComparer.OrdinalIgnoreCase);
+        foreach (var file in found)
+            yield return file;
     }
 }

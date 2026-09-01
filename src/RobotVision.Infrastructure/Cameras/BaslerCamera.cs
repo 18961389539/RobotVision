@@ -41,6 +41,11 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     private const int GigEUnderrunErrorCode = -520093676;
 
     private Camera? _camera;
+
+    // CA2213 误报：_converter 在 Dispose() 的 finally 块中被无条件释放，
+    // 但分析器无法识别 try/finally 路径，仍判定"从未释放"。此处代码已正确，故抑制。
+    [SuppressMessage("Usage", "CA2213:可释放字段应被释放",
+        Justification = "Dispose() 的 finally 块中已无条件调用 _converter.Dispose()，分析器无法识别该路径。")]
     private readonly PixelDataConverter _converter;
     private readonly string _deviceId;
     private readonly int _grabTimeoutMs;
@@ -939,11 +944,18 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             return;
         _disposed = true;
 
-        lock (_grabLock)
+        try
         {
-            ReleaseDevice();
+            lock (_grabLock)
+            {
+                ReleaseDevice();
+            }
         }
-
-        _converter.Dispose();
+        finally
+        {
+            // 必须无条件释放：ReleaseDevice 抛异常时若跳过这里，
+            // PixelDataConverter 持有的非托管缓冲区会泄漏（CA2213）。
+            _converter.Dispose();
+        }
     }
 }

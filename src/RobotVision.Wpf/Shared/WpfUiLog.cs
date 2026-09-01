@@ -24,4 +24,8 @@ internal static partial class WpfUiLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Chat probe failed")]
     public static partial void ChatProbeFailed(ILogger logger, Exception ex);
+
+    // 删除失败图/元数据失败：此前完全静默，用户会以为已删除成功。
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to delete failure artifact {Path}")]
+    public static partial void FailureDeleteFailed(ILogger logger, Exception ex, string path);
 }
