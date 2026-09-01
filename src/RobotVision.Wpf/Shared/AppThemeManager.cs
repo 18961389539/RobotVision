@@ -3,12 +3,9 @@ using Wpf.Ui.Appearance;
 
 namespace RobotVision.WpfHost.Shared;
 
-/// <summary>应用级深浅主题切换与排版覆盖刷新。</summary>
+/// <summary>应用级深浅主题切换与语义画刷/工具提示换肤。</summary>
 internal static class AppThemeManager
 {
-    private static readonly Uri TypographyOverridesUri = new(
-        "/RobotVision.Wpf;component/Shared/TypographyOverrides.xaml", UriKind.Relative);
-
     private static readonly Uri DarkPaletteUri = new(
         "/RobotVision.Wpf;component/Shared/DarkPaletteResources.xaml", UriKind.Relative);
 
@@ -38,7 +35,9 @@ internal static class AppThemeManager
     {
         CurrentTheme = theme;
         ApplicationThemeManager.Apply(theme);
-        RefreshTypographyOverrides();
+        // 注意：不得重建 TypographyOverrides.xaml！其样式 setter 全部为 {DynamicResource}，
+        // 主题跟随已由 DynamicResource 保证；重建会让 App.xaml 里 BasedOn="{StaticResource ...}"
+        // 的引用指向被移除的旧实例（内容等价但 ReferenceEquals 失败，且徒增解析开销）。
         RefreshTooltipChrome(theme);
         RefreshPalette(theme);
     }
@@ -72,18 +71,5 @@ internal static class AppThemeManager
             return;
 
         SwapMergedDictionary(root, DarkTooltipUri, LightTooltipUri, theme == ApplicationTheme.Light);
-    }
-
-    public static void RefreshTypographyOverrides()
-    {
-        if (Application.Current?.Resources is not ResourceDictionary root)
-            return;
-
-        var existing = root.MergedDictionaries
-            .FirstOrDefault(d => d.Source == TypographyOverridesUri);
-        if (existing is not null)
-            root.MergedDictionaries.Remove(existing);
-
-        root.MergedDictionaries.Add(new ResourceDictionary { Source = TypographyOverridesUri });
     }
 }
