@@ -25,7 +25,7 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Setup .NET 8
+    - name: Setup .NET 10
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '10.0.x'
@@ -60,7 +60,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup .NET 8
+    - name: Setup .NET 10
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '10.0.x'
@@ -68,7 +68,7 @@ jobs:
         cache-dependency-path: 'Directory.Packages.props'
 
     - name: Publish (self-contained win-x64)
-      # 自包含:运行时打进产物,目标机器免装 .NET 8;多文件目录形态(单文件易被杀软误报)
+      # 自包含:运行时打进产物,目标机器免装 .NET 10;多文件目录形态(单文件易被杀软误报)
       run: dotnet publish src/RobotVision.Wpf/RobotVision.Wpf.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o publish-out --nologo
 
     - name: Upload artifact
@@ -90,7 +90,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup .NET 8
+    - name: Setup .NET 10
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '10.0.x'
