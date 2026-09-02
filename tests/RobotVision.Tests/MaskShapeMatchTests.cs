@@ -77,6 +77,25 @@ public sealed class MaskShapeMatchTests
         Assert.Null(MaskShapeMatch.BuildTeach(blank));
     }
 
+    [Fact]
+    public void ShapeModel_HasNonTrivialDirectionBins()
+    {
+        // 有向 Chamfer 前提：示教边点方向 bin 有效（非全无效 0xFF）且覆盖 >1 个方向
+        // （不对称件横边/竖边/圆点弧边方向不同）。若全同向说明方向提取失效。
+        using var img = Paint(0);
+        var model = Teach(img, Contour(0));
+        Assert.NotNull(model);
+        var bins = model.DirBins;
+        Assert.NotNull(bins);
+        Assert.Equal(model.PointCount, bins.Length);
+        var valid = bins.Count(b => b < 16);
+        var distinct = bins.Where(b => b < 16).Distinct().Count();
+        Assert.True(valid > model.PointCount * 0.5,
+            $"示教方向有效点仅 {valid}/{model.PointCount}");
+        Assert.True(distinct >= 2,
+            $"示教方向应覆盖多 bin（横边+竖边+弧），实际仅 {distinct} 个不同方向");
+    }
+
     private static void AssertNearPart(Point2d center, Point2f[] contour)
     {
         var housing = MaskHousing.FitObb(contour);

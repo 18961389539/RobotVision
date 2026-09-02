@@ -20,6 +20,14 @@ public static class MaskShapeMatch
     private const double CropMarginRatio = 0.15;
     private const int TeachBorderPx = 4;
 
+    // ── 有向 Chamfer（HALCON shape-based 轻量版）────────────
+    // 方向量化：梯度方向 atan2(dy,dx) 折叠到 [0,180)（Canny 边无极性），16 bin × 11.25°。
+    private const int DirBins = 16;
+    private const double DirBinWidthDeg = 180.0 / DirBins;      // 11.25
+    private const int DirTolBins = 6;                            // 67.5°：正交干扰(90°)仍可分,且容忍转正插值方向漂移
+    /// <summary>Sobel 幅值下限²（8-bit 图）：低于此值方向不可靠（平坦区/转正插值模糊带），标记无效豁免方向检查。</summary>
+    private const double MinDirGradientSq = 36.0;                // 幅值 ~6
+
     public sealed record Result(double AngleDeg, Point2d Center, double Score, double MeanDistPx, double HitRate);
 
     public sealed record ShapeViz(IReadOnlyList<Point2d> Inliers, IReadOnlyList<Point2d> Rejected)
@@ -35,11 +43,13 @@ public static class MaskShapeMatch
     public sealed class ShapeModel
     {
         internal ShapeModel(
-            Point2f[] points, double[] weights, double centerX, double centerY,
+            Point2f[] points, double[] weights, byte[] dirBins,
+            double centerX, double centerY,
             Point2f polarLeft, Point2f polarRight, double polarDelta)
         {
             Points = points;
             Weights = weights;
+            DirBins = dirBins;
             CenterX = centerX;
             CenterY = centerY;
             PolarLeft = polarLeft;
@@ -49,6 +59,8 @@ public static class MaskShapeMatch
 
         internal Point2f[] Points { get; }
         internal double[] Weights { get; }
+        /// <summary>每个示教边点的梯度方向 bin（[0,DirBins)，折叠 180° 无向）。与 Points 一一对应。</summary>
+        internal byte[] DirBins { get; }
         internal double CenterX { get; }
         internal double CenterY { get; }
         internal Point2f PolarLeft { get; }
@@ -157,8 +169,71 @@ public static class MaskShapeMatch
         var (left, right) = PolarProbes(sampled.Points);
         var delta = SampleGray(gray, right.X + sampled.Cx, right.Y + sampled.Cy)
                     - SampleGray(gray, left.X + sampled.Cx, left.Y + sampled.Cy);
-        return new ShapeModel(sampled.Points, RadiusWeights(sampled.Points), sampled.Cx, sampled.Cy,
-            left, right, delta);
+        var dirBins = TeachDirBins(gray, sampled.Points, sampled.Cx, sampled.Cy);
+        return new ShapeModel(sampled.Points, RadiusWeights(sampled.Points), dirBins,
+            sampled.Cx, sampled.Cy, left, right, delta);
+    }
+
+    /// <summary>对每个示教边点（相对中心坐标）插值其灰度梯度方向 bin（折叠 180° 无向）。</summary>
+    private static byte[] TeachDirBins(Mat gray, Point2f[] pts, double cx, double cy)
+    {
+        var binMap = BuildDirMap(gray);
+        try
+        {
+            var bins = new byte[pts.Length];
+            var w = binMap.Cols;
+            var h = binMap.Rows;
+            for (var i = 0; i < pts.Length; i++)
+            {
+                // 边点在其 3×3 邻域多数方向：直接采样该点 bin（Sobel 在边缘像素处方向锐利）
+                // 注意：pts 是相对中心的坐标，查方向图须加回中心偏移
+                var x = (int)Math.Round(Math.Clamp(pts[i].X + cx, 0, w - 1));
+                var y = (int)Math.Round(Math.Clamp(pts[i].Y + cy, 0, h - 1));
+                bins[i] = binMap.At<byte>(y, x);
+            }
+
+            return bins;
+        }
+        finally
+        {
+            binMap.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 灰度梯度方向 bin 图（CV_8U）：Sobel 两向 → atan2 方向 → 折叠 [0,180) → 量化 DirBins。
+    /// 现场搜索图与示教图各算一次，搜索循环全程复用（开销 = 1 次 Sobel，可忽略）。
+    /// </summary>
+    private static Mat BuildDirMap(Mat gray)
+    {
+        using var gx = new Mat();
+        using var gy = new Mat();
+        Cv2.Sobel(gray, gx, MatType.CV_32F, 1, 0, ksize: 3);
+        Cv2.Sobel(gray, gy, MatType.CV_32F, 0, 1, ksize: 3);
+        var binMap = new Mat(gray.Rows, gray.Cols, MatType.CV_8UC1, Scalar.All(0));
+        var bx = gx.GetGenericIndexer<float>();
+        var by = gy.GetGenericIndexer<float>();
+        var bm = binMap.GetGenericIndexer<byte>();
+        for (var y = 0; y < gray.Rows; y++)
+        for (var x = 0; x < gray.Cols; x++)
+        {
+            var dx = bx[y, x];
+            var dy = by[y, x];
+            // 弱梯度（平坦区/插值模糊带）方向无意义 → 0xFF 无效标记（运行时豁免方向检查）
+            if (dx * dx + dy * dy < MinDirGradientSq)
+            {
+                bm[y, x] = 0xFF;
+                continue;
+            }
+
+            var deg = Math.Atan2(dy, dx) * 180.0 / Math.PI; // [-180,180]
+            if (deg < 0)
+                deg += 180.0;                                // 折叠：θ 与 θ+180 同边
+            var bin = (int)(deg / DirBinWidthDeg);
+            bm[y, x] = (byte)Math.Clamp(bin, 0, DirBins - 1);
+        }
+
+        return binMap;
     }
 
     public static void Warm(RecipeConfig recipe) => TeachCache.Warm(recipe);
@@ -190,6 +265,7 @@ public static class MaskShapeMatch
     private static MatchHit? MatchOnUpright(
         Mat upright, ShapeModel model, double rangeDeg)
     {
+        using var gray = ToGray(upright);
         using var edges = MaskTemplateMatcher.ToCanny8u(upright);
         using var inv = new Mat();
         Cv2.BitwiseNot(edges, inv);
@@ -197,16 +273,16 @@ public static class MaskShapeMatch
         Cv2.DistanceTransform(inv, dt, DistanceTypes.L2, DistanceTransformMasks.Mask3);
         if (dt.Empty() || dt.Type() != MatType.CV_32FC1)
             return null;
-
+        using var dirMap = BuildDirMap(gray);
         var cx0 = upright.Width / 2.0;
         var cy0 = upright.Height / 2.0;
         var span = Math.Max(10, Math.Min(40, Math.Max(upright.Width, upright.Height) * 0.10));
-        var coarse = Search(dt, model, rangeDeg, 0, cx0, cy0, span, transStep: 3, rotStep: 1.0);
+        var coarse = Search(dt, dirMap, model, rangeDeg, 0, cx0, cy0, span, transStep: 3, rotStep: 1.0);
         if (coarse is not { } c)
             return null;
-        var fine = Search(dt, model, 2.5, c.Deg, c.Mx, c.My, 12, transStep: 1, rotStep: 0.5);
+        var fine = Search(dt, dirMap, model, 2.5, c.Deg, c.Mx, c.My, 12, transStep: 1, rotStep: 0.5);
         var seed = fine ?? c;
-        var micro = RefineSubpixel(dt, model, seed);
+        var micro = RefineSubpixel(dt, dirMap, model, seed);
         var viz = BuildViz(dt, model.Points, micro.Deg, micro.Mx, micro.My);
         return new MatchHit(micro.Deg, new Point2d(micro.Mx, micro.My), micro.Mean, micro.Hit, viz);
     }
@@ -214,11 +290,12 @@ public static class MaskShapeMatch
     private readonly record struct PoseCand(double Deg, double Mx, double My, double Mean, double Hit, double Cost);
 
     private static PoseCand? Search(
-        Mat dt, ShapeModel model, double rangeDeg, double bandDeg,
+        Mat dt, Mat dirMap, ShapeModel model, double rangeDeg, double bandDeg,
         double cx, double cy, double span, int transStep, double rotStep)
     {
         PoseCand? best = null;
         var indexer = dt.GetGenericIndexer<float>();
+        var dirIdx = dirMap.GetGenericIndexer<byte>();
         var w = dt.Cols;
         var h = dt.Rows;
         var lo = bandDeg - rangeDeg;
@@ -233,7 +310,7 @@ public static class MaskShapeMatch
             {
                 var mx = cx + dx;
                 var my = cy + dy;
-                var scored = Score(indexer, w, h, model, cos, sin, mx, my);
+                var scored = Score(indexer, dirIdx, w, h, model, cos, sin, mx, my);
                 if (best is null || scored.Cost < best.Value.Cost - 1e-9)
                     best = new PoseCand(deg, mx, my, scored.Mean, scored.Hit, scored.Cost);
             }
@@ -242,10 +319,11 @@ public static class MaskShapeMatch
         return best;
     }
 
-    private static PoseCand RefineSubpixel(Mat dt, ShapeModel model, PoseCand seed)
+    private static PoseCand RefineSubpixel(Mat dt, Mat dirMap, ShapeModel model, PoseCand seed)
     {
         var best = seed;
         var indexer = dt.GetGenericIndexer<float>();
+        var dirIdx = dirMap.GetGenericIndexer<byte>();
         var w = dt.Cols;
         var h = dt.Rows;
         foreach (var dDeg in new[] { -0.25, 0, 0.25 })
@@ -259,7 +337,7 @@ public static class MaskShapeMatch
             {
                 var mx = seed.Mx + dx;
                 var my = seed.My + dy;
-                var scored = Score(indexer, w, h, model, cos, sin, mx, my);
+                var scored = Score(indexer, dirIdx, w, h, model, cos, sin, mx, my);
                 if (scored.Cost < best.Cost - 1e-9)
                     best = new PoseCand(deg, mx, my, scored.Mean, scored.Hit, scored.Cost);
             }
@@ -271,10 +349,12 @@ public static class MaskShapeMatch
     private readonly record struct Scored(double Mean, double Hit, double Cost);
 
     private static Scored Score(
-        MatIndexer<float> dt, int w, int h, ShapeModel model, double cos, double sin, double mx, double my)
+        MatIndexer<float> dt, MatIndexer<byte> dirMap,
+        int w, int h, ShapeModel model, double cos, double sin, double mx, double my)
     {
         var pts = model.Points;
         var weights = model.Weights;
+        var dirBins = model.DirBins;
         var sum = 0.0;
         var wsum = 0.0;
         var hit = 0;
@@ -292,8 +372,24 @@ public static class MaskShapeMatch
             }
 
             var d = SampleBilinear(dt, x, y);
+            // 有向 Chamfer：模型点方向 bin + 旋转偏移 = 期望方向，与现场方向图比（折叠 180° 无向）。
+            // 方向失配只影响 hit（不放大距离代价）：正确位姿距离近 → mean 低仍占优；
+            // 方向项用于压制"距离近但方向错"的平行干扰边（其 hit 少 → cost 升高）。
+            var dirOk = true;
+            var sceneBin = dirMap[(int)Math.Round(y), (int)Math.Round(x)];
+            var modelBin = dirBins[i];
+            if (modelBin < DirBins && sceneBin < DirBins)
+            {
+                var degBins = (int)Math.Round(Atan2SignedDeg(cos, sin) / DirBinWidthDeg) % DirBins;
+                var expect = (modelBin + degBins + DirBins * 4) % DirBins;
+                var rawDiff = (sceneBin - expect + DirBins * 4) % DirBins;
+                var diff = Math.Min(rawDiff, DirBins - rawDiff); // 环回最小差
+                if (diff > DirTolBins)
+                    dirOk = false;
+            }
+
             sum += d * wt;
-            if (d <= HitDistPx)
+            if (dirOk && d <= HitDistPx)
                 hit++;
         }
 
@@ -301,6 +397,10 @@ public static class MaskShapeMatch
         var hitRate = hit / (double)n;
         return new Scored(mean, hitRate, mean + 6.0 * (1.0 - hitRate));
     }
+
+    /// <summary>从旋转矩阵余弦/正弦恢复有符号旋转角（度）。</summary>
+    private static double Atan2SignedDeg(double cos, double sin) =>
+        Math.Atan2(sin, cos) * 180.0 / Math.PI;
 
     private static bool PreferFlippedCrop(
         double polar0, double polar180, double polarTeach, MatchHit? a, MatchHit? b)
