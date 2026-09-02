@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
@@ -210,6 +211,10 @@ public partial class CamerasViewModel : ObservableObject, ICommitPendingEdits, I
     private Task _previewInFlightTask = Task.CompletedTask;
 
     /// <summary>未注册相机的预览会话（单实例复用，避免每帧开关 pylon）。</summary>
+    // CA2213 误报：_previewSessionCamera 在 Dispose()→StopPreview()→DisposePreviewSessionCore()
+    // 中被释放（Preview.cs partial），分析器无法跨 partial 文件追踪该路径。
+    [SuppressMessage("Usage", "CA2213:可释放字段应被释放",
+        Justification = "DisposePreviewSessionCore 在 StopPreview 链路中释放本字段（跨 partial 文件，分析器无法追踪）。")]
     private ICamera? _previewSessionCamera;
 
     private string? _previewSessionId;

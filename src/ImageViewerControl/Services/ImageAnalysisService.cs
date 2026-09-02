@@ -32,31 +32,27 @@ namespace ImageViewer.Services
 
         private static readonly ConditionalWeakTable<BitmapSource, PixelCacheEntry> NormalizedPixelCache = new();
 
-        private static PixelCacheEntry GetNormalizedPixels(BitmapSource bitmap)
-        {
-            if (NormalizedPixelCache.TryGetValue(bitmap, out PixelCacheEntry? cached))
+        private static PixelCacheEntry GetNormalizedPixels(BitmapSource bitmap) =>
+            NormalizedPixelCache.GetValue(bitmap, static key =>
             {
-                return cached;
-            }
+                // GetValue 工厂：并发首帧同 key 只执行一次（TryGetValue+Add 先查后加有竞态，
+                // 两线程同时 miss 会抛 ArgumentException）；源位图假定不可变，key 生命周期安全。
+                BitmapSource normalized = NormalizeBitmap(key);
+                int bytesPerPixel = Math.Max(1, (normalized.Format.BitsPerPixel + 7) / 8);
+                int stride = normalized.PixelWidth * bytesPerPixel;
+                byte[] pixels = new byte[normalized.PixelHeight * stride];
+                normalized.CopyPixels(pixels, stride, 0);
 
-            BitmapSource normalized = NormalizeBitmap(bitmap);
-            int bytesPerPixel = Math.Max(1, (normalized.Format.BitsPerPixel + 7) / 8);
-            int stride = normalized.PixelWidth * bytesPerPixel;
-            byte[] pixels = new byte[normalized.PixelHeight * stride];
-            normalized.CopyPixels(pixels, stride, 0);
-
-            var entry = new PixelCacheEntry
-            {
-                Pixels = pixels,
-                Stride = stride,
-                Width = normalized.PixelWidth,
-                Height = normalized.PixelHeight,
-                Format = normalized.Format,
-                BytesPerPixel = bytesPerPixel
-            };
-            NormalizedPixelCache.Add(bitmap, entry);
-            return entry;
-        }
+                return new PixelCacheEntry
+                {
+                    Pixels = pixels,
+                    Stride = stride,
+                    Width = normalized.PixelWidth,
+                    Height = normalized.PixelHeight,
+                    Format = normalized.Format,
+                    BytesPerPixel = bytesPerPixel
+                };
+            });
 
         internal static double NormalizeCaliperScore(double score)
         {

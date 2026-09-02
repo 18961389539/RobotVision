@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -35,6 +36,10 @@ public partial class App : Application, IDisposable
 {
     private const int MaxRecoverableUnhandled = 2;
 
+    // CA2213 误报：_host 在 Dispose()→StopHostSafely()→ApplicationShutdownCoordinator 中
+    // 被 StopAsync 成功后 Dispose（带超时保护），分析器无法跨类型追踪该路径。
+    [SuppressMessage("Usage", "CA2213:可释放字段应被释放",
+        Justification = "_host.Dispose 由 ApplicationShutdownCoordinator.Shutdown 调用（StopAsync 成功后），分析器无法追踪跨类路径。")]
     private IHost? _host;
     private ILogger<App>? _logger;
     private Mutex? _instanceMutex;
