@@ -92,7 +92,8 @@ public static class MaskShapeMatch
         TryRefine(image, contour, model, refineRangeDeg).Pose;
 
     public static Attempt TryRefine(
-        Mat image, IReadOnlyList<Point2f> contour, ShapeModel? model, double refineRangeDeg)
+        Mat image, IReadOnlyList<Point2f> contour, ShapeModel? model, double refineRangeDeg,
+        bool noFlip = false)
     {
         LastDebug = default;
         if (image.Empty() || contour.Count < 4 || model is null || model.PointCount < MinTeachPoints)
@@ -112,29 +113,35 @@ public static class MaskShapeMatch
         try
         {
             var hit = MatchOnUpright(crop.Upright, model, range);
-            var polar0 = hit is null ? 0.0 : PolarAgree(crop.Upright, model, hit);
+            var polar0 = hit is null || noFlip ? 0.0 : PolarAgree(crop.Upright, model, hit);
             var polar180 = 0.0;
             UprightCropResult? flipped = null;
-            try
+            // NoFlipConstraint：产品永不翻转 180°，跳过翻转窗判决——直接信任主窗转正结果。
+            // 翻转判决在中小角度（±20° 内）不可靠（polar0 可能为 0 不可判 → 误走 180° 支），
+            // NoFlip 正是该场景的正确配置。
+            if (!noFlip)
             {
-                flipped = MaskTemplateMatcher.UprightCrop(image, contour, CropMarginRatio, extraWarpDeg: 180);
-                var rematch = MatchOnUpright(flipped.Upright, model, range);
-                polar180 = rematch is null ? 0.0 : PolarAgree(flipped.Upright, model, rematch);
-                var pickFlip = PreferFlippedCrop(polar0, polar180, model.PolarDelta, hit, rematch);
-                if (pickFlip && rematch is not null)
+                try
                 {
-                    crop.Upright.Dispose();
-                    crop = flipped;
-                    flipped = null;
-                    hit = rematch;
+                    flipped = MaskTemplateMatcher.UprightCrop(image, contour, CropMarginRatio, extraWarpDeg: 180);
+                    var rematch = MatchOnUpright(flipped.Upright, model, range);
+                    polar180 = rematch is null ? 0.0 : PolarAgree(flipped.Upright, model, rematch);
+                    var pickFlip = PreferFlippedCrop(polar0, polar180, model.PolarDelta, hit, rematch);
+                    if (pickFlip && rematch is not null)
+                    {
+                        crop.Upright.Dispose();
+                        crop = flipped;
+                        flipped = null;
+                        hit = rematch;
+                    }
                 }
-            }
-            catch (InvalidOperationException)
-            {
-            }
-            finally
-            {
-                flipped?.Upright.Dispose();
+                catch (InvalidOperationException)
+                {
+                }
+                finally
+                {
+                    flipped?.Upright.Dispose();
+                }
             }
 
             if (hit is null)

@@ -96,6 +96,22 @@ public sealed class MaskShapeMatchTests
             $"示教方向应覆盖多 bin（横边+竖边+弧），实际仅 {distinct} 个不同方向");
     }
 
+    [Fact]
+    public void NoFlip_SkipsFlippedWindow_AndTrustsMain()
+    {
+        // 语义验证：noFlip=true 跳过翻转窗——0° 主窗即正确方向，noFlip 不影响正确匹配。
+        using var teachImg = Paint(0);
+        var model = Teach(teachImg, Contour(0));
+        Assert.NotNull(model);
+        using var img = Paint(0);
+        var attempt = MaskShapeMatch.TryRefine(img, Contour(0), model, refineRangeDeg: 8, noFlip: true);
+        Assert.True(attempt.Pose is not null,
+            $"0°(noFlip) 未过门 命中 {MaskShapeMatch.LastDebug.HitRate:0.00} 均距 {MaskShapeMatch.LastDebug.MeanDist:0.00}");
+        var r = attempt.Pose!;
+        Assert.InRange(r.AngleDeg, -8.0, 8.0);
+        AssertNearPart(r.Center, Contour(0));
+    }
+
     private static void AssertNearPart(Point2d center, Point2f[] contour)
     {
         var housing = MaskHousing.FitObb(contour);

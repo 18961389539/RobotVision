@@ -367,7 +367,9 @@ internal sealed class ShapeMatchSegmentRefineRuntime : ISegmentRefineRuntime
     {
         var housing = MaskHousing.Fit(request.Points);
         var range = MaskHousing.AdaptiveRefineRange(request.Recipe.Template.RefineRangeDeg, housing);
-        var shape = MaskShapeMatch.TryRefine(request.RoiView, request.Points, request.ShapeModel, range);
+        // NoFlipConstraint：产品永不翻转 → 跳过翻转窗判决（ShapeMatch 极性在中小角度不可靠）
+        var shape = MaskShapeMatch.TryRefine(request.RoiView, request.Points, request.ShapeModel, range,
+            noFlip: request.Recipe.Template.NoFlipConstraint);
         var dots = SegmentRefineOps.MapMatchDots(shape.Viz.Inliers, shape.Viz.Rejected);
         if (shape.Pose is null)
         {
