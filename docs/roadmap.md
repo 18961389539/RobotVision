@@ -52,7 +52,7 @@
 | 8 | **BaslerCamera 锁内长阻塞**：`_grabLock` 内 `GrabOne(_grabTimeoutMs 默认 60000ms)` + 连接期 `Thread.Sleep(1000)`，UI 预览/标定/管线取图共用同一相机锁。WPF 已包 `Task.Run` 不卡 UI，但长超时互相排队拖吞吐。需真实相机验证，排 .NET 10 窗口。 | `Infrastructure/Cameras/BaslerCamera.cs` | 未开始 |
 | 9 | **ShapeMatch 对标 HALCON 迭代**（`5e2ecb0` v1 有向 Chamfer 已落地）：
     - v1 已做：梯度方向通道（16 bin 折叠 180°）、方向一致性代价（失配只扣 hit）、弱梯度豁免、67.5° 容差
-    - 待迭代：①UprightCrop 转正缺陷——**根因已定位(2026-09-02 实证)**：OpenCV MinAreaRect 的 Angle 指向 Width 边且 Width 不保证是长边；`MaskHousing.Fit`/`UprightCrop` 的 `Width>=Height ? Angle : Angle+90` 假设相反(0°/37° 侥幸正确、-33° 错：实测 0°横条返回 W=90 H=240 Angle=90；-33° 返回 W=90 Angle=57)。**修复部分落地**(`d32b6ad`)：UprightCrop 裁剪窗显式长/短边(warp 保持原口径,改 warp 会破坏 FeatureRoiAdvisor)。**ShapeMatch NoFlip 接线**(`87c921d`)：跳过翻转窗判决(±20° 内极性不可靠误走 180° 支)。②方向图抗插值漂移(金字塔粗到细)；③正交干扰定量测试(需真机)；④32 bin | `Vision/MaskShapeMatch.cs`+`MaskTemplateMatcher.cs` | 迭代中 |
+    - 待迭代：①UprightCrop 转正缺陷——**两味表示歧义(2026-09-02 二次实证)**：a) MinAreaRect Width 可能是短边(已由 `d32b6ad` 裁剪窗长/短边修复)；b) **长轴 180° 补角表示翻转内容**(未修)：实测(220×56 条)负向角 φ=-37/-20/-8.7 时 MinAreaRect 返回 W≈59(短) A=53~81，`Width<Height→Angle+90` 得 warp=143~172 → 转正后内容翻转 179.8°(φ≥0 则正常,内容≈0°)——**代码只在 φ≥0 自洽,负向角全翻**。**修复设计(已验证)**:warp 规范化到 [-90,90):`Canon(w)=((w+90)%180)-90` 于 `MaskHousing.Fit` 单点(-37→-36.9、-20→-19.9、-8.7→-8.5,内容全角度 ±0.3° 一致)。**迁移检查单**(跨消费者,勿只改 Fit):CropMapping 参考 `FullImageUprightCrop` 同步;`MaskCaliperTab` θ0/探针方向语义、`FeatureRoiAdvisor` ROI 方向语义(今晨改 Fit 曾破其测试)、ShapeMatch 翻转窗(extraWarp 保持原算术、勿二次规范化)、UprightCrop 小轮廓回退分支。**已落地**：`d32b6ad` 裁剪窗长/短边、`87c921d` ShapeMatch NoFlip、`f2b8f6c` 翻转极性证据门(8.7°/20° 误翻转修复,-20° 属本味残留)。②方向图抗插值漂移(金字塔粗到细)；③正交干扰定量测试(需真机)；④32 bin | `Vision/MaskShapeMatch.cs`+`MaskTemplateMatcher.cs`+`Teach/FeatureRoiAdvisor.cs` | 迭代中 |
 
 ### P2（性能/工程化，建议配合 .NET 10 升级）
 
