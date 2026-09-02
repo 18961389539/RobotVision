@@ -42,12 +42,12 @@ public sealed class MaskShapeMatchTests
         var contour = Contour(deg);
         var attempt = MaskShapeMatch.TryRefine(img, contour, model, refineRangeDeg: 12);
         Assert.True(attempt.Pose is not null,
-            $"转 {deg}° 未过门 命中 {MaskShapeMatch.LastDebug.HitRate:0.00} 均距 {MaskShapeMatch.LastDebug.MeanDist:0.00} 残差 {MaskShapeMatch.LastDebug.ResidualDeg:0.00}° " +
+            $"转 {deg}° 未过门 命中 {MaskShapeMatch.LastDebug.HitRate:0.00} 均距 {MaskShapeMatch.LastDebug.MeanDist:0.00} 残差 {MaskShapeMatch.LastDebug.ResidualDeg:0.00}° 方向一致 {MaskShapeMatch.LastDebug.DirAgree:0.00} " +
             $"极性 {MaskShapeMatch.LastDebug.PolarTeach:0.0}/{MaskShapeMatch.LastDebug.Polar0:0.0}/{MaskShapeMatch.LastDebug.Polar180:0.0}");
         var r = attempt.Pose!;
         var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - deg));
         Assert.True(err < 8.0,
-            $"转 {deg}°：得 {r.AngleDeg:0.00}，误差 {err:0.00}° 命中 {r.HitRate:0.00} 均距 {r.MeanDistPx:0.00} " +
+            $"转 {deg}°：得 {r.AngleDeg:0.00}，误差 {err:0.00}° 命中 {r.HitRate:0.00} 均距 {r.MeanDistPx:0.00} 方向一致 {MaskShapeMatch.LastDebug.DirAgree:0.00} " +
             $"极性 {MaskShapeMatch.LastDebug.PolarTeach:0.0}/{MaskShapeMatch.LastDebug.Polar0:0.0}/{MaskShapeMatch.LastDebug.Polar180:0.0}");
         AssertNearPart(r.Center, contour);
     }

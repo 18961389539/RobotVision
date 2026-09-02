@@ -70,7 +70,9 @@ public static class MaskShapeMatch
     }
 
     internal readonly record struct DebugInfo(
-        int TeachPts, double MeanDist, double HitRate, double ResidualDeg, double Polar0, double Polar180, double PolarTeach);
+        int TeachPts, double MeanDist, double HitRate, double ResidualDeg,
+        double Polar0, double Polar180, double PolarTeach,
+        double DirAgree = double.NaN); // 方向一致性命中占比（有向 Chamfer 诊断/归因）
 
     [ThreadStatic]
     internal static DebugInfo LastDebug;
@@ -140,7 +142,7 @@ public static class MaskShapeMatch
 
             LastDebug = new DebugInfo(
                 model.PointCount, hit.MeanDistPx, hit.HitRate, hit.RotationDeg,
-                polar0, polar180, model.PolarDelta);
+                polar0, polar180, model.PolarDelta, hit.DirAgree);
             if (hit.HitRate < MinHitRate || hit.MeanDistPx > MaxMeanDistPx)
                 return Attempt.Miss(hit.Viz);
 
@@ -252,7 +254,7 @@ public static class MaskShapeMatch
     }
 
     internal static string FormatQualityNote(double score, double matchThreshold, DebugInfo debug) =>
-        $"命中 {debug.HitRate:P0} · 均距 {debug.MeanDist:0.1f}px · 分 {score:0.00} (门 {matchThreshold:0.00})";
+        $"命中 {debug.HitRate:P0} · 均距 {debug.MeanDist:0.1f}px · 方向一致 {debug.DirAgree:P0} · 分 {score:0.00} (门 {matchThreshold:0.00})";
 
     private static bool ShouldCache(RecipeConfig recipe) =>
         recipe.AngleMode == AngleMode.MaskTemplate
@@ -260,7 +262,8 @@ public static class MaskShapeMatch
         && !string.IsNullOrEmpty(recipe.Template.TemplateImageBase64);
 
     private sealed record MatchHit(
-        double RotationDeg, Point2d CenterInUpright, double MeanDistPx, double HitRate, ShapeViz Viz);
+        double RotationDeg, Point2d CenterInUpright, double MeanDistPx, double HitRate, ShapeViz Viz,
+        double DirAgree = double.NaN);
 
     private static MatchHit? MatchOnUpright(
         Mat upright, ShapeModel model, double rangeDeg)
@@ -284,10 +287,11 @@ public static class MaskShapeMatch
         var seed = fine ?? c;
         var micro = RefineSubpixel(dt, dirMap, model, seed);
         var viz = BuildViz(dt, model.Points, micro.Deg, micro.Mx, micro.My);
-        return new MatchHit(micro.Deg, new Point2d(micro.Mx, micro.My), micro.Mean, micro.Hit, viz);
+        return new MatchHit(micro.Deg, new Point2d(micro.Mx, micro.My), micro.Mean, micro.Hit, viz,
+            micro.DirAgree);
     }
 
-    private readonly record struct PoseCand(double Deg, double Mx, double My, double Mean, double Hit, double Cost);
+    private readonly record struct PoseCand(double Deg, double Mx, double My, double Mean, double Hit, double Cost, double DirAgree);
 
     private static PoseCand? Search(
         Mat dt, Mat dirMap, ShapeModel model, double rangeDeg, double bandDeg,
@@ -312,7 +316,7 @@ public static class MaskShapeMatch
                 var my = cy + dy;
                 var scored = Score(indexer, dirIdx, w, h, model, cos, sin, mx, my);
                 if (best is null || scored.Cost < best.Value.Cost - 1e-9)
-                    best = new PoseCand(deg, mx, my, scored.Mean, scored.Hit, scored.Cost);
+                    best = new PoseCand(deg, mx, my, scored.Mean, scored.Hit, scored.Cost, scored.DirAgree);
             }
         }
 
@@ -339,14 +343,14 @@ public static class MaskShapeMatch
                 var my = seed.My + dy;
                 var scored = Score(indexer, dirIdx, w, h, model, cos, sin, mx, my);
                 if (scored.Cost < best.Cost - 1e-9)
-                    best = new PoseCand(deg, mx, my, scored.Mean, scored.Hit, scored.Cost);
+                    best = new PoseCand(deg, mx, my, scored.Mean, scored.Hit, scored.Cost, scored.DirAgree);
             }
         }
 
         return best with { Deg = AngleGeometry.NormalizeSignedDeg(best.Deg) };
     }
 
-    private readonly record struct Scored(double Mean, double Hit, double Cost);
+    private readonly record struct Scored(double Mean, double Hit, double Cost, double DirAgree);
 
     private static Scored Score(
         MatIndexer<float> dt, MatIndexer<byte> dirMap,
@@ -359,6 +363,8 @@ public static class MaskShapeMatch
         var wsum = 0.0;
         var hit = 0;
         var n = pts.Length;
+        var dirOkCount = 0;
+        var dirChecked = 0;
         for (var i = 0; i < n; i++)
         {
             var x = mx + pts[i].X * cos - pts[i].Y * sin;
@@ -380,11 +386,14 @@ public static class MaskShapeMatch
             var modelBin = dirBins[i];
             if (modelBin < DirBins && sceneBin < DirBins)
             {
+                dirChecked++;
                 var degBins = (int)Math.Round(Atan2SignedDeg(cos, sin) / DirBinWidthDeg) % DirBins;
                 var expect = (modelBin + degBins + DirBins * 4) % DirBins;
                 var rawDiff = (sceneBin - expect + DirBins * 4) % DirBins;
                 var diff = Math.Min(rawDiff, DirBins - rawDiff); // 环回最小差
-                if (diff > DirTolBins)
+                if (diff <= DirTolBins)
+                    dirOkCount++;
+                else
                     dirOk = false;
             }
 
@@ -395,7 +404,8 @@ public static class MaskShapeMatch
 
         var mean = sum / Math.Max(1e-6, wsum);
         var hitRate = hit / (double)n;
-        return new Scored(mean, hitRate, mean + 6.0 * (1.0 - hitRate));
+        var dirAgree = dirChecked == 0 ? double.NaN : dirOkCount / (double)dirChecked;
+        return new Scored(mean, hitRate, mean + 6.0 * (1.0 - hitRate), dirAgree);
     }
 
     /// <summary>从旋转矩阵余弦/正弦恢复有符号旋转角（度）。</summary>
