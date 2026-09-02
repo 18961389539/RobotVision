@@ -19,6 +19,7 @@
 | `1aeab71` | 复查报告 `docs/review/2026-09-02-Repo-Audit.md` 补修复闭环 |
 | `eb7fdfd` | 重审新发现：ImageAnalysisService CWT 缓存竞态 → GetValue 原子工厂；CA2213 误报 ×2 标注（Wpf 首次 0 警告）。重审报告 `docs/review/2026-09-02-ReAudit.md` |
 | `d789230` | **拆分纯视觉算法为独立类库 RobotVision.Vision**：9 算法文件（模板匹配/卡尺/SIFT/形状匹配/壳体/缓存）从 Infrastructure 拆出，仅依赖 Core+OpenCvSharp4，零硬件与推理会话依赖；引用链 Hosting/Teach/tests/benchmarks 显式引用，零行为回归 |
+| `6533809` | **配方 NoFlipConstraint 开关**（产线需求）：目标永不翻转 180° 时跳过 180° 分支搜索与翻转重试——缓存/计算省一半、杜绝近对称件误判 180°；Core/Vision/Runtime/UI 四层 + 4 测试 |
 
 对应评审报告：`docs/review/2026-09-02-Wpf-CodeReview.md`、`docs/review/2026-09-02-Repo-Audit.md`。
 
