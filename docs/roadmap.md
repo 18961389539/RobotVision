@@ -28,7 +28,7 @@
 
 | # | 项 | 状态 |
 |---|---|---|
-| 1 | **.NET 8 → 10 LTS 升级**。.NET 8 EOL = **2026-11-10**（约 70 天）。同时处理：NuGet 镜像 302、`DOTNET_ROLL_FORWARD=LatestMajor` 测试运行、`net8.0`/`net10.0` 双 TFM 过渡。P2-1/2/3 性能项建议打包进本次升级。 | 未开始 |
+| 1 | **.NET 8 → 10 LTS 升级**。✅ **已完成**（本日）：20 个 csproj TFM 全部切 net10.0/net10.0-windows，Microsoft.Extensions 全家 + Sqlite 升 10.0.11，CI 工作流 4 处 dotnet-version 升 10.0.x，`DOTNET_ROLL_FORWARD=LatestMajor` 不再需要（本机已有 10.0.11 运行时）。全解决方案 0 错误；RobotVision.Tests 936 通过 + 11 跳过（环境性）+ 0 失败；Wpf.Tests 244/244；ImageViewerControl.Tests 56/56；IntegrationTests 43 通过 + 4 跳过（UI 自动化）。P2 性能项仍可打包后续迭代。 | 全仓 | ✅ 已完成 |
 | 2 | **ImageViewer God Object**：`Controls/ImageViewer.*.cs` 100 个 partial / 13771 行（占 ImageViewerControl 43%）。按 Controller 边界拆独立类（非新 partial）。用户未选，暂缓。 | 暂缓 |
 
 ### P1（安全/健壮性）

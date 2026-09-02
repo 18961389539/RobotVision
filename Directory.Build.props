@@ -5,7 +5,7 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- Microsoft.Extensions.Configuration.Binder 8.0.2+ 源生成器(及 10.x 的 Logging 生成器)使用 C# 拦截器特性,
          发布(Release)全量运行时会生成拦截器 stub,需在项目中声明允许生成的命名空间,否则报
-         "此命名空间未启用'拦截器'功能"。net8.0 默认 langversion=12,支持拦截器。 -->
+         "此命名空间未启用'拦截器'功能"。net10.0 默认 langversion=14,支持拦截器。 -->
     <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.Extensions.Configuration.Binder.SourceGeneration;Microsoft.Extensions.Logging.Generators</InterceptorsNamespaces>
   </PropertyGroup>
 

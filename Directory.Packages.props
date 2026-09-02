@@ -21,16 +21,15 @@
     <PackageVersion Include="GigEVision.Net" Version="1.0.0" />
     <PackageVersion Include="LDVisionCamera.Net" Version="1.0.0-rc.37" />
 
-    <!-- Microsoft.Extensions（统一 8.0.x 补丁线；net10 升级时整体切 10.x） -->
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="8.0.1" />
-    <!-- GigEVision.Net 1.0.0 要求 Abstractions >= 10.0.5；8.x Logging 可与更高版本 Abstractions 共存 -->
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+    <!-- Microsoft.Extensions（net10 统一 10.0.x 线；GigEVision.Net 要求的 Abstractions>=10.0.5 亦满足） -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.11" />
 
     <!-- 日志 -->
     <PackageVersion Include="Serilog" Version="4.0.2" />
@@ -50,7 +49,7 @@
     <PackageVersion Include="System.IO.Ports" Version="8.0.0" />
 
     <!-- 本机结果库（分析/追溯；不引入 EF） -->
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.11" />
 
     <!-- 测试 -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
