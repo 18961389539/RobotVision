@@ -144,6 +144,10 @@ Wpf 强制重建后 16 个警告，其中真实泄漏：
   - `ApplicationPathsTests.NormalizeAppConfig_EmptyDataRoot_UsesDefaultDataRoot`：测试对"从未创建"的临时目录执行 `Directory.Delete`（此前误判为 TempDir 竞态）。移除无效 Delete + 加 `[Collection("Serial")]` 串行化。
 - **验证**：RobotVision.Tests **935 通过 + 11 跳过 + 0 失败**（修复前 933/13）；全仓编译 0 错误。
 
+## 修复闭环（2026-09-02 本报告同日，4 项修复已落地）
+
+- **P1-5 ✅**：4 处空 catch 补留痕（提交 7c50a0b）——AtomicFile 临时文件清理失败 / ProcessHealthStore 过期 TSV 清理 / CameraManager 与 LightingManager 门闩释放与 Dispose 竞态。有 logger 的用 LoggerMessage 源生成器（Debug 级），无 logger 的用 Trace。62 相关测试通过。
+
 ## 遗留待办（本次未动）
 
 - P1-2 BaslerCamera 锁拆分、P1-3 推理静态全局、P1-5 空 catch 留痕
