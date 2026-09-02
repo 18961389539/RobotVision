@@ -34,7 +34,7 @@ public sealed class PreviewBitmapSink : IDisposable
         }
 
         _useFront = !_useFront;
-        return _useFront ? _front : _back;
+        return _useFront ? _front! : _back!; // 上面的重建分支保证两者均已创建
     }
 
     /// <summary>把 BGRA 像素写入下一帧缓冲并返回（UI 线程调用）。</summary>

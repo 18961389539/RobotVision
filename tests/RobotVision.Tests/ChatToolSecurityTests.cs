@@ -51,6 +51,53 @@ public sealed class ChatToolSecurityTests
     }
 
     [Fact]
+    public void SetCamera_ExposureChange_WithoutConfirm_IsBlocked()
+    {
+        // P1-7 修复前：非 unregister 的 set_camera（改曝光/增益→落盘+热下发）零护栏
+        using var doc = JsonDocument.Parse("""{"camera_id":"CAM1","exposure_us":2000,"gain":20}""");
+        var check = ChatDangerousActionGuard.Evaluate("set_camera", doc.RootElement, "把 1 号相机曝光改成 2000");
+        Assert.True(check.IsBlocked);
+        Assert.Contains("confirm", check.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SetCamera_ExposureChange_WithConfirmAndUserIntent_Allows()
+    {
+        using var doc = JsonDocument.Parse("""{"camera_id":"CAM1","exposure_us":2000,"confirm":true}""");
+        var check = ChatDangerousActionGuard.Evaluate("set_camera", doc.RootElement, "确认把 CAM1 曝光改成 2000");
+        Assert.False(check.IsBlocked);
+    }
+
+    [Fact]
+    public void ClearInhibit_VagueConfirm_WithoutNamingRecipe_IsBlocked()
+    {
+        // P1-7 修复前：targets 硬编码「联锁/解除/1018」，用户一句「确认解除」即通过
+        using var doc = JsonDocument.Parse("""{"confirm":true}""");
+        var check = ChatDangerousActionGuard.Evaluate("clear_inhibit", doc.RootElement, "确认解除");
+        Assert.True(check.IsBlocked);
+    }
+
+    [Fact]
+    public void ClearInhibit_NamedRecipe_WithConfirmAndIntent_Allows()
+    {
+        using var doc = JsonDocument.Parse("""{"recipe":"alpha","confirm":true}""");
+        var check = ChatDangerousActionGuard.Evaluate("clear_inhibit", doc.RootElement, "确认解除配方 alpha");
+        Assert.False(check.IsBlocked);
+    }
+
+    [Fact]
+    public void ClearInhibit_All_RequiresExplicitAllKeyword()
+    {
+        // recipe 为空=解除全部联锁，必须说「全部/所有」+ 意图词才放行
+        using var doc = JsonDocument.Parse("""{"confirm":true}""");
+        var check = ChatDangerousActionGuard.Evaluate("clear_inhibit", doc.RootElement, "确认解除全部联锁");
+        Assert.False(check.IsBlocked);
+
+        var vague = ChatDangerousActionGuard.Evaluate("clear_inhibit", doc.RootElement, "确认解除 1018");
+        Assert.True(vague.IsBlocked, "未点名配方时提及硬编码编号不再作为对象匹配");
+    }
+
+    [Fact]
     public async Task Registry_InvalidArgs_DoesNotInvokeTool()
     {
         var invoked = false;

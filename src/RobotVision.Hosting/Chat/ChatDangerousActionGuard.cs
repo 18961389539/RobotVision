@@ -93,8 +93,16 @@ public static class ChatDangerousActionGuard
                     ChatToolArguments.GetString(args, "file"),
                     action);
                 return true;
-            case "set_camera" when action == "unregister":
-                summary = "set_camera.unregister";
+            case "set_camera":
+                // 全部 set_camera 均为写操作（改曝光/增益/超时 → 落盘配置 + 热下发，
+                // unregister → 注销相机），无查询类 action；此前只拦 unregister，
+                // 改曝光/增益路径零护栏，AI 可一句话改硬件参数并持久化。
+                summary = action switch
+                {
+                    "unregister" => "set_camera.unregister",
+                    "" => "set_camera(改曝光/增益)",
+                    _ => $"set_camera.{action}",
+                };
                 targets = Collect(ChatToolArguments.GetString(args, "camera_id"));
                 return true;
             case "update_settings":
@@ -107,10 +115,19 @@ public static class ChatDangerousActionGuard
                 targets = ["设置", "参数", "端口", "tcp", "timeout", "队列", "whitelist", "白名单"];
                 return true;
             case "clear_inhibit":
-                summary = "clear_inhibit";
-                targets = Collect(
-                    ChatToolArguments.GetString(args, "recipe"),
-                    "1018", "联锁", "解除");
+                // recipe 为空 = 解除全部联锁，比点名单个配方更危险；
+                // targets 只保留对象词（配方名/「全部」「所有」），不混入「联锁/解除」等
+                // 泛化意图词——否则用户一句「确认解除」即可通过，无需点名对象。
+                if (string.IsNullOrWhiteSpace(ChatToolArguments.GetString(args, "recipe")))
+                {
+                    summary = "clear_inhibit(全部)";
+                    targets = ["全部", "所有"];
+                }
+                else
+                {
+                    summary = "clear_inhibit";
+                    targets = Collect(ChatToolArguments.GetString(args, "recipe"));
+                }
                 return true;
             case "light_send_raw":
                 summary = "light_send_raw";

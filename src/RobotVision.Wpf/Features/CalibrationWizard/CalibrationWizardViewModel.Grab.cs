@@ -117,9 +117,19 @@ public partial class CalibrationWizardViewModel
             return;
         }
 
-        var index = ++CollectedFrames;
+        var index = CollectedFrames + 1;
         var path = Path.Combine(TempFolder(), $"frame_{index:D3}.png");
-        _wizard.SaveFramePng(_lastRawFrame, path);
+        try
+        {
+            _wizard.SaveFramePng(_lastRawFrame, path);
+        }
+        catch (Exception ex)
+        {
+            // 保存失败不得计数：CollectedFrames 驱动内参计算的文件枚举，虚高会导致算到不存在的帧
+            Message = $"保存第 {index} 帧失败，未计入采集: {ex.Message}";
+            return;
+        }
+        CollectedFrames = index;
         Message = $"已加入第 {index} 帧（建议 ≥{_wizard.IntrinsicMinImageCount} 帧）";
     }
 

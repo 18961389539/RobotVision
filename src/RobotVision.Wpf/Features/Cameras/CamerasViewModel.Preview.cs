@@ -96,8 +96,9 @@ public partial class CamerasViewModel
         _previewTimer.Start();
     }
 
-    /// <summary>停止实时预览。页面离开时（Unloaded）也必须调用——定时器属于进程级单例
-    /// ViewModel，不随页面销毁，不停就会在后台持续 Grab 占用相机。</summary>
+    /// <summary>停止实时预览。页面离开时（Unloaded）也必须调用——ViewModel 注册为
+    /// Transient（每次导航新建），但 DispatcherTimer 不随页面销毁，不停就会在后台
+    /// 持续 Grab 占用相机。</summary>
     public void StopPreview() => EndPreviewSession(updateMessage: true);
 
     private void EndPreviewSession(bool updateMessage)

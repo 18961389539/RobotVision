@@ -32,6 +32,20 @@ public sealed class HtmlPreviewService : IHtmlPreviewService
             // 丢弃 Task 而非 async void：异常在 InitializePreviewAsync 内部全捕获，
             // 不会直冲同步上下文导致进程崩溃，也不会变成不可观察的静默失败。
             window.Loaded += (_, _) => _ = InitializePreviewAsync(view, html, window);
+            // 窗口关闭必须释放 WebView2：每个实例带独立浏览器进程与非托管内存，
+            // 不 Dispose 则 Chat 助手反复预览时进程/内存只增不减（确定性泄漏）。
+            window.Closed += (_, _) =>
+            {
+                try
+                {
+                    view.Dispose();
+                    window.Content = null;
+                }
+                catch (Exception ex)
+                {
+                    Trace.TraceWarning("[HtmlPreview] 释放预览资源失败: {0}", ex.Message);
+                }
+            };
             window.Show();
         }
         catch (Exception ex)
