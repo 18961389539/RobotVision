@@ -50,7 +50,12 @@ public static class AtomicFile
             finally
             {
                 try { File.Delete(tmp); }
-                catch (IOException) { }
+                catch (IOException ex)
+                {
+                    // 临时文件残留（被占用/权限）：不影响主路径（已 Replace/Move 成功），留痕便于排查
+                    System.Diagnostics.Trace.TraceWarning(
+                        $"AtomicFile: 临时文件清理失败 {tmp}: {ex.Message}");
+                }
             }
         }
     }

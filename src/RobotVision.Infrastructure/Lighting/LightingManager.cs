@@ -191,7 +191,12 @@ public sealed class LightingManager : IDisposable
             foreach (var gate in _gates.Values)
             {
                 try { gate.Release(); }
-                catch (ObjectDisposedException) { }
+                catch (ObjectDisposedException)
+                {
+                    // 关闭路径上另一线程恰好完成 Dispose 的竞态：门闩已释放，忽略即可
+                    System.Diagnostics.Trace.TraceWarning(
+                        "LightingManager: 门闩释放与 Dispose 竞态（预期，忽略）");
+                }
             }
 
             foreach (var gate in _gates.Values)

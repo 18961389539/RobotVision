@@ -12,4 +12,7 @@ internal static partial class ProcessHealthStoreLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "过程能力落盘失败（不影响管线）")]
     public static partial void PersistFailed(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "清理过期健康文件失败（忽略）：{Path}")]
+    public static partial void CleanupOldFileFailed(ILogger logger, string path);
 }

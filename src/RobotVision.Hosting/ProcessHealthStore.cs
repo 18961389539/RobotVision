@@ -160,7 +160,11 @@ public sealed class ProcessHealthStore
                 day < cutoff)
             {
                 try { File.Delete(file); }
-                catch (IOException) { }
+                catch (IOException)
+                {
+                    // 文件被占用/权限抖动：跳过本轮，留痕后下次再清理
+                    ProcessHealthStoreLog.CleanupOldFileFailed(_log, file);
+                }
             }
         }
     }
