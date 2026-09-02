@@ -36,7 +36,7 @@
 | # | 项 | 位置 | 状态 |
 |---|---|---|---|
 | 3 | **Core 层统一 IsFinite 校验**（纵深防御）。评审建议 Core 层统一后 UI 层可简化；当前 WPF 层已单点拦截（`f4b4e0b`），Core/Infrastructure 仍有 62 处分散 `IsFinite/IsNaN`，未统一入口。 | Core/Infrastructure | 未开始 |
-| 4 | **ChatDangerousActionGuard 剩余风险**：`targets.Count == 0 → 放行` 通用规则——manage_recipe 漏填 name 时只要意图词即放行（工具实现层拒绝空 name，风险当前可控）。以及 IntentKeywords 单字词（"改"/"停"）误命中。 | `Hosting/Chat/ChatDangerousActionGuard.cs:49-50` | 未开始 |
+| 4 | **ChatDangerousActionGuard 剩余风险**：~~IntentKeywords 单字词（"改"/"停"）误命中~~ → **已修复**（移除单字词，保留双字"修改/停止/停用"等；新增闲聊不绕过回归测试）。`targets.Count==0 → 放行` 通用规则经核实：所有危险工具（manage_recipe/set_camera/clear_inhibit/manage_calibration）工具层均有空参校验，放行后会被工具层拒绝——风险已闭环，维持现状。 | `Hosting/Chat/ChatDangerousActionGuard.cs:49-50` | ✅ 部分修复 |
 | 5 | ~~13 个环境性测试失败~~ → **已解决**（`177ae7d`）：Skip 机制修复后 Hardware/Live/BakeOff/Bench 11 项转跳过；SmoothRectangle 与 ApplicationPaths 2 个真实 bug 已修。全量 935 通过 + 11 跳过 + 0 失败。 | `tests/RobotVision.Tests` | ✅ `177ae7d` |
 | 6 | **ONNX Runtime 版本**：`Intel.ML.OnnxRuntime.OpenVino 1.22.0`（换包源），上游已 1.29+。评估升级收益与 OpenVino EP 兼容性。 | `Directory.Packages.props` | 未开始 |
 | 7 | **推理策略静态 `[ThreadStatic] LastDebug`（降级自 P1-3）**：4 个策略（MaskCaliperTab/MaskShapeMatch/MaskSiftRefine/MaskTemplateMatcher）各有一份，**实证非运行时 bug**——所有读取方与策略调用同一同步调用栈、入口 `default` 重置、ThreadStatic 天然线程隔离。真实问题是隐式状态传递 + `PickAutoLayout` 依赖副作用选布局，属可维护性债。建议后续改为显式返回 DebugInfo（非本迭代）。 | `Inference/Strategies/*.cs`（9 文件 36 处） | 降级 P2，未开始 |

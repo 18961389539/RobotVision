@@ -16,7 +16,7 @@ public static class ChatDangerousActionGuard
     private static readonly string[] IntentKeywords =
     [
         "确认", "同意", "执行", "删除", "停用", "停止", "卸载", "解除", "断开",
-        "修改", "更新", "注销", "改", "停", "确认执行",
+        "修改", "更新", "注销", "确认执行",
     ];
 
     public static DangerousActionCheck Evaluate(string toolName, JsonElement args, string? lastUserMessage)

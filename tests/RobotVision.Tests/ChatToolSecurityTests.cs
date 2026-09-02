@@ -69,6 +69,16 @@ public sealed class ChatToolSecurityTests
     }
 
     [Fact]
+    public void ChattyChitChat_WithSingleCharIntentWord_DoesNotBypass()
+    {
+        // 回归防护：单字「改/停」曾出现在 IntentKeywords，用户闲聊「曝光改天再看」
+        //（含「改」+ 点名 CAM1）即可放行 set_camera。双字词(修改/停止/确认)才构成确认意图。
+        using var doc = JsonDocument.Parse("""{"camera_id":"CAM1","exposure_us":2000,"confirm":true}""");
+        var check = ChatDangerousActionGuard.Evaluate("set_camera", doc.RootElement, "CAM1 曝光改天再看吧");
+        Assert.True(check.IsBlocked, "闲聊含「改」字不应视为确认意图");
+    }
+
+    [Fact]
     public void ClearInhibit_VagueConfirm_WithoutNamingRecipe_IsBlocked()
     {
         // P1-7 修复前：targets 硬编码「联锁/解除/1018」，用户一句「确认解除」即通过
