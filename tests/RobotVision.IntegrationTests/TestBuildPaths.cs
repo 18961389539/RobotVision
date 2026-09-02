@@ -23,8 +23,16 @@ internal static class TestBuildPaths
 
         foreach (var cfg in new[] { "Release", "Debug" })
         {
-            var exe = Path.Combine(root, "src", "RobotVision.Wpf", "bin", cfg, "net8.0-windows",
-                "RobotVision.Wpf.exe");
+            var cfgDir = Path.Combine(root, "src", "RobotVision.Wpf", "bin", cfg);
+            if (!Directory.Exists(cfgDir))
+                continue;
+            // 动态匹配 TFM 目录（net8.0-windows / net10.0-windows …），避免框架升级后写死失效
+            var tfm = Directory.GetDirectories(cfgDir)
+                .Select(Path.GetFileName)
+                .FirstOrDefault(n => n is not null && n.StartsWith("net", StringComparison.Ordinal));
+            if (tfm is null)
+                continue;
+            var exe = Path.Combine(cfgDir, tfm, "RobotVision.Wpf.exe");
             if (File.Exists(exe))
                 return Path.GetFullPath(exe);
         }

@@ -8,7 +8,7 @@
         <StackPanel Margin="24" MaxWidth="720">
             <ui:TextBlock FontTypography="Title" Text="RobotVision 视觉调试" Margin="0,0,0,4" />
             <ui:TextBlock FontTypography="Body"
-                          Text="机器人引导视觉系统 · C# / .NET 8 / OpenCvSharp / YoloDotNet"
+                          Text="机器人引导视觉系统 · C# / .NET 10 / OpenCvSharp / YoloDotNet"
                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,16" />
 
             <ui:Card Margin="0,0,0,8" Padding="12">

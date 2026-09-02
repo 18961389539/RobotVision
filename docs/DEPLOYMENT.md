@@ -9,7 +9,7 @@
 | 项 | 要求 |
 |---|---|
 | 操作系统 | Windows 10/11 x64（产线推荐 LTSC） |
-| 运行时 | 自包含发布包**无需**单独安装 .NET；框架依赖包需 .NET 8 Runtime |
+| 运行时 | 自包含发布包**无需**单独安装 .NET；框架依赖包需 .NET 10 Runtime |
 | 推理 | Intel CPU；核显可选（OpenVINO GPU，默认 `Inference:Provider = OpenVinoGpu`） |
 | 网络 | 相机网口 + PLC 网口；防火墙放行 `TcpPort`（默认 9999） |
 | 显示 | 当前版本为 **WPF 桌面应用**；需登录桌面会话（无独立 Windows 服务形态） |

@@ -1,6 +1,6 @@
 # RobotVision — 机器人引导视觉系统
 
-基于 C# / .NET 8 / OpenCvSharp / YoloDotNet 的机器人引导视觉应用。
+基于 C# / .NET 10 (LTS) / OpenCvSharp / YoloDotNet 的机器人引导视觉应用。
 流程：TCP 接收配方名 → 相机取图 → 内参去畸变 → 模型推理 → 外参变换 → 返回 (x, y, 角度)。
 
 ## 项目结构
