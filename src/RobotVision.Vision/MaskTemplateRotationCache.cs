@@ -94,12 +94,13 @@ public sealed class MaskTemplateRotationCache : IRecipeTeachCache, IDisposable
     private static MaskTemplateRotationPack BuildPack(TemplateOptions template)
     {
         using var decoded = MaskTemplateMatcher.DecodeTemplatePng(template.TemplateImageBase64);
-        var gray = MaskTemplateMatcher.CreateRotationBank(decoded, template.RefineRangeDeg);
+        var noFlip = template.NoFlipConstraint;
+        var gray = MaskTemplateMatcher.CreateRotationBank(decoded, template.RefineRangeDeg, noFlip);
         RotatedTemplateBank? edge = null;
         if (template.UseEdgeMatch)
         {
             using var edges = MaskTemplateMatcher.ToEdgeMap(decoded);
-            edge = MaskTemplateMatcher.CreateRotationBank(edges, template.RefineRangeDeg);
+            edge = MaskTemplateMatcher.CreateRotationBank(edges, template.RefineRangeDeg, noFlip);
         }
         return new MaskTemplateRotationPack(gray, edge);
     }

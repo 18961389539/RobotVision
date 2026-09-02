@@ -19,7 +19,7 @@ internal static class RecipeTeachFingerprints
     }
 
     public static string RotationPack(TemplateOptions template) =>
-        $"{template.RefineRangeDeg:G17}|{(template.UseEdgeMatch ? 1 : 0)}|{TemplateImage(template)}";
+        $"{template.RefineRangeDeg:G17}|{(template.UseEdgeMatch ? 1 : 0)}|{(template.NoFlipConstraint ? "N" : "F")}|{TemplateImage(template)}";
 }
 
 /// <summary>

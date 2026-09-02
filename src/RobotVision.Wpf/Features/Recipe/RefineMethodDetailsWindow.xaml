@@ -103,6 +103,10 @@
                               IsChecked="{Binding Template.UseUprightCrop}" />
                     <CheckBox Content="边缘图定角（更准）" FontSize="11" Margin="0,0,0,4"
                               IsChecked="{Binding Template.UseEdgeMatch}" />
+                    <CheckBox Content="目标永不翻转 180°（省一半计算，杜绝误判 180°）" FontSize="11"
+                              Margin="0,0,0,4"
+                              IsChecked="{Binding Template.NoFlipConstraint}"
+                              ToolTip="仅当工位分向限定、产品角度不会落在翻转支时勾选；会跳过 180° 分支搜索与翻转重试。" />
                     <TextBlock Text="{Binding TeachPeakHint}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
                 </StackPanel>
 

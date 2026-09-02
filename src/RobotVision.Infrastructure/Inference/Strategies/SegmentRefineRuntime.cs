@@ -235,8 +235,12 @@ internal sealed class TemplateSegmentRefineRuntime : ISegmentRefineRuntime
         {
             var origin = useUpright ? 0.0 : housing.WarpAngleDeg;
             var bank = useUpright ? pack : null;
-            var match = MatchOnUpright(crop.Upright, template, recipe, bank, range, origin);
-            if (useUpright && match is not null && MaskTemplateMatcher.NeedsUprightAlign(match))
+            // NoFlipConstraint：目标永不翻转 180° → 首轮即强制 0 支（跳过 180° 搜索）
+            var noFlip = recipe.Template.NoFlipConstraint;
+            var match = MatchOnUpright(crop.Upright, template, recipe, bank, range, origin,
+                forceZeroBranch: noFlip);
+            // NoFlip 下不做翻转重试（产品不会反放；若匹配峰需翻转窗才对齐，说明示教/粗角方向错了，宁可失败暴露）
+            if (!noFlip && useUpright && match is not null && MaskTemplateMatcher.NeedsUprightAlign(match))
             {
                 UprightCropResult? flipped = null;
                 try

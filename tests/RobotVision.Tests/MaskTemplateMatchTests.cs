@@ -48,6 +48,32 @@ public sealed class MaskTemplateMatchTests : IDisposable
     }
 
     [Fact]
+    public void MatchBest_ForceZeroBranch_DoesNotPick180OnFlippedTarget()
+    {
+        // NoFlipConstraint 的算法侧语义：orientationBranchDeg=0 强制只搜 0 支。
+        // 目标实际翻转 180° 时不应命中（无 180 峰可选），宁可低分/失败，也不输出错 180°。
+        using var upright = MakeUpright(_template, objectDeg: 180);
+        var match = MaskTemplateMatcher.MatchBest(upright, _template, refineRangeDeg: 5, minScore: 0.1,
+            orientationBranchDeg: 0);
+        if (match is null)
+            return; // 只搜 0 支 + 翻转目标 → 0 支无强峰时允许失败（防误判优于误输出）
+        Assert.True(Math.Abs(Signed(match.RotationDeg)) <= 5.0,
+            $"强制 0 支后不得跳到 180° 附近，实际 {match.RotationDeg:0.00}");
+    }
+
+    [Fact]
+    public void MatchBest_ForceZeroBranch_StillMatchesSmallRotation()
+    {
+        // NoFlip 下小角度目标应正常匹配（0 支覆盖 -range~+range）
+        using var upright = MakeUpright(_template, objectDeg: 3.2);
+        var match = MaskTemplateMatcher.MatchBest(upright, _template, refineRangeDeg: 5, minScore: 0.3,
+            orientationBranchDeg: 0);
+        Assert.NotNull(match);
+        var err = Math.Abs(Signed(match.RotationDeg - 3.2));
+        Assert.True(err < 0.5, $"0 支内亚度匹配误差 {err:0.00}° 过大（得 {match.RotationDeg:0.00}）");
+    }
+
+    [Fact]
     public void MatchBest_Flipped_Picks180Branch()
     {
         using var upright = MakeUpright(_template, objectDeg: 180);
@@ -129,6 +155,20 @@ public sealed class MaskTemplateMatchTests : IDisposable
     }
 
     [Fact]
+    public void SearchCacheDegrees_NoFlip_Omits180Branch()
+    {
+        // NoFlipConstraint：目标永不翻转，缓存只覆盖 0 支 → 省一半角
+        var deg = MaskTemplateMatcher.SearchCacheDegrees(5, noFlip: true);
+        Assert.Equal(11, deg.Count); // 仅 0±5 共 11 个（无 180±5 的 11 个）
+        Assert.Contains(0, deg);
+        Assert.Contains(-5, deg);
+        Assert.Contains(5, deg);
+        Assert.DoesNotContain(180, deg);
+        Assert.DoesNotContain(175, deg);
+        Assert.DoesNotContain(185, deg);
+    }
+
+    [Fact]
     public void MatchBest_WithRotationBank_MatchesLiveRotate()
     {
         using var upright = MakeUpright(_template, objectDeg: 3.2);
@@ -185,6 +225,37 @@ public sealed class MaskTemplateMatchTests : IDisposable
         Assert.NotSame(a, edged);
         Assert.NotNull(edged.Edge);
         Assert.Equal(22, edged.Edge.Count);
+    }
+
+    [Fact]
+    public void RotationCache_NoFlip_BankHasOnlyZeroBranch()
+    {
+        // NoFlipConstraint：缓存只预旋 0 支（11 个角），且指纹区分——翻开关后重建为 22 个。
+        var b64 = MaskTemplateMatcher.EncodeTemplatePng(_template);
+        var recipe = new RecipeConfig
+        {
+            Name = "TmplNoFlip",
+            CameraId = "cam",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["m.onnx"],
+            Template = new TemplateOptions
+            {
+                TemplateImageBase64 = b64,
+                RefineRangeDeg = 5,
+                NoFlipConstraint = true,
+            },
+        };
+        using var cache = new MaskTemplateRotationCache();
+        cache.Warm(recipe);
+        var noFlip = cache.GetOrCreate(recipe);
+        Assert.NotNull(noFlip);
+        Assert.Equal(11, noFlip.Gray.Count);
+
+        recipe.Template.NoFlipConstraint = false;
+        var full = cache.GetOrCreate(recipe);
+        Assert.NotNull(full);
+        Assert.NotSame(noFlip, full);
+        Assert.Equal(22, full.Gray.Count);
     }
 
     [Fact]

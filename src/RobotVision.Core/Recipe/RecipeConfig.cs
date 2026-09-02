@@ -220,6 +220,13 @@ public sealed class TemplateOptions
     public bool UseEdgeMatch { get; set; }
 
     /// <summary>
+    /// true = 目标永不翻转 180°（角度仅落在 -90°~+90° 区间，如分向限定工位）。
+    /// 跳过 180° 分支搜索与翻转重试：省一半匹配计算量，并杜绝"180 支误选导致角度差 180°"。
+    /// false（默认）= 允许任意姿态，保留 180° 头尾消歧。
+    /// </summary>
+    public bool NoFlipConstraint { get; set; }
+
+    /// <summary>
     /// true = 精修失败时仍输出无向粗角 [0,180)（旧行为，偏心工具可能差 180°）。
     /// false（默认）= 分割到了但精修不过门时该目标不可用，全部不可用则 TRIGGER 返回 1019。
     /// </summary>
@@ -286,6 +293,7 @@ public sealed class TemplateOptions
         target.RefineRangeDeg = RefineRangeDeg;
         target.UseUprightCrop = UseUprightCrop;
         target.UseEdgeMatch = UseEdgeMatch;
+        target.NoFlipConstraint = NoFlipConstraint;
         target.AllowCoarseFallback = AllowCoarseFallback;
         target.TeachPeakScore = TeachPeakScore;
         target.HousingEdgePolarity = HousingEdgePolarity;

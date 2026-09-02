@@ -193,27 +193,30 @@ public static partial class MaskTemplateMatcher
     internal const double SearchFineHalfWidth = 1.0;
 
     /// <summary>
-    /// 缓存应覆盖的整数度：0°±range 与 180°±range，步进 <see cref="SearchFineStep"/>。
+    /// 缓存应覆盖的整数度：0°±range 与（非 noFlip 时）180°±range，步进 <see cref="SearchFineStep"/>。
+    /// <paramref name="noFlip"/>：目标永不翻转 180°（分向限定），只生成 0 支缓存，省一半。
     /// </summary>
-    public static IReadOnlyList<double> SearchCacheDegrees(double refineRangeDeg)
+    public static IReadOnlyList<double> SearchCacheDegrees(double refineRangeDeg, bool noFlip = false)
     {
         var count = (int)Math.Floor(refineRangeDeg / SearchFineStep);
         var degrees = new List<double>(4 * count + 4);
         for (var i = -count; i <= count; i++)
             degrees.Add(i * SearchFineStep);
-        for (var i = -count; i <= count; i++)
-            degrees.Add(180.0 + i * SearchFineStep);
+        if (!noFlip)
+            for (var i = -count; i <= count; i++)
+                degrees.Add(180.0 + i * SearchFineStep);
         return degrees;
     }
 
     /// <summary>
     /// 按当前精修范围预旋转模板（配方加载时调用）。内部各图由返回库持有。
+    /// <paramref name="noFlip"/>：只预旋 0 支（见 <see cref="SearchCacheDegrees"/>）。
     /// </summary>
-    public static RotatedTemplateBank CreateRotationBank(Mat template, double refineRangeDeg)
+    public static RotatedTemplateBank CreateRotationBank(Mat template, double refineRangeDeg, bool noFlip = false)
     {
         var source = template.Clone();
         var items = new List<(double Deg, Mat Image)>();
-        foreach (var deg in SearchCacheDegrees(refineRangeDeg))
+        foreach (var deg in SearchCacheDegrees(refineRangeDeg, noFlip))
             items.Add((deg, RotateTemplate(source, deg)));
         return new RotatedTemplateBank(source, refineRangeDeg, items);
     }
