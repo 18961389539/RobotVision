@@ -17,6 +17,8 @@
 | `177ae7d` | 全仓复查 P0-1 + P1-1 + P1-4：git rm 两个 `_wpftmp.csproj`（WPF 临时工程文件，泄本机路径）+ .gitignore 防回归；Skip 机制修复（xunit 2.9.2+runner 2.8.2 不支持 `SkipException.ForSkip` → 启用 SkippableFact，22 处 `[Fact]→[SkippableFact]`，13 环境性失败→11 跳过）；CA2213 泄漏 ×4（`_refreshCts` + 两个 `_pageSession` Dispose + CS8604）；顺带修 2 个真实测试 bug（SmoothRectangle 4 角点轮廓不满足 band≥8 契约、ApplicationPaths 对未创建目录 Delete） |
 | `7c50a0b` | 全仓复查 P1-5：4 处空 catch 补留痕（AtomicFile/ProcessHealthStore/CameraManager/LightingManager） |
 | `1aeab71` | 复查报告 `docs/review/2026-09-02-Repo-Audit.md` 补修复闭环 |
+| `eb7fdfd` | 重审新发现：ImageAnalysisService CWT 缓存竞态 → GetValue 原子工厂；CA2213 误报 ×2 标注（Wpf 首次 0 警告）。重审报告 `docs/review/2026-09-02-ReAudit.md` |
+| `d789230` | **拆分纯视觉算法为独立类库 RobotVision.Vision**：9 算法文件（模板匹配/卡尺/SIFT/形状匹配/壳体/缓存）从 Infrastructure 拆出，仅依赖 Core+OpenCvSharp4，零硬件与推理会话依赖；引用链 Hosting/Teach/tests/benchmarks 显式引用，零行为回归 |
 
 对应评审报告：`docs/review/2026-09-02-Wpf-CodeReview.md`、`docs/review/2026-09-02-Repo-Audit.md`。
 

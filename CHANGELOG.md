@@ -34,6 +34,7 @@
 - 推理后端改为 OpenVINO 核显（`Inference:Provider` 默认 `OpenVinoGpu`，单会话；GPU 不可用时回退 OpenVINO CPU 并打警告；YoloDotNet 每进程只能一种 EP，已替换 CPU 包）
 - WPF 界面重构为 Features/Shared 分层
 - **运行时升级 .NET 8 → .NET 10 (LTS)**：目标框架全仓切换 net10.0；Microsoft.Extensions 与 Sqlite 依赖统一 10.0.11；CI 构建/发布链路上升至 .NET 10 SDK。功能与协议无变化，仅运行时升级（.NET 8 已于 2026-11-10 停止支持）
+- **算法层拆分**：纯视觉算法（模板匹配/卡尺/SIFT/形状匹配）迁入独立类库 `RobotVision.Vision`——内部重构，行为与对外功能不变
 
 ### 破坏性变更
 

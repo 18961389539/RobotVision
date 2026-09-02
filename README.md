@@ -13,12 +13,15 @@ RobotVision.sln
 │   │   ├── Geometry/                   #   AngleGeometry（可单测的纯函数）
 │   │   ├── Models/                     #   PixelPose / RobotPose / VisionResult / 标定档案
 │   │   └── Recipe/                     #   RecipeConfig / RecipeLoader
-│   ├── RobotVision.Infrastructure/     # 基础设施层：管理器与策略实现
+│   ├── RobotVision.Infrastructure/     # 基础设施层：管理器与推理策略编排
 │   │   ├── Cameras/                    #   CameraManager / FileCamera（回放相机）
 │   │   ├── Lighting/                   #   LightingManager / NoopLightController（无操作光源）
 │   │   ├── Calibration/                #   CalibrationManager / 棋盘格内参 / 九点外参标定器
 │   │   ├── Communication/              #   TcpServerManager（行协议、超时、连接管理）
-│   │   └── Inference/                  #   ModelManager（IInferenceEngine 抽象）/ 策略与工厂注册表
+│   │   └── Inference/                  #   ModelManager（IInferenceEngine 抽象）/ 策略外壳与工厂注册表
+│   ├── RobotVision.Vision/             # 纯视觉算法库（仅 Core + OpenCvSharp，零硬件/推理会话依赖）
+│   │   └── Inference/Strategies/       #   模板匹配 / 卡尺+凸起 / SIFT / 形状匹配 / 壳体几何 / 缓存
+│   ├── RobotVision.Teach/              # 示教建议层：ScenePlaybook / SegmentRefineBakeOff 赛马对比
 │   ├── RobotVision.Hosting/            # 共享组装层：AddRobotVision 统一 DI、VisionService
 │   │                                   #   （编排）/ PipelineScheduler（并发队列）/ VisionMetrics（统计）、
 │   │                                   #   文件日志（滚动文件 + UI 日志sink）
