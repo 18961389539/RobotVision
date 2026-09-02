@@ -1,4 +1,5 @@
 using ImageViewer.Controls;
+using RobotVision.WpfHost.Shared;
 using ViewerControl = ImageViewer.Controls.ImageViewer;
 
 namespace RobotVision.WpfHost.Features.Recipe;
@@ -8,6 +9,7 @@ internal sealed class RecipeWizardImageHost : IDisposable
 {
     private readonly RecipeRoiEditor _roi;
     private readonly Func<bool> _usesFeatureTeachRoi;
+    private readonly IRoiViewport _viewport;
     private readonly RecipeRoiLiveSync _sync;
 
     public RecipeWizardImageHost(
@@ -15,13 +17,23 @@ internal sealed class RecipeWizardImageHost : IDisposable
         IRecipeWorkspace host,
         RecipeRoiEditor roi,
         Func<bool> usesFeatureTeachRoi)
+        : this(new ImageViewerRoiViewport(viewer), host, roi, usesFeatureTeachRoi)
+    {
+    }
+
+    internal RecipeWizardImageHost(
+        IRoiViewport viewport,
+        IRecipeWorkspace host,
+        RecipeRoiEditor roi,
+        Func<bool> usesFeatureTeachRoi)
     {
         _roi = roi;
         _usesFeatureTeachRoi = usesFeatureTeachRoi;
+        _viewport = viewport;
         _sync = new RecipeRoiLiveSync(
             roi,
-            () => viewer,
-            [viewer],
+            () => _viewport,
+            [_viewport],
             () => roi.HasRoiRefFrame ? host.Editor.Roi : null,
             () => usesFeatureTeachRoi() ? host.Editor.Template?.Roi : null,
             usesFeatureTeachRoi,

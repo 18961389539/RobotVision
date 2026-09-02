@@ -12,6 +12,7 @@ namespace RobotVision.IntegrationTests;
 /// 配方加载/校验、错误码语义（1001/1004/1005/1014/1015/1016）、
 /// OnArm 位姿校验（1012）、健康指标与配方统计。
 /// </summary>
+[Collection("Serial")]
 public class VisionPipelineIntegrationTests
 {
     [Fact]

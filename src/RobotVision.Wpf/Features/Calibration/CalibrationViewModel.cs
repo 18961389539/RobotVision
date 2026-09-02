@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure.Calibration;
+using RobotVision.Core.Calibration;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Calibration;
@@ -190,11 +190,14 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
         _cameras = cameras;
         _dialogs = dialogs;
         _log = log;
-        Refresh();
     }
 
     [RelayCommand]
-    public void Refresh()
+    public void Refresh() => ApplyRefresh();
+
+    public void ScheduleRefresh() => ApplyRefresh();
+
+    private void ApplyRefresh()
     {
         Intrinsics.Clear();
         foreach (var p in _calibration.IntrinsicProfiles)
@@ -282,7 +285,7 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
         if (scaleX <= 0 || scaleY <= 0)
             return "可用";
         var ratio = Math.Max(scaleX, scaleY) / Math.Min(scaleX, scaleY) - 1;
-        return ratio > CalibrationManager.ScaleAnisotropyWarnLimit ? "近似" : "可用";
+        return ratio > CalibrationLimits.ScaleAnisotropyWarnLimit ? "近似" : "可用";
     }
 
     partial void OnScaleXChanged(double value) => UpdateScalePreview();
@@ -302,7 +305,7 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
             ? $" · 视场 {ScaleWidth * ScaleX:0.##} × {ScaleHeight * ScaleY:0.##} mm"
             : "";
         var anisotropy = Math.Max(ScaleX, ScaleY) / Math.Min(ScaleX, ScaleY) - 1;
-        var hint = anisotropy > CalibrationManager.ScaleAnisotropyWarnLimit
+        var hint = anisotropy > _calibration.ScaleAnisotropyWarnLimit
             ? $" · X/Y 差 {anisotropy * 100:0.0}%（疑似旋转/透视/畸变）"
             : "";
         ScaleFormMessageIsError = false;

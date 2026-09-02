@@ -6,6 +6,7 @@ namespace RobotVision.IntegrationTests;
 /// TCP 协议端到端集成测试：真实 socket 连接 → TcpServerManager → VisionService 管线。
 /// 覆盖 PING/STATUS/未知命令/配方解析（名称/序列号/路径穿越）/错误码应答格式/白名单拒绝。
 /// </summary>
+[Collection("Serial")]
 public class TcpProtocolEndToEndTests
 {
     [Fact]

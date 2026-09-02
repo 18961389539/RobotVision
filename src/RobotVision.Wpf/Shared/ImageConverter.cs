@@ -17,6 +17,18 @@ public static class ImageConverter
         return ToBitmapSource(mat);
     }
 
+    public static BitmapSource ToBitmapSource(BgraImageBuffer buffer)
+    {
+        var bitmap = new WriteableBitmap(buffer.Width, buffer.Height, 96, 96, PixelFormats.Bgra32, null);
+        bitmap.WritePixels(
+            new Int32Rect(0, 0, buffer.Width, buffer.Height),
+            buffer.Pixels,
+            buffer.Stride,
+            0);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
     public static BitmapSource ToBitmapSource(Mat bgr)
     {
         Mat bgra;

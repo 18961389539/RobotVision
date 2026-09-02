@@ -1,4 +1,4 @@
-using RobotVision.Infrastructure.Inference;
+using RobotVision.Core.Inference;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -13,6 +13,6 @@ public class InferenceTaskDetectorTests
     [InlineData("yolov8n.onnx", null)]
     public void GuessFromFileName_KnownPatterns(string name, InferenceTask? expected)
     {
-        Assert.Equal(expected, InferenceTaskDetector.GuessFromFileName(name));
+        Assert.Equal(expected, InferenceTaskNaming.GuessFromFileName(name));
     }
 }

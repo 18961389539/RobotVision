@@ -241,10 +241,10 @@ public sealed class MaskTemplateMatchTests : IDisposable
     [Fact]
     public void PreferOrientationBranch_RealOsdpTemplate_FlippedIs180()
     {
-        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "data", "replay", "osdp-template.png"));
-        if (!File.Exists(path))
-            return;
+        var path = Path.GetFullPath(Path.Combine(
+            TestBuildPaths.FindRepoRoot() ?? AppContext.BaseDirectory,
+            "data", "replay", "osdp-template.png"));
+        TestPreconditions.RequireFile(path, $"Missing replay asset: {path}");
         using var tab = Cv2.ImRead(path, ImreadModes.Color);
         Assert.False(tab.Empty());
         using var flipped = new Mat();

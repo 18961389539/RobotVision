@@ -185,7 +185,7 @@
                 <Border.Resources>
                     <ResourceDictionary>
                         <ResourceDictionary.MergedDictionaries>
-                            <ResourceDictionary Source="/Shared/OverlayPanelResources.xaml" />
+                            <ResourceDictionary Source="/RobotVision.Wpf;component/Shared/OverlayPanelResources.xaml" />
                         </ResourceDictionary.MergedDictionaries>
                     </ResourceDictionary>
                 </Border.Resources>

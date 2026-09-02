@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
@@ -15,18 +16,21 @@ public sealed partial class RecipeRoiEditor : ObservableObject
     private readonly ICameraRuntime _cameras;
     private readonly ICalibrationRuntime _calibration;
     private readonly ILightingRuntime _lighting;
+    private readonly PageAsyncSession _pageSession;
     private string? _roiFrameCameraId;
 
     internal RecipeRoiEditor(
         IRecipeWorkspace host,
         ICameraRuntime cameras,
         ICalibrationRuntime calibration,
-        ILightingRuntime lighting)
+        ILightingRuntime lighting,
+        PageAsyncSession pageSession)
     {
         _host = host;
         _cameras = cameras;
         _calibration = calibration;
         _lighting = lighting;
+        _pageSession = pageSession;
     }
 
     private RecipeConfig Editor => _host.Editor;
@@ -337,13 +341,25 @@ public sealed partial class RecipeRoiEditor : ObservableObject
             return;
         }
 
+        var generation = _pageSession.CaptureGeneration();
+        var ct = _pageSession.Token;
+        var work = PreviewRoiCoreAsync(cameraId, generation, ct);
+        _pageSession.Track(work);
+        await work;
+    }
+
+    private async Task PreviewRoiCoreAsync(string cameraId, int generation, CancellationToken ct)
+    {
         _host.IsBusy = true;
         try
         {
             var roi = Editor.Roi;
             _host.Message = $"ROI 预览取图中 · {cameraId} …（推理图像空间：光源+去畸变/工位映射）";
             var (frame, width, height) = await RecipeEditorFrame.GrabPreviewAsync(
-                _cameras, _calibration, _lighting, Editor);
+                _cameras, _calibration, _lighting, Editor, ct);
+            if (!_pageSession.IsCurrent(generation) || ct.IsCancellationRequested)
+                return;
+
             _roiFrameCameraId = cameraId;
             RoiRefWidth = width;
             RoiRefHeight = height;
@@ -354,13 +370,18 @@ public sealed partial class RecipeRoiEditor : ObservableObject
                   $"({(roi.X + roi.Width) * width:0},{(roi.Y + roi.Height) * height:0}) px · " +
                   $"{roi.Width * width:0}×{roi.Height * height:0}px（存储比例 {roi.X:0.000},{roi.Y:0.000},{roi.Width:0.000},{roi.Height:0.000}）";
         }
+        catch (OperationCanceledException)
+        {
+        }
         catch (Exception ex)
         {
-            _host.Message = $"ROI 预览失败: {ex.Message}";
+            if (_pageSession.IsCurrent(generation))
+                _host.Message = $"ROI 预览失败: {ex.Message}";
         }
         finally
         {
-            _host.IsBusy = false;
+            if (_pageSession.IsCurrent(generation))
+                _host.IsBusy = false;
         }
     }
 

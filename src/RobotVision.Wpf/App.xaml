@@ -17,6 +17,10 @@
             <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
             <local:InverseBoolConverter x:Key="InverseBoolConverter"
                                         xmlns:local="clr-namespace:RobotVision.WpfHost.Shared" />
+            <local:NullToCollapsedConverter x:Key="NullToCollapsedConverter"
+                                            xmlns:local="clr-namespace:RobotVision.WpfHost.Shared" />
+            <local:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter"
+                                                    xmlns:local="clr-namespace:RobotVision.WpfHost.Shared" />
 
             <!-- WPF-UI NavigationView 会在 Page 外包一层 DynamicScrollViewer；                 全屏图像页（相机/配方/监控等）须同时禁用外层滚动，否则参数栏内容过高时整页（含 ImageViewer）会一起滚"                 CanContentScroll=False 关闭动态滚动；VerticalScrollBarVisibility=Disabled 禁止外层滚动条与滚轮链式传递；                 设置/关于等表单页不要用 Disabled，保留整页滚动"-->
             <Style TargetType="Page" BasedOn="{StaticResource DefaultPageStyle}">
@@ -71,8 +75,7 @@
             <!-- ===== 全局 DataGrid 风格（隐式样式：所有页面表格自动生效，无需逐页修改）=====
                  BasedOn WPF-UI 主题样式，仅做可读性增强：斑马纹、行高、垂直居中、表头强化"-->
 
-            <Style x:Key="AppDataGridStyle" TargetType="{x:Type DataGrid}"
-                   BasedOn="{StaticResource {x:Type DataGrid}}">
+            <Style x:Key="AppDataGridStyle" TargetType="{x:Type DataGrid}">
                 <Setter Property="AlternationCount" Value="2" />
                 <!-- 表格主体背景/前景：WPF-UI 3.x 未覆盖 DataGrid 默认白底，这里补深色 -->
                 <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />

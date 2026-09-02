@@ -14,7 +14,6 @@ using RobotVision.Core.Abstractions;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Cameras;
-using RobotVision.Infrastructure.Cameras;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Cameras;

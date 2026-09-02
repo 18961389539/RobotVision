@@ -12,6 +12,7 @@ namespace RobotVision.Tests;
 /// 成功/失败同一格式（失败行 Code=错误码）、开关、按天清理。
 /// 写入为后台异步追加，断言前轮询等待文件出现。
 /// </summary>
+[Collection("Serial")]
 public class ResultLogStoreTests : IDisposable
 {
     private readonly string _folder =
@@ -34,15 +35,16 @@ public class ResultLogStoreTests : IDisposable
 
     private static string WaitForFile(string dir, string pattern, int timeoutMs = 5000)
     {
-        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (DateTime.UtcNow < deadline)
-        {
-            var file = Directory.Exists(dir) ? Directory.GetFiles(dir, pattern).FirstOrDefault() : null;
-            if (file is not null)
-                return file;
-            Thread.Sleep(50);
-        }
-        return "";
+        string? file = null;
+        TestWait.Until(
+            () =>
+            {
+                file = Directory.Exists(dir) ? Directory.GetFiles(dir, pattern).FirstOrDefault() : null;
+                return file is not null;
+            },
+            TimeSpan.FromMilliseconds(timeoutMs),
+            description: $"File not found: {pattern} in {dir}");
+        return file!;
     }
 
     [Fact]
@@ -99,15 +101,11 @@ public class ResultLogStoreTests : IDisposable
         store.Record(VisionResult.Fail("B", VisionErrorCode.Busy, "busy", 0));
 
         var file = WaitForFile(_folder, "results-*.jsonl");
-        var deadline = DateTime.UtcNow.AddSeconds(3);
-        var lines = Array.Empty<string>();
-        while (DateTime.UtcNow < deadline)
-        {
-            lines = File.ReadAllLines(file);
-            if (lines.Length >= 3)
-                break;
-            Thread.Sleep(50);
-        }
+        TestWait.Until(
+            () => File.ReadAllLines(file).Length >= 3,
+            TimeSpan.FromSeconds(3),
+            description: "Expected 3 JSONL lines");
+        var lines = File.ReadAllLines(file);
         Assert.Equal(3, lines.Length);
     }
 
@@ -117,7 +115,10 @@ public class ResultLogStoreTests : IDisposable
         using var store = new ResultLogStore(Config(_folder, enabled: false), NullLogger<ResultLogStore>.Instance);
 
         store.Record(VisionResult.Success("A", [new RobotPose(1, 2, 0)], 10));
-        Thread.Sleep(300);
+        TestWait.WhileTrue(
+            () => !Directory.Exists(_folder) || Directory.GetFiles(_folder).Length == 0,
+            TimeSpan.FromMilliseconds(500),
+            description: "Disabled store should not write files");
 
         Assert.False(Directory.Exists(_folder) && Directory.GetFiles(_folder).Length > 0);
     }
@@ -147,10 +148,8 @@ public class ResultLogStoreTests : IDisposable
         store.Record(VisionResult.Success("A", [new RobotPose(1, 2, 0)], 10));
 
         WaitForFile(_folder, "results-*.jsonl");
-        // 写盘为后台异步线程,CI 负载高时可能延迟,放宽到 10s
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (DateTime.UtcNow < deadline && File.Exists(oldFile))
-            Thread.Sleep(50);
+        TestWait.Until(() => !File.Exists(oldFile), TimeSpan.FromSeconds(10),
+            description: "Expired log file should be cleaned up");
 
         Assert.False(File.Exists(oldFile), "超期日志文件应被清理");
         Assert.True(Directory.GetFiles(_folder, "results-*.jsonl").Length >= 1, "今天的日志应保留");
@@ -167,7 +166,8 @@ public class ResultLogStoreTests : IDisposable
         store.Record(VisionResult.Success("A", [new RobotPose(1, 2, 0)], 10));
 
         WaitForFile(_folder, "results-*.jsonl");
-        Thread.Sleep(300);
+        TestWait.Until(() => File.Exists(oldFile), TimeSpan.FromMilliseconds(500),
+            description: "RetainedDays=0 should keep old files");
         Assert.True(File.Exists(oldFile), "RetainedDays=0 不应清理");
     }
 }

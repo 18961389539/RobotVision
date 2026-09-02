@@ -16,24 +16,44 @@ namespace RobotVision.Tests;
 /// 现场成功留存图批量精修：剪影轮廓对比 + Product 配方真实分割。
 /// 默认目录：Wpf bin 下 data/captures/yyyy-MM-dd（可通过环境变量 FIELD_CAPTURE_DIR 覆盖）。
 /// </summary>
+[Trait("Category", "Bench")]
 public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
 {
-    private static readonly string WpfBin = Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "..", "..",
-        "src", "RobotVision.Wpf", "bin", "Debug", "net8.0-windows"));
+    private static string DefaultCaptureDir
+    {
+        get
+        {
+            var wpfBin = TestBuildPaths.ResolveWpfBin();
+            return wpfBin is null
+                ? ""
+                : Path.Combine(wpfBin, "data", "captures", "2026-08-28");
+        }
+    }
 
-    private static readonly string DefaultCaptureDir =
-        Path.Combine(WpfBin, "data", "captures", "2026-08-28");
+    private static string RequireCaptureDir()
+    {
+        var dir = Environment.GetEnvironmentVariable("FIELD_CAPTURE_DIR") ?? DefaultCaptureDir;
+        TestPreconditions.RequireDirectory(dir, $"Capture directory not found: {dir}");
+        return dir;
+    }
+
+    private static (string CaptureDir, string RecipeDir, string ModelsDir) ResolveBenchAssets()
+    {
+        var dir = RequireCaptureDir();
+
+        var recipeDir = TestBuildPaths.ResolveRecipesDir()
+                        ?? TestBuildPaths.CombineWpf("recipes");
+        var modelsDir = TestBuildPaths.ResolveModelsDir()
+                        ?? TestBuildPaths.CombineWpf("models");
+        TestPreconditions.RequireFile(Path.Combine(recipeDir, "Product.json"), "Missing Product.json for bench.");
+        TestPreconditions.RequireFile(Path.Combine(modelsDir, "OSFP-SEG.onnx"), "Missing OSFP-SEG.onnx for bench.");
+        return (dir, recipeDir, modelsDir);
+    }
 
     [Fact]
     public void Bench_field_captures_compare_refine_paths()
     {
-        var dir = Environment.GetEnvironmentVariable("FIELD_CAPTURE_DIR") ?? DefaultCaptureDir;
-        if (!Directory.Exists(dir))
-        {
-            output.WriteLine($"跳过：目录不存在 {dir}");
-            return;
-        }
+        var dir = RequireCaptureDir();
 
         var files = Directory.GetFiles(dir, "*_Product_OK.png", SearchOption.TopDirectoryOnly)
             .OrderBy(f => f).ToArray();
@@ -80,16 +100,7 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
     [Fact]
     public void Bench_field_captures_product_recipe_yolo()
     {
-        var dir = Environment.GetEnvironmentVariable("FIELD_CAPTURE_DIR") ?? DefaultCaptureDir;
-        var recipeDir = Path.Combine(WpfBin, "recipes");
-        var modelsDir = Path.Combine(WpfBin, "models");
-        if (!Directory.Exists(dir) || !File.Exists(Path.Combine(recipeDir, "Product.json")) ||
-            !File.Exists(Path.Combine(modelsDir, "OSFP-SEG.onnx")))
-        {
-            output.WriteLine("跳过：缺少现场图 / Product.json / OSFP-SEG.onnx");
-            return;
-        }
-
+        var (dir, recipeDir, modelsDir) = ResolveBenchAssets();
         var recipe = new RecipeLoader(recipeDir).Get("Product");
         using var models = new ModelManager(modelsDir);
         var strategy = new MaskTemplateStrategy(models);
@@ -151,16 +162,7 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
     [Fact]
     public void Bench_field_captures_sift_vs_caliper()
     {
-        var dir = Environment.GetEnvironmentVariable("FIELD_CAPTURE_DIR") ?? DefaultCaptureDir;
-        var recipeDir = Path.Combine(WpfBin, "recipes");
-        var modelsDir = Path.Combine(WpfBin, "models");
-        if (!Directory.Exists(dir) || !File.Exists(Path.Combine(recipeDir, "Product.json")) ||
-            !File.Exists(Path.Combine(modelsDir, "OSFP-SEG.onnx")))
-        {
-            output.WriteLine("跳过：缺少现场图 / Product.json / OSFP-SEG.onnx");
-            return;
-        }
-
+        var (dir, recipeDir, modelsDir) = ResolveBenchAssets();
         SIFT? sift;
         try
         {

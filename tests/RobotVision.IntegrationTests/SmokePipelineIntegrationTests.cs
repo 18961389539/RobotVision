@@ -21,6 +21,7 @@ namespace RobotVision.IntegrationTests;
 /// 全部用合成图 + DualBlobCenterLine（无模型），CI/开发机可直接运行。
 /// 共享一个 TestServer（fixture），避免每个用例重复冷启动 DI 容器。
 /// </summary>
+[Collection("Serial")]
 public class SmokePipelineIntegrationTests : IClassFixture<SmokePipelineIntegrationTests.SmokeServerFixture>
 {
     private const int ImageSize = 512;

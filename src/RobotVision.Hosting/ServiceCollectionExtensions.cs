@@ -83,8 +83,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ChatToolAuditStore>(),
             sp.GetRequiredService<ChatConfig>()));
         services.AddSingleton<ChatAgent>();
-        services.AddSingleton<CameraConfigStore>(new CameraConfigStore(cfg));
-        services.AddSingleton<LightingConfigStore>(new LightingConfigStore(cfg));
+        services.AddSingleton<IRecipeTestService, RecipeTestService>();
+        services.AddSingleton<CameraConfigStore>(new CameraConfigStore(cfg, ApplicationPaths.UserSettingsPath));
+        services.AddSingleton<LightingConfigStore>(new LightingConfigStore(cfg, ApplicationPaths.UserSettingsPath));
 
         // 相机工厂注册表：内置 File/Basler/GigEVision/Virtual 已注册，第三方品牌在启动早期
         // 调 CameraTypeRegistry.Default.Register(...) 一行接入，此处与 UI 均从注册表查询。
@@ -143,7 +144,7 @@ public static class ServiceCollectionExtensions
         {
             var log = sp.GetRequiredService<ILogger<CameraManager>>();
             var registry = sp.GetRequiredService<CameraTypeRegistry>();
-            var manager = new CameraManager();
+            var manager = new CameraManager(log);
             foreach (var camera in cfg.Cameras)
             {
                 try
@@ -377,7 +378,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(sp =>
         {
-            var store = new AppSettingsStore(cfg);
+            var store = new AppSettingsStore(cfg, ApplicationPaths.UserSettingsPath);
             // 保存后把可热应用的参数同步到运行中的管理器：任何调用方保存即生效，
             // 不再依赖 UI 逐个手动应用；不可热应用的参数（MaxConcurrent/TcpBacklog
             // 首次固化/启动时读取）显式跳过并记录提示

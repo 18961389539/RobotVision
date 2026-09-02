@@ -1,0 +1,317 @@
+<UserControl x:Class="RobotVision.WpfHost.Features.Calibration.CalibrationScaleWorkspace"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:ivc="clr-namespace:ImageViewer.Controls;assembly=ImageViewerControl"
+             xmlns:host="clr-namespace:RobotVision.WpfHost.Shared">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/RobotVision.Wpf;component/Shared/PagePanelResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+                <Grid Margin="0,4,0,0">
+                    <!-- 主导图像区：取图后全屏预览，便于量像素填换算助手 -->
+                    <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
+                        <Grid>
+                            <ivc:ImageViewer ImageSource="{Binding ScalePreviewImage}" />
+                            <Border Background="#66000000" CornerRadius="3" Padding="6,2" Margin="10,10,10,10"
+                                    HorizontalAlignment="Left" VerticalAlignment="Top" Panel.ZIndex="10"
+                                    Visibility="{Binding ScalePreviewVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <TextBlock Text="{Binding ScalePreviewCaption}" FontSize="11" Foreground="White" />
+                            </Border>
+                            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10,12,10,10"
+                                    Background="#66000000" CornerRadius="3" Padding="8,4" Panel.ZIndex="10"
+                                    IsHitTestVisible="False">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsScaleParamPanelVisible}" Value="False">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding ScaleFormMessage}" FontSize="11" Foreground="White"
+                                           MaxWidth="360" TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding ScaleFormMessage}" />
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- 列表收起时重新打开 -->
+                    <Button HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12"
+                            Content="比例档案" Padding="14,8" FontWeight="SemiBold" Panel.ZIndex="30"
+                            Command="{Binding ToggleScaleListPanelCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsScaleListPanelVisible}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+
+                    <!-- 左：比例档案列表（浮动窄栏，可折叠） -->
+                    <Border Width="220" Margin="12" VerticalAlignment="Top" MaxHeight="640" Panel.ZIndex="20"
+                            HorizontalAlignment="Left" Background="#F01E2836"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="8"
+                            Visibility="{Binding IsScaleListPanelVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Border.Resources>
+                            <ResourceDictionary>
+                                <ResourceDictionary.MergedDictionaries>
+                                    <ResourceDictionary Source="/RobotVision.Wpf;component/Shared/OverlayPanelResources.xaml" />
+                                </ResourceDictionary.MergedDictionaries>
+                            </ResourceDictionary>
+                        </Border.Resources>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" MaxHeight="480" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid Margin="10,10,10,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ui:TextBlock Text="比例档案" FontTypography="BodyStrong" Foreground="{DynamicResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                <ui:Button Grid.Column="1" Content="新建" Padding="8,3" FontSize="11" Margin="6,0,0,0"
+                                           ToolTip="清空表单，填写新工位 Id 后保存即可新建比例档"
+                                           Command="{Binding NewScaleCommand}" />
+                                <ui:Button Grid.Column="2" Content="刷新" Padding="8,3" FontSize="11" ToolTip="F5"
+                                           Command="{Binding RefreshCommand}" />
+                                <Button Grid.Column="3" Content="收起" Padding="10,4" FontSize="12" Margin="6,0,0,0"
+                                        Command="{Binding ToggleScaleListPanelCommand}" />
+                            </Grid>
+                            <ListBox Grid.Row="1" Margin="4,0,4,4" ItemsSource="{Binding Scales}"
+                                     SelectedItem="{Binding SelectedScale}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="2,4" Width="200">
+                                            <StackPanel Orientation="Horizontal">
+                                                <ui:TextBlock Text="{Binding StationId, Mode=OneWay}" FontTypography="BodyStrong" Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                              TextTrimming="CharacterEllipsis" />
+                                                <Border Margin="6,2,0,0" Padding="4,1" CornerRadius="3"
+                                                        Background="{DynamicResource SystemFillColorSuccessBrush}">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Quality, Mode=OneWay}" Value="近似">
+                                                                    <Setter Property="Background"
+                                                                            Value="{DynamicResource SystemFillColorCautionBrush}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBlock Text="{Binding Quality, Mode=OneWay}" FontSize="9"
+                                                               Foreground="{DynamicResource Brush.AppBadgeText}" FontWeight="Bold" />
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
+                                                       Foreground="#FFB8C0CC">
+                                                <Run Text="{Binding CameraId, Mode=OneWay}" />
+                                                <Run Text=" · " />
+                                                <Run Text="{Binding Resolution, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <UniformGrid Columns="2" Margin="0,4,0,0">
+                                                <ui:NumberBox Value="{Binding ScaleX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Minimum="0" Maximum="1000" SmallChange="0.001"
+                                                              SpinButtonPlacementMode="Compact" FontSize="11"
+                                                              ToolTip="X 比例 (mm/px)" />
+                                                <ui:NumberBox Value="{Binding ScaleY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Minimum="0" Maximum="1000" SmallChange="0.001"
+                                                              SpinButtonPlacementMode="Compact" FontSize="11" Margin="4,0,0,0"
+                                                              ToolTip="Y 比例 (mm/px)" />
+                                            </UniformGrid>
+                                            <TextBlock Text="{Binding FieldOfView, Mode=OneWay, StringFormat=视场 {0}}"
+                                                       FontSize="9" Margin="0,2,0,0"
+                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+                                                <ui:Button Content="载入" FontSize="10" Padding="6,2" Margin="0,0,4,0"
+                                                           ToolTip="载入右侧参数面板（含卡片上已改的比例）"
+                                                           Command="{Binding DataContext.LoadScaleToFormCommand,
+                                                               RelativeSource={RelativeSource AncestorType=Page}}"
+                                                           CommandParameter="{Binding}" />
+                                                <ui:Button Content="保存" FontSize="10" Padding="6,2" Margin="0,0,4,0"
+                                                           ToolTip="仅保存本卡片 X/Y，相机与分辨率不变）"
+                                                           Command="{Binding DataContext.QuickSaveScaleCommand,
+                                                               RelativeSource={RelativeSource AncestorType=Page}}"
+                                                           CommandParameter="{Binding}" />
+                                                <ui:Button Content="删除" FontSize="10" Padding="6,2"
+                                                           Command="{Binding DataContext.DeleteScaleCommand,
+                                                               RelativeSource={RelativeSource AncestorType=Page}}"
+                                                           CommandParameter="{Binding StationId}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <StackPanel Grid.Row="2" Margin="10,4,10,10">
+                                <ui:Button Content="打开标定目录" Padding="8,4" FontSize="11"
+                                           Command="{Binding OpenFolderCommand}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- 参数收起时重新打开 -->
+                    <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
+                            Content="参数" Padding="14,8" FontWeight="SemiBold" Panel.ZIndex="30"
+                            Command="{Binding ToggleScaleParamPanelCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsScaleParamPanelVisible}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+
+                    <!-- 右：比例录入参数（浮动面�?428px，可折叠"-->
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="428" Margin="12"
+                            Panel.ZIndex="20" ClipToBounds="True" Background="#F01E2836"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="8"
+                            Visibility="{Binding IsScaleParamPanelVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Border.Resources>
+                            <ResourceDictionary>
+                                <ResourceDictionary.MergedDictionaries>
+                                    <ResourceDictionary Source="/RobotVision.Wpf;component/Shared/OverlayPanelResources.xaml" />
+                                </ResourceDictionary.MergedDictionaries>
+                            </ResourceDictionary>
+                        </Border.Resources>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid Margin="12,12,12,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ui:TextBlock Text="比例标定" FontTypography="BodyStrong" Foreground="{DynamicResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Content="收起" Padding="10,4" FontSize="12"
+                                        Command="{Binding ToggleScaleParamPanelCommand}" />
+                            </Grid>
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="12,0,12,8"
+                                          host:ViewportPageLayout.IsolateWheel="True">
+                                <StackPanel>
+                                    <TextBlock FontSize="11" Margin="0,0,0,10" TextWrapping="Wrap"
+                                               Foreground="#FFD0D8E4"
+                                               Text="像素 → 毫米线性比例 (mm/px)。取图后在画面上量像素，配合换算助手录入；保存后即时热加载" />
+                                    <UniformGrid Columns="2" Margin="0,0,0,8">
+                                        <StackPanel Margin="0,0,8,8">
+                                            <TextBlock Text="工位 Id" Margin="0,0,0,4" FontSize="12" />
+                                            <ui:TextBox Text="{Binding ScaleStationId, UpdateSourceTrigger=PropertyChanged}"
+                                                        ToolTip="与配方外参同名的工位标" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,8">
+                                            <TextBlock Text="相机" Margin="0,0,0,4" FontSize="12" />
+                                            <ComboBox ItemsSource="{Binding CameraOptions}"
+                                                      DisplayMemberPath="Label"
+                                                      SelectedValuePath="Id"
+                                                      SelectedValue="{Binding ScaleCameraId}"
+                                                      ToolTip="录入比例所用的相机" />
+                                            <TextBlock Text="{Binding ScaleCameraGrabHint}" FontSize="11" TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                                       Margin="0,4,0,0"
+                                                       Visibility="{Binding ScaleCameraGrabHint,
+                                                           Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,8">
+                                            <TextBlock Text="分辨率宽 (px)" Margin="0,0,0,4" FontSize="12" />
+                                            <ui:NumberBox Value="{Binding ScaleWidth}" Minimum="0" Maximum="65535"
+                                                          SmallChange="1" SpinButtonPlacementMode="Compact" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,8">
+                                            <TextBlock Text="分辨率高 (px)" Margin="0,0,0,4" FontSize="12" />
+                                            <ui:NumberBox Value="{Binding ScaleHeight}" Minimum="0" Maximum="65535"
+                                                          SmallChange="1" SpinButtonPlacementMode="Compact" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                        <ui:Button Content="取图显示" Command="{Binding GrabScalePreviewCommand}"
+                                                   IsEnabled="{Binding CanUseScaleGrab}"
+                                                   ToolTip="取一帧显示在主画面，并同步填入宽" />
+                                        <ui:Button Content="仅读分辨率" Margin="6,0,0,0"
+                                                   Command="{Binding ReadCameraResolutionCommand}"
+                                                   IsEnabled="{Binding CanUseScaleGrab}"
+                                                   ToolTip="只填宽高，不刷新主画" />
+                                    </StackPanel>
+                                    <UniformGrid Columns="2" Margin="0,0,0,8">
+                                        <StackPanel Margin="0,0,8,8">
+                                            <TextBlock Text="X 比例 (mm/px)" Margin="0,0,0,4" FontSize="12" />
+                                            <ui:NumberBox Value="{Binding ScaleX}" Minimum="0" Maximum="1000"
+                                                          SmallChange="0.001" SpinButtonPlacementMode="Compact" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,8">
+                                            <TextBlock Text="Y 比例 (mm/px)" Margin="0,0,0,4" FontSize="12" />
+                                            <ui:NumberBox Value="{Binding ScaleY}" Minimum="0" Maximum="1000"
+                                                          SmallChange="0.001" SpinButtonPlacementMode="Compact" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <Border Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="4"
+                                            Padding="10,8" Margin="0,0,0,4">
+                                        <StackPanel>
+                                            <TextBlock Text="换算助手：物�?mm ÷ 图上 px = 比例" FontSize="11"
+                                                       Foreground="#FFD0D8E4" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                <ui:NumberBox Value="{Binding RefLengthMm}" Minimum="0" Maximum="100000"
+                                                              SmallChange="0.1" SpinButtonPlacementMode="Compact"
+                                                              MinWidth="80" ToolTip="参考物实际长度 (mm)" />
+                                                <ui:NumberBox Value="{Binding RefLengthPx}" Minimum="0" Maximum="100000"
+                                                              SmallChange="1" SpinButtonPlacementMode="Compact"
+                                                              MinWidth="80" Margin="6,0,0,0" ToolTip="图上像素长度" />
+                                                <ui:Button Content="�?X" Padding="8,3" Margin="6,0,0,0"
+                                                           Command="{Binding ApplyRefToXCommand}" />
+                                                <ui:Button Content="�?Y" Padding="8,3" Margin="6,0,0,0"
+                                                           Command="{Binding ApplyRefToYCommand}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                            <StackPanel Grid.Row="2" Margin="12,0,12,12">
+                                <TextBlock Text="{Binding ScaleFormMessage}" FontSize="11" TextWrapping="Wrap"
+                                           Margin="0,0,0,8">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                            <Setter Property="Foreground"
+                                                    Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ScaleFormMessageIsError}" Value="True">
+                                                    <Setter Property="Foreground"
+                                                            Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:Button Content="删除" Command="{Binding DeleteCurrentScaleCommand}" />
+                                    <ui:Button Grid.Column="2" Content="保存比例档案" Appearance="Primary"
+                                               Command="{Binding SaveScaleCommand}"
+                                               ToolTip="写入 {工位}.scale.json 并热加载" />
+                                </Grid>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+</UserControl>

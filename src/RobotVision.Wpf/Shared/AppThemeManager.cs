@@ -18,6 +18,10 @@ internal static class AppThemeManager
     private static readonly Uri DarkTooltipUri = new(
         "/RobotVision.Wpf;component/Shared/DarkTooltipResources.xaml", UriKind.Relative);
 
+    private static readonly Uri DarkComboBoxUri = new(ResourceUris.DarkComboBox, UriKind.Relative);
+
+    private static readonly Uri LightComboBoxUri = new(ResourceUris.LightComboBox, UriKind.Relative);
+
     public static ApplicationTheme CurrentTheme { get; private set; } = ApplicationTheme.Dark;
 
     public static bool IsLight =>
@@ -40,6 +44,7 @@ internal static class AppThemeManager
         // 的引用指向被移除的旧实例（内容等价但 ReferenceEquals 失败，且徒增解析开销）。
         RefreshTooltipChrome(theme);
         RefreshPalette(theme);
+        RefreshComboBoxChrome(theme);
     }
 
     /// <summary>按主题二选一加载语义画刷字典（Brush.App*）；DynamicResource 引用随切换即时更新。</summary>
@@ -71,5 +76,13 @@ internal static class AppThemeManager
             return;
 
         SwapMergedDictionary(root, DarkTooltipUri, LightTooltipUri, theme == ApplicationTheme.Light);
+    }
+
+    private static void RefreshComboBoxChrome(ApplicationTheme theme)
+    {
+        if (Application.Current?.Resources is not ResourceDictionary root)
+            return;
+
+        SwapMergedDictionary(root, DarkComboBoxUri, LightComboBoxUri, theme == ApplicationTheme.Light);
     }
 }

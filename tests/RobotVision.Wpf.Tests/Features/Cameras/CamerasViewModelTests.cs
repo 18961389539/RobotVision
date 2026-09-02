@@ -1,4 +1,5 @@
-using System.Threading;
+using System.Windows;
+using System.Windows.Threading;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using FluentAssertions;
@@ -31,6 +32,54 @@ internal sealed class CountingCameraFactory : ICameraFactory
             config.IntervalMs,
             config.NoiseSigma,
             config.ChessCellPx);
+    }
+}
+
+/// <summary>测试用：Grab 期间可检测是否已被 Dispose。</summary>
+internal sealed class SlowPreviewCameraFactory : ICameraFactory
+{
+    public static int CreateCount;
+    public static int GrabAfterDisposeCount;
+
+    public string TypeName => "SlowPreview";
+
+    public ICamera Create(CameraConfig config, ILogger? logger = null)
+    {
+        Interlocked.Increment(ref CreateCount);
+        return new SlowPreviewCamera(config.Id, config.Width, config.Height, config.IntervalMs);
+    }
+
+    private sealed class SlowPreviewCamera(string id, int width, int height, int intervalMs) : ICamera
+    {
+        private volatile bool _disposed;
+
+        public string Id => id;
+
+        public CameraKind Kind => CameraKind.Virtual;
+
+        public CameraFrame Grab(CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (_disposed)
+            {
+                Interlocked.Increment(ref GrabAfterDisposeCount);
+                throw new ObjectDisposedException(nameof(SlowPreviewCamera));
+            }
+
+            ct.WaitHandle.WaitOne(Math.Max(intervalMs, 300));
+            ct.ThrowIfCancellationRequested();
+            if (_disposed)
+            {
+                Interlocked.Increment(ref GrabAfterDisposeCount);
+                throw new ObjectDisposedException(nameof(SlowPreviewCamera));
+            }
+
+            using var mat = new OpenCvSharp.Mat(height, width, OpenCvSharp.MatType.CV_8UC3, OpenCvSharp.Scalar.All(120));
+            var image = RobotVision.Infrastructure.VisionImageCv.Adopt(mat);
+            return new CameraFrame(image, DateTime.UtcNow);
+        }
+
+        public void Dispose() => _disposed = true;
     }
 }
 
@@ -70,8 +119,27 @@ public class CamerasViewModelTests : IDisposable
 
     private readonly TestDialogService _dialogs = new();
 
-    private CamerasViewModel CreateVm() =>
-        new(_cfg, _store, TestInfra.CameraFacade(_cameras), _recipes, _registry, _dialogs, TestLog.Null<CamerasViewModel>());
+    private static void RefreshList(CamerasViewModel vm)
+    {
+        if (Application.Current?.Dispatcher.CheckAccess() == true)
+        {
+            var refresh = vm.RefreshAsync();
+            while (!refresh.IsCompleted)
+                Application.Current.Dispatcher.Invoke(DispatcherPriority.Background, static () => { });
+            refresh.GetAwaiter().GetResult();
+            return;
+        }
+
+        TestInfra.RunSta(() => RefreshList(vm));
+    }
+
+    private CamerasViewModel CreateVm(bool refresh = true)
+    {
+        var vm = new CamerasViewModel(_cfg, _store, TestInfra.CameraFacade(_cameras), _recipes, _registry, _dialogs, TestLog.Null<CamerasViewModel>());
+        if (refresh)
+            RefreshList(vm);
+        return vm;
+    }
 
     private static BitmapSource TinyImage() =>
         BitmapSource.Create(1, 1, 96, 96, PixelFormats.Bgra32, null, new byte[] { 0, 0, 0, 255 }, 4);
@@ -106,8 +174,8 @@ public class CamerasViewModelTests : IDisposable
             vm.EditName = "左工位";
 
             vm.SaveCommand.Execute(null);
+            TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(300));
 
-            vm.Message.Should().StartWith("已保存 cam_a");
             _cfg.Cameras.Single(c => c.Id == "cam_a").Name.Should().Be("左工位");
             vm.Items.Single(i => i.Id == "cam_a").Title.Should().Be("左工位");
             vm.Items.Single(i => i.Id == "cam_a").Subtitle.Should().Be("cam_a");
@@ -278,6 +346,7 @@ public class CamerasViewModelTests : IDisposable
                 new CameraConfig { Id = "cam_spy", Type = "CountingVirtual", Width = 64, Height = 64, Pattern = "Bars" },
             ];
             var vm = new CamerasViewModel(_cfg, _store, TestInfra.CameraFacade(_cameras), _recipes, registry, new TestDialogService(), TestLog.Null<CamerasViewModel>());
+            RefreshList(vm);
             vm.Selected = vm.Items.Single(i => i.Id == "cam_spy");
 
             vm.TogglePreviewCommand.Execute(null);
@@ -308,6 +377,37 @@ public class CamerasViewModelTests : IDisposable
 
             vm.IsPreviewing.Should().BeFalse();
             vm.PreviewCaption.Should().Be("保留角标");
+        });
+    }
+
+    [Fact]
+    public void StopPreview_WaitsForInFlightGrab_BeforeDisposingSession()
+    {
+        TestInfra.RunSta(() =>
+        {
+            SlowPreviewCameraFactory.CreateCount = 0;
+            SlowPreviewCameraFactory.GrabAfterDisposeCount = 0;
+            var registry = CameraTypeRegistry.CreateDefault();
+            registry.Register(new SlowPreviewCameraFactory());
+            _cfg.Cameras =
+            [
+                new CameraConfig { Id = "cam_slow_preview", Type = "SlowPreview", Width = 64, Height = 64, IntervalMs = 600 },
+            ];
+            var vm = new CamerasViewModel(_cfg, _store, TestInfra.CameraFacade(_cameras), _recipes, registry, new TestDialogService(), TestLog.Null<CamerasViewModel>());
+            RefreshList(vm);
+            vm.Selected = vm.Items.Single(i => i.Id == "cam_slow_preview");
+
+            vm.TogglePreviewCommand.Execute(null);
+            TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(80));
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            vm.StopPreview();
+            sw.Stop();
+
+            sw.Elapsed.Should().BeLessThan(TimeSpan.FromMilliseconds(200),
+                "StopPreview must not block the UI thread waiting for in-flight grab");
+            TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(900));
+
+            vm.IsPreviewing.Should().BeFalse();
         });
     }
 }

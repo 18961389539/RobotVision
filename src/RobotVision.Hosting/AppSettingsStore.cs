@@ -8,15 +8,15 @@ namespace RobotVision.Hosting;
 /// <summary>
 /// 服务参数的写回与同步：把超时/队列/并发/连接上限/白名单/失败留存/网络端点
 /// 写入 appsettings.json（保留其他节点），并同步内存 AppConfig 单例。
-/// 分两层语义：热参数（超时/队列/并发/连接上限/白名单/留存）由调用方同时应用到
-/// 运行中的管理器立即生效；网络端点（IP/端口）改动经 Restart 热重启监听，
-/// 失败时由调用方回滚提示（本类只负责落盘与内存同步）。
+/// 分两层语义：热参数（超时/队列/并发/连接上限/白名单/留存）由调用方或 <see cref="RuntimeSync"/>
+/// 同步到运行中的管理器；网络端点（IP/端口）须先经 <c>TcpServerManager.Restart</c> 热重启成功，
+/// 再由调用方落盘（本类 <see cref="Save"/>），失败时不得写入 appsettings 与 <see cref="cfg"/>。
 /// 校验集中在本层（Save 抛 InvalidDataException），非 UI 调用方同样受保护。
 /// </summary>
 public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
 {
     private readonly string _settingsPath =
-        settingsPath ?? Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        settingsPath ?? ApplicationPaths.UserSettingsPath;
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 

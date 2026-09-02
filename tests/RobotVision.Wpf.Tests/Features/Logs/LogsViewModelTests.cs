@@ -77,7 +77,7 @@ public class LogsViewModelTests
         var cfg = TestInfra.CreateAppConfig(dir.Path);
         cfg.FileLogging.Folder = System.IO.Path.Combine(dir.Path, "no_such_logs");
 
-        var vm = new LogsViewModel(cfg);
+        var vm = new LogsViewModel(cfg, TestLog.Null<LogsViewModel>());
 
         vm.Files.Should().BeEmpty();
         vm.Status.Should().Contain("日志目录不存在");
@@ -93,7 +93,7 @@ public class LogsViewModelTests
         var cfg = TestInfra.CreateAppConfig(dir.Path);
         cfg.FileLogging.Folder = logs;
 
-        var vm = new LogsViewModel(cfg);
+        var vm = new LogsViewModel(cfg, TestLog.Null<LogsViewModel>());
 
         vm.Files.Should().HaveCount(2);
         vm.Files[0].Name.Should().Be("robotvision-20260825.log"); // 时间倒序
@@ -117,7 +117,7 @@ public class LogsViewModelTests
         var cfg = TestInfra.CreateAppConfig(dir.Path);
         cfg.FileLogging.Folder = logs;
 
-        var vm = new LogsViewModel(cfg);
+        var vm = new LogsViewModel(cfg, TestLog.Null<LogsViewModel>());
         vm.SelectedFile.Should().NotBeNull();
         await vm.ReloadCommand.ExecuteAsync(null);
 
@@ -158,7 +158,7 @@ public class LogsViewModelTests
             var cfg = TestInfra.CreateAppConfig(dir.Path);
             cfg.FileLogging.Folder = logs;
 
-            var vm = new LogsViewModel(cfg);
+            var vm = new LogsViewModel(cfg, TestLog.Null<LogsViewModel>());
             _ = vm.ReloadCommand.ExecuteAsync(null);
             PumpUntil(() => vm.Rows.Count == 3);
             vm.Rows.Should().HaveCount(3);
@@ -202,7 +202,7 @@ public class LogsViewModelTests
 
         await using var writer = new FileStream(
             path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-        var vm = new LogsViewModel(cfg);
+        var vm = new LogsViewModel(cfg, TestLog.Null<LogsViewModel>());
         await vm.ReloadCommand.ExecuteAsync(null);
 
         vm.Rows.Should().ContainSingle();
@@ -215,7 +215,7 @@ public class LogsViewModelTests
         using var dir = new TestInfra.TempDir("rv_logs_clear");
         var cfg = TestInfra.CreateAppConfig(dir.Path);
 
-        var vm = new LogsViewModel(cfg);
+        var vm = new LogsViewModel(cfg, TestLog.Null<LogsViewModel>());
         vm.IncludeDebug = true;
         vm.IncludeInfo = false;
         vm.IncludeWarning = false;
@@ -237,7 +237,7 @@ public class LogsViewModelTests
         // 级别过滤默认契约：Info/Warning/Error 打开，Debug 关闭（生产日志默认不显示调试）
         using var dir = new TestInfra.TempDir("rv_logs_level");
         var cfg = TestInfra.CreateAppConfig(dir.Path);
-        var vm = new LogsViewModel(cfg);
+        var vm = new LogsViewModel(cfg, TestLog.Null<LogsViewModel>());
 
         vm.IncludeInfo.Should().BeTrue();
         vm.IncludeWarning.Should().BeTrue();

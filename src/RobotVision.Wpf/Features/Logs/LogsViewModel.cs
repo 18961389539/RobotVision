@@ -5,7 +5,9 @@ using System.Text.RegularExpressions;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Logs;
 
@@ -66,6 +68,7 @@ public partial class LogsViewModel : ObservableObject, IDisposable
     private const int MaxRows = 20000;
 
     private readonly string _folder;
+    private readonly ILogger<LogsViewModel> _log;
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _filterDebounce;
     private List<LogRow> _allRows = [];
@@ -104,9 +107,10 @@ public partial class LogsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _status = "";
 
-    public LogsViewModel(AppConfig cfg)
+    public LogsViewModel(AppConfig cfg, ILogger<LogsViewModel> log)
     {
         _folder = AppConfigExtensions.ResolveFolder(cfg.FileLogging.Folder);
+        _log = log;
         RefreshFiles();
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -215,7 +219,8 @@ public partial class LogsViewModel : ObservableObject, IDisposable
         Keyword = "";
     }
 
-    partial void OnSelectedFileChanged(LogFileItem? value) => _ = ReloadAsync();
+    partial void OnSelectedFileChanged(LogFileItem? value) =>
+        UiFireAndForget.Run(ReloadAsync, _log);
 
     partial void OnIncludeDebugChanged(bool value) => ApplyFilter();
     partial void OnIncludeInfoChanged(bool value) => ApplyFilter();
@@ -282,7 +287,7 @@ public partial class LogsViewModel : ObservableObject, IDisposable
             if (write != _lastWriteUtc)
             {
                 _lastWriteUtc = write;
-                _ = AppendTailAsync(); // 跟随刷新：增量解析新增行，不阻塞 UI
+                UiFireAndForget.Run(AppendTailAsync, _log);
             }
         }
         catch (IOException)

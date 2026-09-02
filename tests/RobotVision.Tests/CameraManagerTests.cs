@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using FluentAssertions;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
@@ -13,6 +15,7 @@ namespace RobotVision.Tests;
 /// - Get 未注册抛 CameraNotRegistered；Dispose 释放全部相机且幂等；
 /// - 取图按相机 Id 串行：并发 Grab 不得同时进入同一相机的 Grab（SDK 非线程安全）。
 /// </summary>
+[Collection("Serial")]
 public class CameraManagerTests
 {
     /// <summary>可控行为假相机：记录释放次数，可注入 Grab 钩子。</summary>
@@ -244,6 +247,46 @@ public class CameraManagerTests
 
         Assert.True(r1.GateWaitMs < 40, $"首帧等锁应接近 0，实际 {r1.GateWaitMs:0}ms");
         Assert.True(r2.GateWaitMs > 30, $"次帧应等到首帧释放门闩，实际等锁 {r2.GateWaitMs:0}ms");
+    }
+
+    [Fact]
+    public void PrepareForShutdown_BlocksNewGrabs()
+    {
+        using var manager = new CameraManager();
+        manager.Register(new FakeCamera("cam1"));
+        manager.PrepareForShutdown(TimeSpan.FromSeconds(1));
+
+        Assert.Throws<OperationCanceledException>(() => manager.Grab("cam1"));
+    }
+
+    [Fact]
+    public void Dispose_WithStuckGrab_DoesNotBlockIndefinitely()
+    {
+        var manager = new CameraManager();
+        using var enteredGrab = new ManualResetEventSlim(false);
+        var camera = new FakeCamera("cam1")
+        {
+            OnGrab = _ =>
+            {
+                enteredGrab.Set();
+                Thread.Sleep(Timeout.Infinite);
+                throw new InvalidOperationException("unreachable");
+            },
+        };
+        manager.Register(camera);
+
+        _ = Task.Run(() =>
+        {
+            try { manager.Grab("cam1"); }
+            catch { /* shutting down */ }
+        });
+
+        Assert.True(enteredGrab.Wait(TimeSpan.FromSeconds(2)));
+        var sw = Stopwatch.StartNew();
+        manager.Dispose();
+        sw.Stop();
+
+        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

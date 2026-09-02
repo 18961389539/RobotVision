@@ -22,6 +22,7 @@
     <PackageVersion Include="LDVisionCamera.Net" Version="1.0.0-rc.37" />
 
     <!-- Microsoft.Extensions（统一 8.0.x 补丁线；net10 升级时整体切 10.x） -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
@@ -67,5 +68,6 @@
     <!-- UI 自动化 -->
     <PackageVersion Include="FlaUI.Core" Version="4.0.0" />
     <PackageVersion Include="FlaUI.UIA3" Version="4.0.0" />
+    <PackageVersion Include="Xunit.SkippableFact" Version="1.4.13" />
   </ItemGroup>
 </Project>

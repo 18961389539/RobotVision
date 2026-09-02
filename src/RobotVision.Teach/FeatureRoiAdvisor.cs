@@ -1,6 +1,6 @@
 using OpenCvSharp;
 using RobotVision.Core.Models;
-using RobotVision.Infrastructure.Inference;
+using RobotVision.Core.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
 
 namespace RobotVision.Teach;

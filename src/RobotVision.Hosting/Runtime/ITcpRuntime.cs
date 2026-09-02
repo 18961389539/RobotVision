@@ -24,13 +24,13 @@ public interface ITcpRuntime
 
     IReadOnlyList<string> IpWhitelist { get; set; }
 
-    event Action<TcpClientSnapshot>? ClientConnected;
-    event Action<TcpClientSnapshot>? ClientDisconnected;
-    event Action<TcpRequestRecord>? RequestStarted;
-    event Action<TcpRequestRecord>? RequestProcessed;
+    event Action<TcpClientView>? ClientConnected;
+    event Action<TcpClientView>? ClientDisconnected;
+    event Action<TcpRequestView>? RequestStarted;
+    event Action<TcpRequestView>? RequestProcessed;
 
-    IReadOnlyList<TcpClientSnapshot> GetClients();
-    IReadOnlyList<TcpRequestRecord> GetRecentRequests();
+    IReadOnlyList<TcpClientView> GetClients();
+    IReadOnlyList<TcpRequestView> GetRecentRequests();
     void Start();
     void Stop();
     bool Restart(string ipAddress, int port);
@@ -39,6 +39,11 @@ public interface ITcpRuntime
 
 internal sealed class TcpRuntime(TcpServerManager inner) : ITcpRuntime
 {
+    private readonly Dictionary<Action<TcpClientView>, Action<TcpClientSnapshot>> _connected = new();
+    private readonly Dictionary<Action<TcpClientView>, Action<TcpClientSnapshot>> _disconnected = new();
+    private readonly Dictionary<Action<TcpRequestView>, Action<TcpRequestRecord>> _started = new();
+    private readonly Dictionary<Action<TcpRequestView>, Action<TcpRequestRecord>> _processed = new();
+
     public bool IsRunning => inner.IsRunning;
     public int ConnectedClients => inner.ConnectedClients;
     public string ListenEndPoint => inner.ListenEndPoint;
@@ -100,32 +105,104 @@ internal sealed class TcpRuntime(TcpServerManager inner) : ITcpRuntime
         set => inner.PlcDebugDefaultRz = value;
     }
 
-    public event Action<TcpClientSnapshot>? ClientConnected
+    public event Action<TcpClientView>? ClientConnected
     {
-        add => inner.ClientConnected += value;
-        remove => inner.ClientConnected -= value;
+        add
+        {
+            if (value is null)
+                return;
+            Action<TcpClientSnapshot> wrapper = s => value(TcpViewMapper.Map(s));
+            lock (_connected)
+                _connected[value] = wrapper;
+            inner.ClientConnected += wrapper;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_connected)
+            {
+                if (_connected.Remove(value, out var wrapper))
+                    inner.ClientConnected -= wrapper;
+            }
+        }
     }
 
-    public event Action<TcpClientSnapshot>? ClientDisconnected
+    public event Action<TcpClientView>? ClientDisconnected
     {
-        add => inner.ClientDisconnected += value;
-        remove => inner.ClientDisconnected -= value;
+        add
+        {
+            if (value is null)
+                return;
+            Action<TcpClientSnapshot> wrapper = s => value(TcpViewMapper.Map(s));
+            lock (_disconnected)
+                _disconnected[value] = wrapper;
+            inner.ClientDisconnected += wrapper;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_disconnected)
+            {
+                if (_disconnected.Remove(value, out var wrapper))
+                    inner.ClientDisconnected -= wrapper;
+            }
+        }
     }
 
-    public event Action<TcpRequestRecord>? RequestStarted
+    public event Action<TcpRequestView>? RequestStarted
     {
-        add => inner.RequestStarted += value;
-        remove => inner.RequestStarted -= value;
+        add
+        {
+            if (value is null)
+                return;
+            Action<TcpRequestRecord> wrapper = r => value(TcpViewMapper.Map(r));
+            lock (_started)
+                _started[value] = wrapper;
+            inner.RequestStarted += wrapper;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_started)
+            {
+                if (_started.Remove(value, out var wrapper))
+                    inner.RequestStarted -= wrapper;
+            }
+        }
     }
 
-    public event Action<TcpRequestRecord>? RequestProcessed
+    public event Action<TcpRequestView>? RequestProcessed
     {
-        add => inner.RequestProcessed += value;
-        remove => inner.RequestProcessed -= value;
+        add
+        {
+            if (value is null)
+                return;
+            Action<TcpRequestRecord> wrapper = r => value(TcpViewMapper.Map(r));
+            lock (_processed)
+                _processed[value] = wrapper;
+            inner.RequestProcessed += wrapper;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_processed)
+            {
+                if (_processed.Remove(value, out var wrapper))
+                    inner.RequestProcessed -= wrapper;
+            }
+        }
     }
 
-    public IReadOnlyList<TcpClientSnapshot> GetClients() => inner.GetClients();
-    public IReadOnlyList<TcpRequestRecord> GetRecentRequests() => inner.GetRecentRequests();
+    public IReadOnlyList<TcpClientView> GetClients() =>
+        inner.GetClients().Select(TcpViewMapper.Map).ToList();
+
+    public IReadOnlyList<TcpRequestView> GetRecentRequests() =>
+        inner.GetRecentRequests().Select(TcpViewMapper.Map).ToList();
+
     public void Start() => inner.Start();
     public void Stop() => inner.Stop();
     public bool Restart(string ipAddress, int port) => inner.Restart(ipAddress, port);

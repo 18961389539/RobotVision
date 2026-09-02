@@ -21,20 +21,14 @@ namespace RobotVision.Tests;
 [Trait("Category", "Hardware")]
 public sealed class ProductLiveAdvisorTests(ITestOutputHelper output)
 {
-    private static bool Enabled =>
-        string.Equals(Environment.GetEnvironmentVariable("RV_HARDWARE_TEST"), "1",
-            StringComparison.OrdinalIgnoreCase);
-
-    private static string RepoRoot => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
     [Fact]
     public void Product_Live_Caliper_And_BakeOff_Agree()
     {
-        if (!Enabled)
-            return;
+        TestPreconditions.RequireHardware();
 
-        var wpfBin = Path.Combine(RepoRoot, "src", "RobotVision.Wpf", "bin", "Debug", "net8.0-windows");
+        var wpfBin = TestBuildPaths.ResolveWpfBin()
+                     ?? throw new InvalidOperationException("WPF bin not found.");
         var recipeDir = LiveRecipesDir(wpfBin);
         var modelsDir = Path.Combine(wpfBin, "models");
         Assert.True(File.Exists(Path.Combine(recipeDir, "Product.json")), $"缺少 {recipeDir}\\Product.json");

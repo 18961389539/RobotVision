@@ -10,6 +10,7 @@ namespace RobotVision.Tests;
 /// 失败现场图像留存测试：PNG+JSON 成对落盘、元数据内容、同毫秒冲突、
 /// 数量滚动清理（含孤儿元数据）、开关与空图守卫。时钟注入保证确定性。
 /// </summary>
+[Collection("Serial")]
 public class FailureImageStoreTests : IDisposable
 {
     private readonly string _folder = Path.Combine(Path.GetTempPath(), "rv_fail_" + Guid.NewGuid().ToString("N"));
@@ -36,17 +37,8 @@ public class FailureImageStoreTests : IDisposable
     /// 等待后台落盘完成：Save 已异步化（fire-and-forget + 后台 WriteCore），
     /// 断言前轮询目录直到满足条件，避免与后台线程竞态。
     /// </summary>
-    private static void WaitForCondition(Func<bool> condition, string description)
-    {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (DateTime.UtcNow < deadline)
-        {
-            if (condition())
-                return;
-            Thread.Sleep(25);
-        }
-        Assert.Fail($"等待超时: {description}");
-    }
+    private static void WaitForCondition(Func<bool> condition, string description) =>
+        TestWait.Until(condition, TimeSpan.FromSeconds(5), description: $"等待超时: {description}");
 
     private static void WaitForPngs(string folder, int expected) =>
         WaitForCondition(

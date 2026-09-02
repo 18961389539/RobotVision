@@ -28,4 +28,7 @@ internal static partial class WpfUiLog
     // 删除失败图/元数据失败：此前完全静默，用户会以为已删除成功。
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to delete failure artifact {Path}")]
     public static partial void FailureDeleteFailed(ILogger logger, Exception ex, string path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Preview in-flight grab did not finish within {TimeoutMs} ms; disposing session anyway")]
+    public static partial void PreviewDrainTimeout(ILogger logger, double timeoutMs);
 }

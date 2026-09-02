@@ -15,9 +15,14 @@ namespace RobotVision.Wpf.Tests;
 /// </summary>
 public class CalibrationViewModelTests
 {
-    private static CalibrationViewModel CreateVm(CalibrationManager calibration) =>
-        new(TestInfra.CalibrationFacade(calibration), TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()),
+    private static CalibrationViewModel CreateVm(CalibrationManager calibration)
+    {
+        var vm = new CalibrationViewModel(
+            TestInfra.CalibrationFacade(calibration), TestInfra.CreateAppConfig(System.IO.Path.GetTempPath()),
             TestInfra.CameraFacade(new CameraManager()), new TestDialogService(), TestLog.Null<CalibrationViewModel>());
+        vm.Refresh();
+        return vm;
+    }
 
     [Fact]
     public void Ctor_WithEmptyManager_ShowsEmptyState()
@@ -442,9 +447,7 @@ public class CalibrationViewModelTests
             Width = 2448,
             Height = 2048,
         });
-        var vm = new CalibrationViewModel(
-            TestInfra.CalibrationFacade(calibration), TestInfra.CreateAppConfig(dir.Path),
-            TestInfra.CameraFacade(new CameraManager()), new TestDialogService(), TestLog.Null<CalibrationViewModel>());
+        var vm = CreateVm(calibration);
 
         vm.Scales[0].ScaleX = 0.051;
         vm.Scales[0].ScaleY = 0.051;

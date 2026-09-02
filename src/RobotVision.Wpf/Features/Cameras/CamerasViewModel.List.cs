@@ -13,14 +13,16 @@ using RobotVision.Core.Abstractions;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Cameras;
-using RobotVision.Infrastructure.Cameras;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Cameras;
 public partial class CamerasViewModel
 {
     [RelayCommand]
-    public void Refresh() => Refresh(preferId: null);
+    public void Refresh() => ScheduleRefresh();
+
+    public void ScheduleRefresh(string? preferId = null, bool resetPreview = true, bool loadLiveParams = true) =>
+        UiFireAndForget.Run(() => RefreshAsync(preferId, resetPreview, loadLiveParams), _log);
 
     /// <param name="preferId">刷新后优先选中的 Id；空则尽量保持当前选中。</param>
     /// <param name="resetPreview">
@@ -31,29 +33,36 @@ public partial class CamerasViewModel
     /// true：后台读曝光/增益填滑块（选中/F5）。
     /// false：保存后不要连相机读参——读失败会把「已保存」盖成「读取相机参数失败」。
     /// </param>
-    public void Refresh(string? preferId, bool resetPreview = true, bool loadLiveParams = true)
+    public async Task RefreshAsync(string? preferId = null, bool resetPreview = true, bool loadLiveParams = true)
     {
-        // 未保存修改：确认后才丢弃（页面 Loaded 自动刷新同样生效）
         if (HasUnsavedChanges && !ConfirmDiscard("刷新列表"))
             return;
 
-        // ListBox 双向绑定：Items.Clear() 会把 Selected 置 null，必须先记下要恢复的 Id
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        var cts = _refreshCts = new CancellationTokenSource();
+        var token = cts.Token;
         var keepId = ListSelection.KeepKey(preferId, Selected?.Id ?? EditId.Trim());
+
+        List<CameraListItem> items;
+        try
+        {
+            items = await Task.Run(() => BuildCameraListItems(token), token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested)
+            return;
 
         _switching = true;
         try
         {
             Items.Clear();
-            foreach (var camera in _cfg.Cameras)
-            {
-                var registered = _cameras.IsRegistered(camera.Id);
-                var title = CameraLabels.ListTitle(camera);
-                var subtitle = string.IsNullOrWhiteSpace(camera.Name) ? null : camera.Id;
-                Items.Add(new CameraListItem(
-                    camera.Id, title, subtitle, camera.Type, Summarize(camera),
-                    registered ? "已注册" : "未注册", registered,
-                    registered ? null : UnregisterReason(camera)));
-            }
+            foreach (var item in items)
+                Items.Add(item);
 
             Selected = ListSelection.Restore(Items, keepId, i => i.Id);
         }
@@ -62,11 +71,32 @@ public partial class CamerasViewModel
             _switching = false;
         }
 
-        // Refresh 在 _switching 内改 Selected 会跳过 OnSelectedChanged，须显式同步编辑区与调光面板
         if (Selected is not null)
             ApplySelectedItem(Selected, resetPreview, loadLiveParams);
         Message = $"共 {Items.Count} 台相机";
     }
+
+    private List<CameraListItem> BuildCameraListItems(CancellationToken ct)
+    {
+        var items = new List<CameraListItem>(_cfg.Cameras.Count);
+        foreach (var camera in _cfg.Cameras)
+        {
+            ct.ThrowIfCancellationRequested();
+            var registered = _cameras.IsRegistered(camera.Id);
+            var title = CameraLabels.ListTitle(camera);
+            var subtitle = string.IsNullOrWhiteSpace(camera.Name) ? null : camera.Id;
+            items.Add(new CameraListItem(
+                camera.Id, title, subtitle, camera.Type, Summarize(camera),
+                registered ? "已注册" : "未注册", registered,
+                registered ? null : UnregisterReason(camera)));
+        }
+
+        return items;
+    }
+
+    /// <summary>保存/删除后刷新列表（保留预览与不调相机读参）。</summary>
+    private void RefreshAfterMutation(string? preferId = null) =>
+        ScheduleRefresh(preferId, resetPreview: false, loadLiveParams: false);
 
     /// <summary>未保存修改确认框；用户拒绝时返回 false 并中止当前操作。</summary>
     private bool ConfirmDiscard(string action) =>
@@ -204,7 +234,7 @@ public partial class CamerasViewModel
             var error = TryRegister(entry);
             IsNew = false;
             _baseline = entry; // 保存后的配置即新基线（Refresh 的脏检查不会误弹）
-            Refresh(id, resetPreview: false, loadLiveParams: false);
+            RefreshAfterMutation(id);
             Message = error is null ? $"已保存 {id}（运行时已注册）" : $"已保存 {id}（运行时注册失败: {error}）";
             NotifyDirtyState();
         }
@@ -304,7 +334,7 @@ public partial class CamerasViewModel
                 .ToList();
             _store.Save(list);
             _cameras.Unregister(id);
-            Refresh();
+            ScheduleRefresh();
             Message = $"已删除 {id}";
         }
         catch (Exception ex)

@@ -311,45 +311,61 @@ public partial class AnalysisViewModel : ObservableObject, IDisposable
     private void OpenFolder() => Explorer.OpenFolder(_db.Folder);
 
     [RelayCommand]
-    private void ExportCsv()
+    private async Task ExportCsvAsync()
     {
+        IsBusy = true;
+        Message = "导出中…";
         try
         {
-            var query = BuildQuery() with { Limit = 10_000, Offset = 0 };
-            var rows = _db.Query(query);
-            if (rows.Count == 0)
+            var result = await Task.Run(ExportCsvCore).ConfigureAwait(true);
+            if (result is null)
             {
                 Message = "没有可导出的记录";
                 return;
             }
 
-            Directory.CreateDirectory(_db.Folder);
-            var path = Path.Combine(_db.Folder, $"analysis_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
-            var sb = new StringBuilder();
-            sb.AppendLine("time,recipe,station,camera,x,y,angle,confidence,count,elapsed_ms,code,message");
-            foreach (var row in rows)
-            {
-                sb.Append(Csv(row.T)).Append(',')
-                    .Append(Csv(row.Recipe)).Append(',')
-                    .Append(Csv(row.Station)).Append(',')
-                    .Append(Csv(row.Camera)).Append(',')
-                    .Append(Num(row.X)).Append(',')
-                    .Append(Num(row.Y)).Append(',')
-                    .Append(Num(row.Angle)).Append(',')
-                    .Append(Num(row.Confidence)).Append(',')
-                    .Append(row.Count.ToString(CultureInfo.InvariantCulture)).Append(',')
-                    .Append(row.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
-                    .Append(row.Code.ToString(CultureInfo.InvariantCulture)).Append(',')
-                    .Append(Csv(row.Message)).AppendLine();
-            }
-            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-            Message = $"已导出 {rows.Count} 条 → {Path.GetFileName(path)}";
+            Message = $"已导出 {result.Value.RowCount} 条 → {Path.GetFileName(result.Value.Path)}";
             Explorer.OpenFolder(_db.Folder);
         }
         catch (Exception ex)
         {
+            WpfUiLog.AnalysisLoadFailed(_log, ex);
             Message = "导出失败: " + ex.Message;
         }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private (string Path, int RowCount)? ExportCsvCore()
+    {
+        var query = BuildQuery() with { Limit = 10_000, Offset = 0 };
+        var rows = _db.Query(query);
+        if (rows.Count == 0)
+            return null;
+
+        Directory.CreateDirectory(_db.Folder);
+        var path = Path.Combine(_db.Folder, $"analysis_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+        var sb = new StringBuilder();
+        sb.AppendLine("time,recipe,station,camera,x,y,angle,confidence,count,elapsed_ms,code,message");
+        foreach (var row in rows)
+        {
+            sb.Append(Csv(row.T)).Append(',')
+                .Append(Csv(row.Recipe)).Append(',')
+                .Append(Csv(row.Station)).Append(',')
+                .Append(Csv(row.Camera)).Append(',')
+                .Append(Num(row.X)).Append(',')
+                .Append(Num(row.Y)).Append(',')
+                .Append(Num(row.Angle)).Append(',')
+                .Append(Num(row.Confidence)).Append(',')
+                .Append(row.Count.ToString(CultureInfo.InvariantCulture)).Append(',')
+                .Append(row.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
+                .Append(row.Code.ToString(CultureInfo.InvariantCulture)).Append(',')
+                .Append(Csv(row.Message)).AppendLine();
+        }
+        File.WriteAllText(path, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        return (path, rows.Count);
     }
 
     internal ResultDbQuery BuildQuery()

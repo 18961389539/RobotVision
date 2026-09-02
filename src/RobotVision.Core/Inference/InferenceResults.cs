@@ -1,6 +1,6 @@
 using RobotVision.Core.Models;
 
-namespace RobotVision.Infrastructure.Inference;
+namespace RobotVision.Core.Inference;
 
 /// <summary>像素轴对齐框（左上角 + 宽高）。推理结果用，不暴露 SKRectI。</summary>
 public readonly record struct PixelBox(int X, int Y, int Width, int Height)
@@ -29,7 +29,7 @@ public sealed record PoseDetectionResult(
 
 /// <summary>
 /// 实例分割结果（框架无关）。
-/// <see cref="ContourLocal"/> 为相对包围盒的局部坐标（与旧 Yolo GetContourPoints 同口径）；
+/// <see cref="ContourLocal"/> 为相对包围盒的局部坐标；
 /// <see cref="BitPackedMask"/> 为包围盒尺寸、LSB-first 位打包掩码。
 /// </summary>
 public sealed record InstanceSegmentation(

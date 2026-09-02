@@ -12,6 +12,7 @@ using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
 using RobotVision.Infrastructure.Lighting;
 using RobotVision.WpfHost;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.Wpf.Tests;
 
@@ -171,4 +172,43 @@ public static class TestInfra
 
     public static IAngleStrategyCatalog AngleCatalog(AngleStrategyTypeRegistry registry) =>
         registry.AsRuntimeFacade();
+
+    public static IRecipeTestService CreateRecipeTestService(
+        VisionService vision,
+        CameraManager cameras,
+        ModelManager models,
+        CalibrationManager calibration,
+        LightingManager lighting) =>
+        new RecipeTestService(
+            vision,
+            CameraFacade(cameras),
+            ModelFacade(models),
+            CalibrationFacade(calibration),
+            LightingFacade(lighting));
+
+    public static IMaskTemplateTeachService MaskTeach() => new MaskTemplateTeachService();
+
+    public static ISegmentRefineGuidance RefineGuidance() => new SegmentRefineGuidance();
+
+    public static ICalibrationWizardService CalibrationWizard(
+        ICameraRuntime? cameras = null,
+        ICalibrationRuntime? calibration = null) =>
+        new CalibrationWizardService(
+            cameras ?? new CameraManager().AsRuntimeFacade(),
+            calibration ?? new CalibrationManager().AsRuntimeFacade());
+
+    public static IModelTestService ModelTest(ModelManager models) => new ModelTestService(models);
+
+    public static IImageFileReader ImageFiles() => new ImageFileReader();
+
+    public static IFrameOverlayPresenter Overlay() => new FrameOverlayPresenter();
+
+    public static IMonitorPreviewService MonitorPreview(
+        RecipeLoader recipes,
+        ICameraRuntime? cameras = null,
+        ICalibrationRuntime? calibration = null) =>
+        new MonitorPreviewService(
+            cameras ?? new CameraManager().AsRuntimeFacade(),
+            calibration ?? new CalibrationManager().AsRuntimeFacade(),
+            recipes);
 }

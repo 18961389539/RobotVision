@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using ImageViewer.Controls;
+using RobotVision.WpfHost.Shared;
 using ViewerControl = ImageViewer.Controls.ImageViewer;
 
 namespace RobotVision.WpfHost.Features.Recipe;
@@ -8,20 +9,25 @@ namespace RobotVision.WpfHost.Features.Recipe;
 internal sealed class RecipePageRoiCoordinator : IDisposable
 {
     private readonly RecipeViewModel _vm;
-    private readonly ViewerControl _testViewer;
-    private readonly ViewerControl _roiViewer;
+    private readonly IRoiViewport _testViewport;
+    private readonly IRoiViewport _roiViewport;
     private readonly RecipeRoiLiveSync _sync;
     private bool _wired;
 
     public RecipePageRoiCoordinator(RecipeViewModel vm, ViewerControl testViewer, ViewerControl roiViewer)
+        : this(vm, new ImageViewerRoiViewport(testViewer), new ImageViewerRoiViewport(roiViewer))
+    {
+    }
+
+    internal RecipePageRoiCoordinator(RecipeViewModel vm, IRoiViewport testViewport, IRoiViewport roiViewport)
     {
         _vm = vm;
-        _testViewer = testViewer;
-        _roiViewer = roiViewer;
+        _testViewport = testViewport;
+        _roiViewport = roiViewport;
         _sync = new RecipeRoiLiveSync(
             vm.Roi,
-            ResolveActiveViewer,
-            [testViewer, roiViewer],
+            () => _vm is { ShowTestImage: true, Test.ResultImage: not null } ? _testViewport : _roiViewport,
+            [_testViewport, _roiViewport],
             () => _vm.Roi.UseRoi ? _vm.Editor.Roi : null,
             () => _vm.UsesFeatureTeachRoi ? _vm.Editor.Template?.Roi : null,
             () => _vm.UsesFeatureTeachRoi,
@@ -92,9 +98,6 @@ internal sealed class RecipePageRoiCoordinator : IDisposable
             _sync.StartDrawAfterGrab = true;
         _vm.Roi.PreviewRoiCommand.Execute(null);
     }
-
-    private ViewerControl ResolveActiveViewer() =>
-        _vm is { ShowTestImage: true, Test.ResultImage: not null } ? _testViewer : _roiViewer;
 
     private bool ShowTeachFeatureRect()
     {

@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using ImageViewer.Controls;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Recipe;
@@ -20,6 +19,7 @@ public partial class RecipePage : Page
             _vm.StopDirtyWatch();
         });
         InitializeComponent();
+        ParamPanel.DrawRoiRegionRequested += OnDrawRoiRegionClick;
         NumberBoxCommit.Bind(this, _vm);
 
         Loaded += (_, _) =>
@@ -28,14 +28,14 @@ public partial class RecipePage : Page
             _vm.RefreshStationIds();
             _vm.StartDirtyWatch();
             _vm.RequestTemplateRoiDraw = () => _roiCoordinator?.BeginRoiDraw(template: true);
-            _roiCoordinator ??= new RecipePageRoiCoordinator(_vm, TestViewer, RoiViewer);
+            _roiCoordinator ??= new RecipePageRoiCoordinator(
+                _vm,
+                ImageViewport.TestViewerControl,
+                ImageViewport.RoiViewerControl);
             _roiCoordinator.Wire();
         };
     }
 
     private void OnDrawRoiRegionClick(object sender, RoutedEventArgs e) =>
         _roiCoordinator?.BeginRoiDraw(template: false);
-
-    private void OnDrawTemplateRoiClick(object sender, RoutedEventArgs e) =>
-        _roiCoordinator?.BeginRoiDraw(template: true);
 }

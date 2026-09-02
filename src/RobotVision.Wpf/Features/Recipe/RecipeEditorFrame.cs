@@ -3,7 +3,6 @@ using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure.Calibration;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
@@ -23,26 +22,14 @@ internal static class RecipeEditorFrame
 
         return await Task.Run(() =>
         {
-            using var grabbed = cameras.Grab(recipe.CameraId);
+            ct.ThrowIfCancellationRequested();
+            using var grabbed = cameras.Grab(recipe.CameraId, ct);
             using var inference = PrepareInferenceImage(calibration, recipe, grabbed.Image);
             return (ImageConverter.ToBitmapSource(inference), inference.Width, inference.Height);
         }, ct).ConfigureAwait(false);
     }
 
     public static VisionImage PrepareInferenceImage(
-        ICalibrationRuntime calibration, RecipeConfig recipe, VisionImage source)
-    {
-        var mode = calibration.GetMappingMode(recipe.StationId);
-        if (mode is StationMappingMode.Polynomial or StationMappingMode.Scale)
-            return source.Clone();
-
-        try
-        {
-            return calibration.Undistort(recipe.CameraId, source);
-        }
-        catch (VisionException)
-        {
-            return source.Clone();
-        }
-    }
+        ICalibrationRuntime calibration, RecipeConfig recipe, VisionImage source) =>
+        RecipeEditorImagePrep.PrepareInferenceImage(calibration, recipe, source);
 }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
@@ -16,11 +17,17 @@ public readonly record struct GrabTrace(CameraFrame Frame, double GateWaitMs, do
 /// </summary>
 public sealed class CameraManager : IDisposable
 {
+    public static TimeSpan DefaultGateDrainTimeout { get; } = TimeSpan.FromSeconds(3);
+
+    private readonly ILogger<CameraManager>? _logger;
     private readonly ConcurrentDictionary<string, ICamera> _cameras = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
     private string[]? _cachedIds;
     private bool _disposed;
+    private bool _shuttingDown;
+
+    public CameraManager(ILogger<CameraManager>? logger = null) => _logger = logger;
 
     public int Count => _cameras.Count;
 
@@ -145,9 +152,15 @@ public sealed class CameraManager : IDisposable
         return GrabCoreTracedAsync(camera.Id, () => camera.Grab(ct), ct);
     }
 
+    /// <summary>退出前排空在途取图：拒绝新 Grab，并在限时内等待各相机门闩。</summary>
+    public void PrepareForShutdown(TimeSpan timeout, ILogger? logger = null) =>
+        DrainGates(timeout, markShuttingDown: true, logger ?? _logger);
+
     private CameraFrame GrabCore(string id, Func<CameraFrame> grab, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_shuttingDown)
+            throw new OperationCanceledException("Camera manager is shutting down.");
         var gate = Gate(id);
         gate.Wait(ct);
         try
@@ -163,6 +176,8 @@ public sealed class CameraManager : IDisposable
     private async Task<GrabTrace> GrabCoreTracedAsync(string id, Func<CameraFrame> grab, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_shuttingDown)
+            throw new OperationCanceledException("Camera manager is shutting down.");
         var gate = Gate(id);
         var sw = Stopwatch.StartNew();
         await gate.WaitAsync(ct).ConfigureAwait(false);
@@ -194,15 +209,8 @@ public sealed class CameraManager : IDisposable
         if (_disposed)
             return;
 
+        DrainGates(DefaultGateDrainTimeout, markShuttingDown: true, _logger);
         _disposed = true;
-
-        var gateIds = _gates.Keys.ToArray();
-        Array.Sort(gateIds, StringComparer.OrdinalIgnoreCase);
-        foreach (var id in gateIds)
-        {
-            if (_gates.TryGetValue(id, out var gate))
-                gate.Wait();
-        }
 
         try
         {
@@ -223,5 +231,36 @@ public sealed class CameraManager : IDisposable
                 gate.Dispose();
             _gates.Clear();
         }
+    }
+
+    private void DrainGates(TimeSpan timeout, bool markShuttingDown, ILogger? logger)
+    {
+        if (markShuttingDown)
+            _shuttingDown = true;
+
+        var gateIds = _gates.Keys.ToArray();
+        if (gateIds.Length == 0)
+            return;
+
+        Array.Sort(gateIds, StringComparer.OrdinalIgnoreCase);
+        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+        foreach (var id in gateIds)
+        {
+            var remainingMs = deadline - Environment.TickCount64;
+            if (remainingMs <= 0)
+            {
+                LogGateDrainTimedOut(logger, id);
+                continue;
+            }
+
+            if (_gates.TryGetValue(id, out var gate) && !gate.Wait(TimeSpan.FromMilliseconds(remainingMs)))
+                LogGateDrainTimedOut(logger, id);
+        }
+    }
+
+    private static void LogGateDrainTimedOut(ILogger? logger, string cameraId)
+    {
+        if (logger is not null)
+            CameraManagerLog.GateDrainTimedOut(logger, cameraId);
     }
 }

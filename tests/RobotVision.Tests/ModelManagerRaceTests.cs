@@ -16,6 +16,7 @@ namespace RobotVision.Tests;
 /// - 文件版本缓存键：替换 .onnx 后自动加载新版本并清理旧会话。
 /// REAL 系列依赖仓库内真实 ONNX 模型（加载+预热约 1s），模型缺失时跳过。
 /// </summary>
+[Collection("Serial")]
 public class ModelManagerRaceTests : IDisposable
 {
     /// <summary>仓库内真实 ONNX 模型（从仓库根 models/ 探测；不存在时 REAL 测试 Skip）。</summary>
@@ -76,9 +77,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Open_MissingFile_FailureNotCached_RetrySucceedsAfterFileArrives()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel); // 运维场景：启动时模型未就位，后补模型文件后应能重试成功
-        if (RealModel.Length == 0) return; // 无真实模型环境:静默跳过
-
+        TestPreconditions.RequireOnnx(RealModel);
         using var manager = new ModelManager(_folder);
 
         Assert.Throws<VisionException>(() => manager.Open("late.onnx", InferenceTask.PoseEstimation));
@@ -93,8 +92,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Open_SameModelConcurrent_LoadsExactlyOnce()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
-        if (RealModel.Length == 0) return; // 无真实模型环境:静默跳过
+        TestPreconditions.RequireOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
         var sessions = new ConcurrentQueue<ModelSession>();
@@ -108,8 +106,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Open_TaskIsPartOfCacheKey_FailedTaskDoesNotEvictWorkingOne()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
-        if (RealModel.Length == 0) return; // 无真实模型环境:静默跳过
+        TestPreconditions.RequireOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
 
@@ -129,8 +126,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Open_PathCaseInsensitive_SharesCache()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
-        if (RealModel.Length == 0) return; // 无真实模型环境:静默跳过
+        TestPreconditions.RequireOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
 
@@ -152,8 +148,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void Unload_RemovesSingleTask_AndReloadsOnNextOpen()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
-        if (RealModel.Length == 0) return; // 无真实模型环境:静默跳过
+        TestPreconditions.RequireOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
         manager.Open(RealModel, InferenceTask.PoseEstimation);
@@ -170,8 +165,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void UnloadAll_File_RemovesEveryTaskOfThatModel()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
-        if (RealModel.Length == 0) return; // 无真实模型环境:静默跳过
+        TestPreconditions.RequireOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
 
@@ -192,8 +186,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void UnloadAll_Everything_ClearsCache()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
-        if (RealModel.Length == 0) return; // 无真实模型环境:静默跳过
+        TestPreconditions.RequireOnnx(RealModel);
 
         using var manager = new ModelManager(_folder);
         manager.Open(RealModel, InferenceTask.PoseEstimation);
@@ -209,8 +202,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void MaxSessions_TrimsOldestUnusedSession()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
-        if (RealModel.Length == 0) return; // 无真实模型环境:静默跳过
+        TestPreconditions.RequireOnnx(RealModel);
 
         using var manager = new ModelManager(_folder, maxSessions: 2);
 
@@ -231,8 +223,7 @@ public class ModelManagerRaceTests : IDisposable
     [Fact]
     public void MaxSessions_Zero_MeansUnlimited()
     {
-        RepoAssets.SkipIfNoOnnx(RealModel);
-        if (RealModel.Length == 0) return; // 无真实模型环境:静默跳过
+        TestPreconditions.RequireOnnx(RealModel);
 
         using var manager = new ModelManager(_folder, maxSessions: 0);
         manager.Open(RealModel, InferenceTask.PoseEstimation);
@@ -272,8 +263,8 @@ public class ModelManagerRaceTests : IDisposable
         Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "推理未启动");
 
         var unloadTask = Task.Run(() => manager.Unload(file, InferenceTask.ObjectDetection));
-        await Task.Delay(300);
-        Assert.False(unloadTask.IsCompleted);
+        Assert.False(unloadTask.Wait(TimeSpan.FromMilliseconds(300)),
+            "Unload should block until inference completes");
 
         release.Set();
         await unloadTask.WaitAsync(TimeSpan.FromSeconds(10));

@@ -1,15 +1,11 @@
 using System.Globalization;
 using OpenCvSharp;
-using RobotVision.Infrastructure.Inference;
+using RobotVision.Core.Inference;
 
-namespace RobotVision.WpfHost.Shared;
+namespace RobotVision.Hosting;
 
-/// <summary>
-/// 模型测试推理的叠加绘制：检测框 / 分割轮廓 / 关键点骨架。
-/// 与产线 OverlayDrawer 的区别：这里画的是"模型原始输出"（框/掩码/点），
-/// 不是像素位姿（中心+角度箭头），用于验证模型本身的表现。
-/// </summary>
-public static class ModelTestOverlay
+/// <summary>模型测试推理叠加绘制（检测框 / 分割轮廓 / 关键点）。</summary>
+internal static class InferenceResultOverlay
 {
     public static void DrawDetections(Mat image, IReadOnlyList<ObjectDetectionResult> results)
     {
@@ -41,7 +37,6 @@ public static class ModelTestOverlay
         }
     }
 
-    /// <param name="keypointConfidence">关键点置信度阈值（低于该值画灰色点）；与 UI 的置信度参数保持一致。</param>
     public static void DrawPoses(Mat image, IReadOnlyList<PoseDetectionResult> results, double keypointConfidence = 0.3)
     {
         for (var i = 0; i < results.Count; i++)

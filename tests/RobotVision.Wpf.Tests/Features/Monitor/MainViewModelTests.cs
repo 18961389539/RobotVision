@@ -12,7 +12,7 @@ namespace RobotVision.Wpf.Tests;
 /// 主监控页测试：相机/配方下拉初始化、默认相机选择策略、面板折叠、
 /// 日志汇聚与级别过滤、手动触发失败路径（配方不存在 → 1001 横幅）、日志清空。
 /// </summary>
-public class MainViewModelTests : IDisposable
+public class MonitorViewModelTests : IDisposable
 {
     private readonly TestInfra.TempDir _dir = new("rv_main");
     private readonly AppConfig _cfg;
@@ -22,7 +22,7 @@ public class MainViewModelTests : IDisposable
     private readonly TcpServerManager _tcp;
     private readonly LogSink _sink;
 
-    public MainViewModelTests()
+    public MonitorViewModelTests()
     {
         var recipeFolder = _dir.CreateSub("recipes");
         File.WriteAllText(System.IO.Path.Combine(recipeFolder, "A01.json"),
@@ -56,10 +56,13 @@ public class MainViewModelTests : IDisposable
         _dir.Dispose();
     }
 
-    private MainViewModel CreateVm() =>
-        new(_vision, _cfg, TestInfra.CameraFacade(_cameras),
+    private MonitorViewModel CreateVm() =>
+        new(_vision, _cfg, TestInfra.MonitorPreview(_recipes, TestInfra.CameraFacade(_cameras),
+                TestInfra.CalibrationFacade(new RobotVision.Infrastructure.Calibration.CalibrationManager())),
+            TestInfra.Overlay(),
+            TestInfra.CameraFacade(_cameras),
             TestInfra.CalibrationFacade(new RobotVision.Infrastructure.Calibration.CalibrationManager()),
-            _recipes, TestInfra.TcpFacade(_tcp), _sink, TestLog.Null<MainViewModel>());
+            _recipes, _sink, TestLog.Null<MonitorViewModel>());
 
     [Fact]
     public void Ctor_LoadsCamerasAndRecipes_SelectsVirtualCameraByDefault()
@@ -229,5 +232,56 @@ public class MainViewModelTests : IDisposable
     {
         var line = new LogLine("14:11:03", "Error", "相机 cam_basler 采集失败");
         line.ClipboardText.Should().Be("14:11:03 Error 相机 cam_basler 采集失败");
+    }
+
+    [Fact]
+    public void MonitorPreview_LateFrame_DoesNotUpdate_AfterLeavePage()
+    {
+        TestInfra.RunSta(() =>
+        {
+            _cameras.Register(new VirtualCamera("cam_slow", 64, 64, "Bars", intervalMs: 600));
+            _cfg.Cameras.Add(new CameraConfig { Id = "cam_slow", Type = "Virtual", IntervalMs = 600 });
+            var vm = CreateVm();
+            try
+            {
+                vm.MonitorActive = true;
+                vm.PreviewEnabled = true;
+                vm.SelectedCamera = "cam_slow";
+
+                TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(80));
+                vm.MonitorActive = false;
+                vm.StatusText = "已离开";
+                TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(900));
+
+                vm.StatusText.Should().Be("已离开");
+            }
+            finally { vm.Dispose(); }
+        });
+    }
+
+    [Fact]
+    public void MonitorPreview_LateFrame_DoesNotUpdate_AfterCameraSwitch()
+    {
+        TestInfra.RunSta(() =>
+        {
+            _cameras.Register(new VirtualCamera("cam_slow", 64, 64, "Bars", intervalMs: 600));
+            _cfg.Cameras.Add(new CameraConfig { Id = "cam_slow", Type = "Virtual", IntervalMs = 600 });
+            var vm = CreateVm();
+            try
+            {
+                vm.MonitorActive = true;
+                vm.PreviewEnabled = true;
+                vm.SelectedCamera = "cam_slow";
+
+                TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(50));
+                vm.SelectedCamera = "cam_virtual";
+                vm.PreviewEnabled = false;
+                vm.StatusText = "已切换";
+                TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(900));
+
+                vm.StatusText.Should().Be("已切换");
+            }
+            finally { vm.Dispose(); }
+        });
     }
 }

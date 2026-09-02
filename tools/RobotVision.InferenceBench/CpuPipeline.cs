@@ -1,3 +1,4 @@
+using RobotVision.Core.Inference;
 using RobotVision.Core.Models;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Inference;

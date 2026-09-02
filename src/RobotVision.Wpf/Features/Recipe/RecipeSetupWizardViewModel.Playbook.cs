@@ -3,15 +3,10 @@ using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure;
-using RobotVision.Infrastructure.Cameras;
-using RobotVision.Infrastructure.Inference;
-using RobotVision.Infrastructure.Inference.Strategies;
 using RobotVision.Teach;
 using RobotVision.WpfHost.Shared;
 
@@ -152,7 +147,7 @@ internal sealed partial class RecipeSetupWizardViewModel
         OnPropertyChanged(nameof(CanGoNext));
         OnPropertyChanged(nameof(NextLabel));
         OnPropertyChanged(nameof(HasEnoughForResult));
-        OnPropertyChanged(nameof(IsFileCamera));
+        OnPropertyChanged(nameof(HasPlaybackFiles));
         OnPropertyChanged(nameof(CameraHint));
         OnPropertyChanged(nameof(AnalyzeHint));
         OnPropertyChanged(nameof(ApplyLabel));

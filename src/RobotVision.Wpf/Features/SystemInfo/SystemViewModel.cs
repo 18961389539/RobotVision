@@ -5,7 +5,6 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure.Inference;
 
 namespace RobotVision.WpfHost.Features.SystemInfo;
 
@@ -24,7 +23,7 @@ public partial class SystemViewModel : ObservableObject, IDisposable
     private readonly RecipeLoader _recipes;
     private readonly FailureImageStore _failures;
     private readonly IModelRuntime _models;
-    private readonly IInferenceEngineFactory _inference;
+    private readonly IInferenceRuntime _inference;
     private readonly ILogger<SystemViewModel> _log;
     private readonly DispatcherTimer _timer;
 
@@ -55,7 +54,7 @@ public partial class SystemViewModel : ObservableObject, IDisposable
         RecipeLoader recipes,
         FailureImageStore failures,
         IModelRuntime models,
-        IInferenceEngineFactory inference,
+        IInferenceRuntime inference,
         ILogger<SystemViewModel> log)
     {
         _cfg = cfg;

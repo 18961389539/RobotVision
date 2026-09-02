@@ -227,14 +227,15 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         _registry = registry;
         _dialogs = dialogs;
         _log = log;
-        Refresh();
     }
 
     [RelayCommand]
-    public void Refresh() => Refresh(preferId: null);
+    public void Refresh() => ApplyRefresh();
+
+    public void ScheduleRefresh(string? preferId = null) => ApplyRefresh(preferId);
 
     /// <param name="preferId">刷新后优先选中的 Id；空则尽量保持当前选中。</param>
-    public void Refresh(string? preferId)
+    public void ApplyRefresh(string? preferId = null)
     {
         var keepId = ListSelection.KeepKey(preferId, Selected?.Id);
 
@@ -362,7 +363,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
             _lighting.Unregister(id);
             if (_registry.Create(entry) is { } newInstance)
                 _lighting.Register(newInstance);
-            Refresh(id);
+            ApplyRefresh(id);
             Message = $"已保存 {id}（{entry.Type}）";
         }
         catch (Exception ex)
@@ -438,7 +439,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
             NewEndpoint = "";
             NewLocalEndpoint = "";
             NewPort = "";
-            Refresh(id);
+            ApplyRefresh(id);
             Message = $"已添加 {type} 控制器 {id}（运行时已注册）";
         }
         catch (Exception ex)

@@ -14,7 +14,6 @@ using RobotVision.Core.Abstractions;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
 using RobotVision.Hosting.Cameras;
-using RobotVision.Infrastructure.Cameras;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Cameras;
@@ -89,8 +88,7 @@ public partial class CamerasViewModel
             return;
         }
 
-        CancelPreviewCts();
-        DisposePreviewSession();
+        EndPreviewSession(updateMessage: false);
         _previewCts = new CancellationTokenSource();
         IsPreviewing = true;
         _previewFrameTicks.Clear();
@@ -100,18 +98,21 @@ public partial class CamerasViewModel
 
     /// <summary>停止实时预览。页面离开时（Unloaded）也必须调用——定时器属于进程级单例
     /// ViewModel，不随页面销毁，不停就会在后台持续 Grab 占用相机。</summary>
-    public void StopPreview()
+    public void StopPreview() => EndPreviewSession(updateMessage: true);
+
+    private void EndPreviewSession(bool updateMessage)
     {
         _previewTimer.Stop();
+        var wasPreviewing = IsPreviewing;
+        IsPreviewing = false;
+
         CancelPreviewCts();
         DisposePreviewSession();
         _previewTickBusy = false;
         _previewFrameTicks.Clear();
-        if (IsPreviewing)
-        {
-            IsPreviewing = false;
+
+        if (updateMessage && wasPreviewing)
             Message = "已停止实时预览";
-        }
     }
 
     private void CancelPreviewCts()
@@ -130,13 +131,21 @@ public partial class CamerasViewModel
         _previewCts = null;
     }
 
-    /// <summary>进程退出时由 DI 容器级联调用（单例 VM）：停预览循环并释放会话相机，避免退出阶段仍占用设备。</summary>
+    /// <summary>页面 Unload / 进程退出时停预览循环并释放会话相机。</summary>
     public void Dispose()
     {
         StopPreview();
     }
 
     private void DisposePreviewSession()
+    {
+        lock (_previewSessionLock)
+        {
+            DisposePreviewSessionCore();
+        }
+    }
+
+    private void DisposePreviewSessionCore()
     {
         _previewSessionCamera?.Dispose();
         _previewSessionCamera = null;
@@ -148,13 +157,15 @@ public partial class CamerasViewModel
     private void OnPreviewTick(object? sender, EventArgs e)
     {
         // 异常由 OnPreviewTickAsync 全捕获；未观察异常由 UiFireAndForget 记录。
-        UiFireAndForget.Run(OnPreviewTickAsync, _log);
+        var tick = OnPreviewTickAsync();
+        _previewInFlightTask = tick;
+        UiFireAndForget.Run(tick, _log);
     }
 
     private async Task OnPreviewTickAsync()
     {
         // IsBusy（手动取图/调光进行中）或上一帧未完成时跳过，避免并发 Grab 与堆帧
-        if (_previewTickBusy || IsBusy)
+        if (_previewTickBusy || IsBusy || !IsPreviewing)
             return;
         _previewTickBusy = true;
         try
@@ -181,7 +192,8 @@ public partial class CamerasViewModel
 
             var label = PreviewCameraLabel();
             var ct = _previewCts?.Token ?? CancellationToken.None;
-            var snap = await Task.Run(() => GrabFrameSnapshot(entry, id, ct, reusePreviewSession: true), ct);
+            var snap = await Task.Run(() => GrabFrameSnapshot(entry, id, ct, reusePreviewSession: true), ct)
+                .ConfigureAwait(true);
             if (ct.IsCancellationRequested || !IsPreviewing)
                 return;
 
@@ -252,15 +264,25 @@ public partial class CamerasViewModel
         if (_cameras.TryGet(id, out var existing) && existing is not null)
         {
             if (reusePreviewSession)
-                DisposePreviewSession();
+            {
+                lock (_previewSessionLock)
+                    DisposePreviewSessionCore();
+            }
             using var registeredFrame = _cameras.Grab(id, ct);
             sw.Stop();
             return ToGrabSnapshot(registeredFrame, sw.Elapsed.TotalMilliseconds);
         }
 
-        var camera = reusePreviewSession
-            ? GetOrCreatePreviewSessionCamera(entry, id)
-            : CreateCamera(entry);
+        ICamera camera;
+        var ownsSessionCamera = false;
+        lock (_previewSessionLock)
+        {
+            camera = reusePreviewSession
+                ? GetOrCreatePreviewSessionCameraCore(entry, id)
+                : CreateCamera(entry);
+            ownsSessionCamera = !reusePreviewSession;
+        }
+
         try
         {
             using var tempFrame = _cameras.Grab(camera, ct);
@@ -269,12 +291,12 @@ public partial class CamerasViewModel
         }
         finally
         {
-            if (!reusePreviewSession)
+            if (ownsSessionCamera)
                 camera.Dispose();
         }
     }
 
-    private ICamera GetOrCreatePreviewSessionCamera(CameraConfig entry, string id)
+    private ICamera GetOrCreatePreviewSessionCameraCore(CameraConfig entry, string id)
     {
         if (_previewSessionCamera is not null &&
             string.Equals(_previewSessionId, id, StringComparison.OrdinalIgnoreCase) &&
@@ -282,7 +304,7 @@ public partial class CamerasViewModel
             SameCamera(_previewSessionConfig, entry))
             return _previewSessionCamera;
 
-        DisposePreviewSession();
+        DisposePreviewSessionCore();
         _previewSessionCamera = CreateCamera(entry);
         _previewSessionId = id;
         _previewSessionConfig = CloneCameraConfig(entry);

@@ -7,6 +7,7 @@ namespace RobotVision.Tests;
 /// <summary>
 /// 文件日志测试：目录自动创建、日志条目落盘（消息/来源类别/异常堆栈）。
 /// </summary>
+[Collection("Serial")]
 public class FileLoggingTests
 {
     [Fact]

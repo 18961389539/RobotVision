@@ -1,4 +1,5 @@
 using OpenCvSharp;
+using RobotVision.Core.Calibration;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Calibration;
@@ -9,6 +10,7 @@ namespace RobotVision.Hosting;
 public interface ICalibrationRuntime
 {
     double ExtrinsicResidualFair { get; }
+    double ScaleAnisotropyWarnLimit { get; }
 
     IReadOnlyList<IntrinsicProfile> IntrinsicProfiles { get; }
     IReadOnlyList<ExtrinsicProfile> ExtrinsicProfiles { get; }
@@ -49,6 +51,7 @@ public interface ICalibrationRuntime
 internal sealed class CalibrationRuntime(CalibrationManager inner) : ICalibrationRuntime
 {
     public double ExtrinsicResidualFair => CalibrationManager.ExtrinsicResidualFair;
+    public double ScaleAnisotropyWarnLimit => CalibrationLimits.ScaleAnisotropyWarnLimit;
 
     public IReadOnlyList<IntrinsicProfile> IntrinsicProfiles => inner.IntrinsicProfiles;
     public IReadOnlyList<ExtrinsicProfile> ExtrinsicProfiles => inner.ExtrinsicProfiles;

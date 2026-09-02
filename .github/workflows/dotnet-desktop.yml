@@ -39,10 +39,9 @@ jobs:
       run: dotnet build RobotVision.sln -c Release --no-restore --nologo
 
     - name: Test (Release, with coverage)
-      # 全量单元 + 集成测试;UI/硬件冒烟因环境变量未设置自动跳过
+      # 默认排除 Hardware/Bench/UiAutomation；时序敏感用例由 [Collection("Serial")] 串行
       # --collect 生成 coverage.cobertura.xml(coverlet),上传到 Artifacts 供查看
-      # --settings tests/serial.runsettings 串行执行:并发/时序敏感测试在 CI 并行下偶发失败
-      run: dotnet test RobotVision.sln -c Release --no-build --no-restore --nologo --collect:"XPlat Code Coverage" --settings tests/serial.runsettings
+      run: dotnet test RobotVision.sln -c Release --no-build --no-restore --nologo --collect:"XPlat Code Coverage" --filter "Category!=Hardware&Category!=Bench&Category!=UiAutomation"
 
     - name: Upload coverage report
       uses: actions/upload-artifact@v4

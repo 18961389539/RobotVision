@@ -211,6 +211,75 @@ var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "
     ("Text=\"合格\" FontSize=\"11\"\n                                           Foreground=\"{DynamicResource TextFillColorTertiaryBrush}\" />\n                                <TextBlock Text=\"{Binding YieldText}\"", "Text=\"合格率\" FontSize=\"11\"\n                                           Foreground=\"{DynamicResource TextFillColorTertiaryBrush}\" />\n                                <TextBlock Text=\"{Binding YieldText}\""),
 ];
 
+static string FixReplacementCharArtifacts(string content)
+{
+    if (!content.Contains('\uFFFD')) return content;
+
+    (string Pattern, string Replacement)[] rules =
+    [
+        ("未检出目.{0,4}1007", "未检出目标 1007"),
+        ("取.{0,3}标定/模型失败则无.{0,3} />", "取图/标定/模型失败则无图\" />"),
+        ("（F5 刷新.{0,3} />", "（F5 刷新）\" />"),
+        ("Text=\".{0,3} FontSize=\"9\" Foreground=\"Black\"", "Text=\"停\" FontSize=\"9\" Foreground=\"Black\""),
+        ("位姿叠加结.{0,3}>", "位姿叠加结果\">"),
+        ("名称（字.{0,3}数字/_/-.{0,3} Margin=", "名称（字母/数字/_/-）\" Margin="),
+        ("推理与角.{0,3} Margin=", "推理与角度\" Margin="),
+        ("主模型（.onnx.{0,3} Margin=", "主模型（.onnx）\" Margin="),
+        ("次模型（B 特征 .onnx.{0,3} Margin=", "次模型（B 特征 .onnx）\" Margin="),
+        ("掩码置信.{0,3} Margin=", "掩码置信度\" Margin="),
+        ("Otsu 自动阈.{0,3} Margin=", "Otsu 自动阈值\" Margin="),
+        ("固定阈.{0,3} Margin=", "固定阈值\" Margin="),
+        ("控制.{0,3} Margin=", "控制器\" Margin="),
+        ("通道（≥1.{0,3} Margin=", "通道（≥1）\" Margin="),
+        ("配置工作.{0,3} Margin=", "配置工作台\" Margin="),
+        ("详情.{0,3} Padding=", "详情…\" Padding="),
+        ("打开配置工作.{0,3} Padding=", "打开配置工作台\" Padding="),
+        ("记下本次为示教输.{0,3} Padding=", "记下本次为示教输出\" Padding="),
+        ("用结果库合格均值建议补.{0,3} Padding=", "用结果库合格均值建议补偿\" Padding="),
+        ("Content=\"取一.{0,3} Command=", "Content=\"取一帧\" Command="),
+        ("单帧取图超时（ms.{0,3} Margin=", "单帧取图超时（ms）\" Margin="),
+        ("宽（px.{0,3} Margin=", "宽（px）\" Margin="),
+        ("高（px.{0,3} Margin=", "高（px）\" Margin="),
+        ("模拟曝光延时（ms.{0,3} Margin=", "模拟曝光延时（ms）\" Margin="),
+        ("Content=\"仅读分辨.{0,3} Margin=", "Content=\"仅读分辨率\" Margin="),
+        (" · 最大残.{0,3} Foreground=", " · 最大残差 \" Foreground="),
+        ("分辨.{0,3} Foreground=", "分辨率\" Foreground="),
+        ("Text=\"多项.{0,3} />", "Text=\"多项式\" />"),
+        ("工.{0,3}Id（可手输.{0,3}", "工位 Id（可手输）\""),
+        ("不是列表.{0,3}2 项", "不是列表第 2 项"),
+        ("必须保.{0,3} />", "必须保存\" />"),
+        ("固定阈值更.{0,3} />", "固定阈值更稳\" />"),
+        ("显示可选项.{0,3} />", "显示可选项）\" />"),
+        ("补偿后的坐.{0,3} />", "补偿后的坐标\" />"),
+        ("再点一次累.{0,3}Δ", "再点一次累加 Δ"),
+        ("需要生.{0,3}TRIGGER", "需要生产 TRIGGER"),
+        ("试触发不入.{0,3} />", "试触发不入库\" />"),
+        ("不改产.{0,3}TRIGGER.{0,3} />", "不改产线 TRIGGER。\" />"),
+        ("绿.{0,3}检测", "绿框=检测"),
+        ("金.{0,3}匹配窗", "金框=匹配窗"),
+        ("保存才上产线.{0,3} />", "保存才上产线。\" />"),
+        ("线性比.{0,3}\\(mm/px\\)", "线性比例 (mm/px)"),
+        ("即时热加.{0,3} />", "即时热加载\" />"),
+        ("同名的工位.{0,3} />", "同名的工位标\" />"),
+        ("已改的比例.{0,3}", "已改的比例）\""),
+        ("分辨率不.{0,3}", "分辨率不变）\""),
+        ("appsettings.json .{0,3}Cameras 节点后重.{0,3} />", "appsettings.json 的 Cameras 节点后重启\" />"),
+        ("持久化到配.{0,3} />", "持久化到配置\" />"),
+        ("像素 .{0,3}毫米", "像素 → 毫米"),
+        ("Header=\"检测区域（ROI.{0,3} IsExpanded", "Header=\"检测区域（ROI）\" IsExpanded"),
+        ("启用（取图前点亮.{0,3} FontSize", "启用（取图前点亮）\" FontSize"),
+        ("Content=\"框选区.{0,3} FontSize", "Content=\"框选区域\" FontSize"),
+        ("启动时.{0,3}data/calibration", "启动时从 data/calibration"),
+        ("Content=\"应用并取图预.{0,3} Appearance=", "Content=\"应用并取图预览\" Appearance="),
+        ("预\uFFFD? Appearance=", "预览\" Appearance="),
+        ("合格中位 .{0,3}示教", "合格中位 − 示教"),
+    ];
+
+    foreach (var (pattern, replacement) in rules)
+        content = System.Text.RegularExpressions.Regex.Replace(content, pattern, replacement);
+    return content;
+}
+
 static string FixWhPx(string content)
 {
     if (!content.Contains("?(px)")) return content;
@@ -246,6 +315,7 @@ foreach (var path in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDi
     text = FixWhPx(text);
     text = FixBytes(text);
     text = FixEmptyWh(text);
+    text = FixReplacementCharArtifacts(text);
     if (text == orig) continue;
     File.WriteAllText(path, text);
     Console.WriteLine("fixed: " + Path.GetFileName(path));

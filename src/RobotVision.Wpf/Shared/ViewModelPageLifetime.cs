@@ -20,6 +20,8 @@ internal static class ViewModelPageLifetime
         {
             page.Unloaded -= OnUnloaded;
             onUnloading?.Invoke();
+            if (viewModel is IPageUnloadAware unloadAware)
+                unloadAware.OnPageUnloading();
             if (disposeViewModelOnUnload && viewModel is IDisposable disposable)
                 disposable.Dispose();
         }

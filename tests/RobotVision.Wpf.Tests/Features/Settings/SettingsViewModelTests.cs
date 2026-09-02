@@ -192,6 +192,42 @@ public class SettingsViewModelTests : IDisposable
         vm.Message.Should().Contain("需重启程序生效");
     }
 
+    [Fact]
+    public void Save_EndpointRestartFailure_DoesNotPersistOrUpdateBaseline()
+    {
+        var vm = CreateVm();
+        vm.IpAddress = "127.0.0.1";
+        var savedPort = FreeTcpPort();
+        vm.TcpPort = savedPort;
+        vm.SaveCommand.Execute(null);
+        vm.Message.Should().Contain("已保存并应用");
+        _cfg.IpAddress.Should().Be("127.0.0.1");
+        _cfg.TcpPort.Should().Be(savedPort);
+
+        var blocker = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        blocker.Start();
+        var busyPort = ((System.Net.IPEndPoint)blocker.LocalEndpoint).Port;
+        try
+        {
+            vm.TcpPort = busyPort;
+            vm.SaveCommand.Execute(null);
+
+            vm.Message.Should().Contain("未保存");
+            vm.Message.Should().NotContain("已保存并应用");
+            vm.HasUnsavedChanges.Should().BeFalse("失败保存会回滚表单到已保存基线");
+            vm.TcpPort.Should().Be(savedPort);
+            _tcp.Port.Should().Be(savedPort);
+            _tcp.IsRunning.Should().BeTrue();
+
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(_settingsPath));
+            doc.RootElement.GetProperty("TcpPort").GetInt32().Should().Be(savedPort);
+        }
+        finally
+        {
+            blocker.Stop();
+        }
+    }
+
     /// <summary>获取一个当前空闲的 TCP 端口（绑定 0 后立即释放）。</summary>
     private static int FreeTcpPort()
     {

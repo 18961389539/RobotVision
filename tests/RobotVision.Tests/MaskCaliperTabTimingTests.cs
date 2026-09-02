@@ -11,18 +11,16 @@ namespace RobotVision.Tests;
 /// 精修耗时对比（无相机）：OSDP 真实模板尺寸 + 与现场同量级的转正窗 / 壳体。
 /// 不含取图与分割。
 /// </summary>
+[Trait("Category", "Bench")]
 public sealed class MaskCaliperTabTimingTests(ITestOutputHelper output)
 {
-    private static string RepoRoot => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-
     [Fact]
     public void RefineOnly_CaliperFasterThanTemplate_OsdpScale()
     {
-        var recipeDir = Path.Combine(RepoRoot, "src", "RobotVision.Wpf",
-            "bin", "Debug", "net8.0-windows", "recipes");
+        var recipeDir = TestBuildPaths.ResolveRecipesDir()
+                        ?? TestBuildPaths.CombineWpf("recipes");
         var path = Path.Combine(recipeDir, "OSDP.json");
-        Assert.True(File.Exists(path), $"缺少 {path}");
+        TestPreconditions.RequireFile(path, $"Missing {path}");
 
         var recipe = new RecipeLoader(recipeDir).Get("OSDP");
         using var template = MaskTemplateMatcher.DecodeTemplatePng(recipe.Template.TemplateImageBase64);

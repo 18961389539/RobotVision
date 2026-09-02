@@ -12,7 +12,7 @@ namespace RobotVision.Hosting;
 public sealed class CameraConfigStore(AppConfig cfg, string? settingsPath = null)
 {
     private readonly string _settingsPath =
-        settingsPath ?? Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        settingsPath ?? ApplicationPaths.UserSettingsPath;
 
     private static readonly JsonSerializerOptions Indented = new()
     {

@@ -181,6 +181,7 @@ public partial class CamerasViewModel : ObservableObject, ICommitPendingEdits, I
 
     /// <summary>防止 OnSelectedChanged 重入（程序内设置 Selected 时置位）。</summary>
     private bool _switching;
+    private CancellationTokenSource? _refreshCts;
 
     /// <summary>从磁盘/列表回填编辑区时置位：跳过切类型时的字段清空，避免把刚填入的 SN/目录冲掉。</summary>
     private bool _applyingEditor;
@@ -201,6 +202,12 @@ public partial class CamerasViewModel : ObservableObject, ICommitPendingEdits, I
 
     /// <summary>停止预览时取消在途取图，避免迟到帧写回 UI。</summary>
     private CancellationTokenSource? _previewCts;
+
+    /// <summary>预览取帧/会话释放串行锁（创建、Grab、Dispose 同生命周期）。</summary>
+    private readonly object _previewSessionLock = new();
+
+    /// <summary>当前预览 Tick 异步体（Stop 时等待其结束再 Dispose 会话相机）。</summary>
+    private Task _previewInFlightTask = Task.CompletedTask;
 
     /// <summary>未注册相机的预览会话（单实例复用，避免每帧开关 pylon）。</summary>
     private ICamera? _previewSessionCamera;
@@ -336,7 +343,6 @@ public partial class CamerasViewModel : ObservableObject, ICommitPendingEdits, I
         _log = log;
         _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         _previewTimer.Tick += OnPreviewTick;
-        Refresh();
     }
 
     private readonly AppConfig _cfg;

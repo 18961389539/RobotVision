@@ -31,7 +31,8 @@ public sealed class AppConfig
     public List<string> IpWhitelist { get; set; } = [];
 
     /// <summary>
-    /// 工位数据根（配方/标定/回放/失败图/结果等）。空 = 相对路径仍按 exe/CWD 解析（便携部署）。
+    /// 工位数据根（配方/标定/回放/失败图/结果等）。空字符串在启动时由
+    /// <see cref="ApplicationPaths.NormalizeAppConfig"/> 落到 %ProgramData%\RobotVision\Data。
     /// 模型目录不走此根。启动时 <see cref="DataRootBinder.Apply"/> 把未设绝对路径的项绑到此目录下。
     /// </summary>
     public string DataRoot { get; set; } = "";

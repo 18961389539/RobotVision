@@ -14,6 +14,7 @@ namespace RobotVision.Tests;
 /// - MaxConcurrent=1 时并发提交串行执行（最多 1 个同时在跑）；
 /// - BeginExecution/CompleteExecution 维护 IsProcessing 与 LastElapsedMs。
 /// </summary>
+[Collection("Serial")]
 public class PipelineSchedulerTests
 {
     private static PipelineScheduler Create(int maxConcurrent = 2, int maxQueueDepth = 4) =>

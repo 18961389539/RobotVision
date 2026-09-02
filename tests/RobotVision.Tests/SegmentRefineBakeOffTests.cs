@@ -40,8 +40,7 @@ public sealed class SegmentRefineBakeOffTests
         ];
         var candidates = SegmentRefineBakeOff.Run(img, contour);
         var winner = SegmentRefineBakeOff.PickWinner(candidates);
-        if (winner is null)
-            return;
+        Assert.NotNull(winner);
         Assert.Equal(SegmentRefineMethod.LineFit, winner.Method);
         Assert.False(winner.Directed);
     }

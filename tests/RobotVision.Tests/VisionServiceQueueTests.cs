@@ -18,6 +18,7 @@ namespace RobotVision.Tests;
 /// REAL 系列用例改用 Fake 推理引擎（可注入 400ms 耗时占管线），不依赖仓库真实 ONNX，
 /// 本地/CI/无模型环境行为一致。
 /// </summary>
+[Collection("Serial")]
 public class VisionServiceQueueTests : IDisposable
 {
     private readonly string _recipeFolder = Path.Combine(Path.GetTempPath(), "rv_vsq_" + Guid.NewGuid().ToString("N"));

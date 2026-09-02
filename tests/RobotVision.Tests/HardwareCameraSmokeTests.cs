@@ -18,18 +18,13 @@ namespace RobotVision.Tests;
 [Trait("Category", "Hardware")]
 public class HardwareCameraSmokeTests(ITestOutputHelper output)
 {
-    private static bool Enabled =>
-        string.Equals(Environment.GetEnvironmentVariable("RV_HARDWARE_TEST"), "1",
-            StringComparison.OrdinalIgnoreCase);
-
     private static string OutDir =>
         Path.Combine(Path.GetTempPath(), "RobotVision-camera-test");
 
     [Fact]
     public void GigE_Discover_And_Grab_EachCamera()
     {
-        if (!Enabled)
-            return;
+        TestPreconditions.RequireHardware();
 
         var devices = GigEVisionCamera.EnumerateDevices();
         foreach (var d in devices)
@@ -68,8 +63,7 @@ public class HardwareCameraSmokeTests(ITestOutputHelper output)
     [Fact]
     public void Pylon_Discover_And_Grab_EachCamera()
     {
-        if (!Enabled)
-            return;
+        TestPreconditions.RequireHardware();
 
         IReadOnlyList<string> devices;
         try
@@ -117,8 +111,7 @@ public class HardwareCameraSmokeTests(ITestOutputHelper output)
     [Fact]
     public void GigE_ContinuousGrab_30Frames_Stable()
     {
-        if (!Enabled)
-            return;
+        TestPreconditions.RequireHardware();
 
         var devices = GigEVisionCamera.EnumerateDevices();
         if (devices.Count == 0)
@@ -179,41 +172,31 @@ public class HardwareCameraSmokeTests(ITestOutputHelper output)
     [Fact]
     public void Exposure_ChangeAffectsBrightness()
     {
-        if (!Enabled)
-            return;
+        TestPreconditions.RequireHardware();
 
         var devices = GigEVisionCamera.EnumerateDevices();
-        if (devices.Count == 0)
-        {
-            output.WriteLine("未发现 GigE 设备（跳过）");
-            return;
-        }
+        TestSkip.When(devices.Count == 0, "No GigE devices discovered for exposure test.");
 
         var serial = devices[0].Split('|')[0].Trim();
         using var cam = new GigEVisionCamera($"hwtest_{serial}", serial, grabTimeoutMs: 5000,
             log: new OutputLogger(output));
         Assert.True(cam.TryConnectOnce(), $"相机 {serial} 连接失败");
-        if (cam is not IExposureControl exposure)
-        {
-            output.WriteLine("相机未实现 IExposureControl（跳过参数链路验证）");
-            return;
-        }
+        if (cam is not IExposureControl)
+            TestSkip.Throw("Camera does not implement IExposureControl.");
 
-        var range = exposure.GetExposureRange();
+        var range = cam.GetExposureRange();
         Assert.NotNull(range);
         Assert.True(range!.Value.Max > range.Value.Min, "曝光范围非法");
 
         // 最小曝光取帧
-        Assert.True(exposure.TrySetExposureTimeUs(range.Value.Min), "设置最小曝光失败");
-        Thread.Sleep(100); // 等参数生效
-        using var lowFrame = cam.Grab();
+        Assert.True(cam.TrySetExposureTimeUs(range.Value.Min), "设置最小曝光失败");
+        using var lowFrame = GrabSettled(cam);
         using var lowMat = VisionImageCv.AsMat(lowFrame.Image);
         var lowMean = Cv2.Mean(lowMat).Val0;
 
         // 最大曝光取帧
-        Assert.True(exposure.TrySetExposureTimeUs(range.Value.Max), "设置最大曝光失败");
-        Thread.Sleep(100);
-        using var highFrame = cam.Grab();
+        Assert.True(cam.TrySetExposureTimeUs(range.Value.Max), "设置最大曝光失败");
+        using var highFrame = GrabSettled(cam);
         using var highMat = VisionImageCv.AsMat(highFrame.Image);
         var highMean = Cv2.Mean(highMat).Val0;
 
@@ -223,7 +206,14 @@ public class HardwareCameraSmokeTests(ITestOutputHelper output)
 
         // 恢复中值曝光，避免影响后续使用
         var mid = (range.Value.Min + range.Value.Max) / 2;
-        exposure.TrySetExposureTimeUs(mid);
+        cam.TrySetExposureTimeUs(mid);
+    }
+
+    private static CameraFrame GrabSettled(GigEVisionCamera cam)
+    {
+        using (cam.Grab()) { }
+        using (cam.Grab()) { }
+        return cam.Grab();
     }
 
     private sealed class OutputLogger(ITestOutputHelper output) : ILogger

@@ -2,7 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
-using RobotVision.Teach;
+using RobotVision.Hosting;
 using System.ComponentModel;
 using System.Windows.Media;
 
@@ -52,7 +52,7 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
     public string TemplateStatusText => _host.TemplateStatusText;
 
     public string MethodTitle =>
-        $"{SegmentRefineAdvisor.MethodLabel(Template.RefineMethod)} · 参数";
+        $"{_host.RefineGuidance.MethodLabel(Template.RefineMethod)} · 参数";
 
     public string MethodHint => _host.RefineMethodHint;
 

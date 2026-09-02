@@ -13,6 +13,7 @@ namespace RobotVision.Tests;
 /// 相机配置管理测试：CameraConfigStore 写回 appsettings.json
 /// （保留其他节点、同步内存配置、文件不存在时新建），CameraManager 注册/覆盖/移除。
 /// </summary>
+[Collection("Serial")]
 public class CameraConfigStoreTests : IDisposable
 {
     private readonly string _file = Path.Combine(Path.GetTempPath(), "rv_camcfg_" + Guid.NewGuid().ToString("N") + ".json");
@@ -132,6 +133,7 @@ file sealed class StubCamera(string id) : ICamera
     public void Dispose() => Disposed = true;
 }
 
+[Collection("Serial")]
 public class CameraManagerLifecycleTests
 {
     [Fact]

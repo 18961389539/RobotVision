@@ -12,8 +12,8 @@ public partial class SettingsPage : Page
             viewModel.StopTimer();
             if (viewModel.HasUnsavedChanges)
             {
-                dialogs.ShowWarning(
-                    "服务设置页有未保存的修改，已丢失。如需保留请返回后点击「保存并应用」。",
+                dialogs.ConfirmDiscard(
+                    "服务设置页有未保存的修改。选择「否」可返回继续编辑（若导航已切换，请手动回到本页）。",
                     "未保存修改");
             }
         });

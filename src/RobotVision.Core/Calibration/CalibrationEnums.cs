@@ -1,4 +1,4 @@
-namespace RobotVision.Infrastructure.Calibration;
+namespace RobotVision.Core.Calibration;
 
 /// <summary>标定质量评估结果（与 README 验收参考对齐）。</summary>
 public enum CalibrationQuality
@@ -13,8 +13,7 @@ public enum CalibrationQuality
     Poor,
 }
 
-/// <summary>工位坐标映射模式（管线分发用），优先级：多项式 &gt; 外参 &gt; 比例。
-/// 见 <see cref="CalibrationManager.GetMappingMode"/>。</summary>
+/// <summary>工位坐标映射模式（管线分发用），优先级：多项式 &gt; 外参 &gt; 比例。</summary>
 public enum StationMappingMode
 {
     /// <summary>无映射档案：外参路径报 1004。</summary>

@@ -10,6 +10,6 @@ public partial class CalibrationPage : Page
         ViewModelPageLifetime.Attach(this, viewModel);
         InitializeComponent();
         NumberBoxCommit.Bind(this, viewModel);
-        Loaded += (_, _) => viewModel.Refresh();
+        Loaded += (_, _) => viewModel.ScheduleRefresh();
     }
 }

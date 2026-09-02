@@ -11,7 +11,6 @@ public sealed class ModelsViewModelTests : IDisposable
 {
     private readonly TestInfra.TempDir _dir = new("rv_models");
     private readonly ModelManager _models;
-    private readonly YoloDotNetEngineFactory _engineFactory = new();
 
     public ModelsViewModelTests()
     {
@@ -27,17 +26,47 @@ public sealed class ModelsViewModelTests : IDisposable
     }
 
     private ModelsViewModel CreateVm() =>
-        new(TestInfra.ModelFacade(_models), _engineFactory, new TestDialogService(), TestLog.Null<ModelsViewModel>());
+        new(TestInfra.ModelFacade(_models), new YoloDotNetEngineFactory().AsInferenceRuntime(),
+            TestInfra.ModelTest(_models), TestInfra.ImageFiles(), new TestDialogService(),
+            TestLog.Null<ModelsViewModel>());
 
     [Fact]
-    public void Ctor_ListsOnnxFilesInFolder()
+    public async Task Ctor_LoadsPrefs_AndRefreshListsOnnxFiles()
     {
         var vm = CreateVm();
+        await vm.RefreshAsync();
 
         vm.Files.Should().ContainSingle();
         vm.Files[0].Name.Should().Be("demo.onnx");
         vm.Files[0].LoadedText.Should().Be("未加载");
         vm.Message.Should().Contain("1 个模型文件");
+    }
+
+    [Fact]
+    public void SavePrefs_PersistsTaskAndThresholds()
+    {
+        var prefsPath = Path.Combine(AppContext.BaseDirectory, "model-test.prefs.json");
+        var backup = File.Exists(prefsPath) ? File.ReadAllText(prefsPath) : null;
+        try
+        {
+            var vm = CreateVm();
+            vm.SelectedTask = InferenceTask.Segmentation;
+            vm.Confidence = 0.42;
+            vm.PixelConfidence = 0.55;
+            vm.Iou = 0.61;
+            vm.FlushPrefsForTests();
+
+            var json = File.ReadAllText(prefsPath);
+            json.Should().Contain("\"Task\":1");
+            json.Should().Contain("0.42");
+        }
+        finally
+        {
+            if (backup is null)
+                File.Delete(prefsPath);
+            else
+                File.WriteAllText(prefsPath, backup);
+        }
     }
 
     [Fact]
@@ -52,12 +81,13 @@ public sealed class ModelsViewModelTests : IDisposable
     }
 
     [Fact]
-    public void Refresh_PreservesSelection_WhenFileStillExists()
+    public async Task Refresh_PreservesSelection_WhenFileStillExists()
     {
         var vm = CreateVm();
+        await vm.RefreshAsync();
         vm.SelectedFile = vm.Files[0];
 
-        vm.RefreshCommand.Execute(null);
+        await vm.RefreshAsync();
 
         vm.SelectedFile?.Name.Should().Be("demo.onnx");
     }

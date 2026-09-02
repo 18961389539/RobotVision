@@ -1,17 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using RobotVision.Core.Inference;
 using RobotVision.Core;
 using RobotVision.Core.Assets;
 using RobotVision.Core.Models;
 
 namespace RobotVision.Infrastructure.Inference;
-
-public enum InferenceTask
-{
-    ObjectDetection,
-    Segmentation,
-    PoseEstimation,
-}
 
 /// <summary>
 /// 模型会话：持有推理引擎的访问句柄。同一模型的推理通过内部信号量串行化

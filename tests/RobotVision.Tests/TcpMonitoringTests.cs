@@ -8,6 +8,7 @@ using Xunit;
 
 namespace RobotVision.Tests;
 
+[Collection("Serial")]
 public class TcpMonitoringTests : IDisposable
 {
     private readonly TcpServerManager _tcp;

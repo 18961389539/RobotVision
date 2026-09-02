@@ -20,12 +20,14 @@ namespace RobotVision.WpfHost.Shared;
 
 internal static class WpfHostServiceCollectionExtensions
 {
-    /// <summary>注册导航页、页面 ViewModel（Transient）与壳层 <see cref="MainViewModel"/>（Singleton）。</summary>
+    /// <summary>注册导航页、页面 ViewModel（Transient）与壳层 <see cref="ShellViewModel"/>（Singleton）。</summary>
     public static IServiceCollection AddWpfNavigation(this IServiceCollection services)
     {
         services.AddSingleton<IPageService, DiPageService>();
-        services.AddSingleton<MainViewModel>();
+        services.AddSingleton<ShellViewModel>();
+        services.AddSingleton<IFrameOverlayPresenter, FrameOverlayPresenter>();
 
+        services.AddTransient<MonitorViewModel>();
         services.AddTransient<RecipeViewModel>();
         services.AddTransient<CamerasViewModel>();
         services.AddTransient<LightingsViewModel>();

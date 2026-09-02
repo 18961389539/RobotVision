@@ -231,7 +231,7 @@
                                    Text="{Binding AnalyzeHint}" />
                         <CheckBox Content="文件夹相机：对目录内全部图片打分（磁盘解码，不推进产线回放下标）"
                                   IsChecked="{Binding ScoreAllPlayback}" Margin="0,0,0,12"
-                                  Visibility="{Binding IsFileCamera, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                  Visibility="{Binding HasPlaybackFiles, Converter={StaticResource BoolToVisibilityConverter}}" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <ui:Button Content="分析当前画面" Appearance="Primary" HorizontalAlignment="Left"
                                        Command="{Binding AnalyzeCommand}"

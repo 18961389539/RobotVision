@@ -23,42 +23,32 @@ namespace RobotVision.Tests;
 [Trait("Category", "Hardware")]
 public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
 {
-    private static bool Enabled =>
-        string.Equals(Environment.GetEnvironmentVariable("RV_HARDWARE_TEST"), "1",
-            StringComparison.OrdinalIgnoreCase);
-
-    private static string RepoRoot => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    private static string RepoRoot => TestBuildPaths.FindRepoRoot()
+                                      ?? throw new InvalidOperationException("Repo root not found.");
 
     [Fact]
     public void OsdpLive_AngleDoesNotFlip180()
     {
-        if (!Enabled)
-            return;
+        TestPreconditions.RequireHardware();
         RunOsdpLive(SegmentRefineMethod.Template, "template");
     }
 
     [Fact]
     public void OsdpLive_CaliperTab_DoesNotFlip180()
     {
-        if (!Enabled)
-            return;
+        TestPreconditions.RequireHardware();
         RunOsdpLive(SegmentRefineMethod.CaliperTab, "caliper");
     }
 
     [Fact]
     public void OsdpLive_CaliperVsTemplate_RefineTime()
     {
-        if (!Enabled)
-            return;
+        TestPreconditions.RequireHardware();
 
         var recipeDir = OsdpRecipesDir();
-        var modelsDir = Path.Combine(RepoRoot, "models");
-        if (!File.Exists(Path.Combine(modelsDir, "OSFP-SEG.onnx")))
-        {
-            modelsDir = Path.Combine(RepoRoot, "src", "RobotVision.Wpf",
-                "bin", "Debug", "net8.0-windows", "models");
-        }
+        var modelsDir = TestBuildPaths.ResolveModelsDir()
+                        ?? throw new InvalidOperationException("models directory not found.");
+        TestPreconditions.RequireFile(Path.Combine(modelsDir, "OSFP-SEG.onnx"), "Missing OSFP-SEG.onnx");
         var loader = new RecipeLoader(recipeDir);
         var tplRecipe = loader.Get("OSDP").Clone();
         tplRecipe.Template.RefineMethod = SegmentRefineMethod.Template;
@@ -69,8 +59,7 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
         var tpl = new MaskTemplateStrategy(models);
         var cal = new MaskTemplateStrategy(models);
 
-        var wpfAppsettings = Path.Combine(RepoRoot, "src", "RobotVision.Wpf",
-            "bin", "Debug", "net8.0-windows", "appsettings.json");
+        var wpfAppsettings = TestBuildPaths.CombineWpf("appsettings.json");
         var camCfg = ReadCamBasler(wpfAppsettings);
         var wantedSn = Environment.GetEnvironmentVariable("RV_OSDP_CAMERA_SN")?.Trim();
         if (string.IsNullOrWhiteSpace(wantedSn))
@@ -160,14 +149,10 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
     private void RunOsdpLive(SegmentRefineMethod method, string tag)
     {
         var recipeDir = OsdpRecipesDir();
-        var modelsDir = Path.Combine(RepoRoot, "models");
-        if (!File.Exists(Path.Combine(modelsDir, "OSFP-SEG.onnx")))
-        {
-            modelsDir = Path.Combine(RepoRoot, "src", "RobotVision.Wpf",
-                "bin", "Debug", "net8.0-windows", "models");
-        }
+        var modelsDir = TestBuildPaths.ResolveModelsDir()
+                        ?? throw new InvalidOperationException("models directory not found.");
         Assert.True(File.Exists(Path.Combine(recipeDir, "OSDP.json")), $"缺少配方: {recipeDir}\\OSDP.json");
-        Assert.True(File.Exists(Path.Combine(modelsDir, "OSFP-SEG.onnx")), "缺少 OSFP-SEG.onnx");
+        TestPreconditions.RequireFile(Path.Combine(modelsDir, "OSFP-SEG.onnx"), "缺少 OSFP-SEG.onnx");
 
         var loader = new RecipeLoader(recipeDir);
         var recipe = loader.Get("OSDP").Clone();
@@ -175,8 +160,7 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
         using var models = new ModelManager(modelsDir);
         var strategy = new MaskTemplateStrategy(models);
 
-        var wpfAppsettings = Path.Combine(RepoRoot, "src", "RobotVision.Wpf",
-            "bin", "Debug", "net8.0-windows", "appsettings.json");
+        var wpfAppsettings = TestBuildPaths.CombineWpf("appsettings.json");
         var camCfg = ReadCamBasler(wpfAppsettings);
         var wantedSn = Environment.GetEnvironmentVariable("RV_OSDP_CAMERA_SN")?.Trim();
         if (string.IsNullOrWhiteSpace(wantedSn))
@@ -305,8 +289,8 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
 
     private static string OsdpRecipesDir()
     {
-        var wpfBin = Path.Combine(RepoRoot, "src", "RobotVision.Wpf", "bin", "Debug", "net8.0-windows");
-        var settings = Path.Combine(wpfBin, "appsettings.json");
+        var wpfBin = TestBuildPaths.ResolveWpfBin();
+        var settings = wpfBin is not null ? Path.Combine(wpfBin, "appsettings.json") : "";
         if (File.Exists(settings))
         {
             try
@@ -325,7 +309,8 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
             }
         }
 
-        return Path.Combine(wpfBin, "recipes");
+        return TestBuildPaths.ResolveRecipesDir()
+               ?? Path.Combine(wpfBin ?? RepoRoot, "recipes");
     }
 
     private static (string DeviceId, double? ExposureUs, double? Gain) ReadCamBasler(string appsettingsPath)

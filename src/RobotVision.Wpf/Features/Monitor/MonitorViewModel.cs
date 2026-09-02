@@ -5,7 +5,6 @@ using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
-using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
@@ -22,7 +21,7 @@ public sealed record LogLine(string Time, string Level, string Message)
     public string ClipboardText => $"{Time} {Level} {Message}";
 }
 
-public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDisposable
+public partial class MonitorViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
     private const int LogCapacity = 500;
     private static readonly TimeSpan PreviewInterval = TimeSpan.FromMilliseconds(500);
@@ -31,18 +30,22 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
     private readonly AppConfig _cfg;
     private readonly ICameraRuntime _cameras;
     private readonly ICalibrationRuntime _calibration;
+    private readonly IMonitorPreviewService _preview;
+    private readonly IFrameOverlayPresenter _overlay;
     private readonly RecipeLoader _recipes;
-    private readonly ITcpRuntime _tcp;
     private readonly LogSink _sink;
-    private readonly ILogger<MainViewModel> _log;
+    private readonly ILogger<MonitorViewModel> _log;
     private readonly DispatcherTimer _previewTimer;
-    private readonly DispatcherTimer _statusTimer;
+    private readonly DispatcherTimer _interlockTimer;
     private readonly Random _random = new();
 
     public Action? FlushPendingEdits { get; set; }
 
     private bool _showingSnapshot;
     private int _previewBusy;
+    private int _previewGeneration;
+    private CancellationTokenSource? _previewCts;
+    private Task _previewInFlightTask = Task.CompletedTask;
 
     [ObservableProperty]
     private bool _includeTriggerPose;
@@ -80,13 +83,6 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
     /// <summary>监控页面当前是否显示（导航离开时停止预览抓图，避免后台空转）。</summary>
     [ObservableProperty]
     private bool _monitorActive;
-
-    [ObservableProperty]
-    private string _tcpStatus = "TCP 未启动";
-
-    /// <summary>TCP 服务是否在运行（底部状态栏圆点指示：绿=运行 / 橙=未启动）。</summary>
-    [ObservableProperty]
-    private bool _isTcpRunning;
 
     /// <summary>触发按钮可用性（任务执行中禁用，防止连点并发触发）。</summary>
     [ObservableProperty]
@@ -132,23 +128,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         RefreshInterlock();
     }
 
-    private void RefreshInterlock()
-    {
-        if (!_vision.AnyInhibited)
-        {
-            InterlockText = "";
-            return;
-        }
-
-        var limit = Math.Max(1, _vision.ConsecutiveFailLimit);
-        var locked = _vision.GetRecipeStats()
-            .Where(s => s.ConsecutiveFails >= limit)
-            .Select(s => $"{s.Recipe}×{s.ConsecutiveFails}")
-            .ToList();
-        InterlockText = locked.Count == 0
-            ? "连续失败联锁已触发（1018）。排除现场问题后点「解除联锁」。"
-            : $"连续失败联锁：{string.Join("、", locked)}。TRIGGER 返回 1018。";
-    }
+    private void RefreshInterlock() => InterlockText = InterlockBannerText.Format(_vision);
 
     /// <summary>日志级别过滤选项。</summary>
     public IReadOnlyList<string> LogFilterOptions { get; } = ["全部", "警告及错误", "仅错误"];
@@ -170,22 +150,24 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
 
     public ObservableCollection<LogLine> Logs { get; } = [];
 
-    public MainViewModel(
+    public MonitorViewModel(
         VisionService vision,
         AppConfig cfg,
+        IMonitorPreviewService preview,
+        IFrameOverlayPresenter overlay,
         ICameraRuntime cameras,
         ICalibrationRuntime calibration,
         RecipeLoader recipes,
-        ITcpRuntime tcp,
         LogSink sink,
-        ILogger<MainViewModel> log)
+        ILogger<MonitorViewModel> log)
     {
         _vision = vision;
         _cfg = cfg;
         _cameras = cameras;
         _calibration = calibration;
+        _preview = preview;
+        _overlay = overlay;
         _recipes = recipes;
-        _tcp = tcp;
         _sink = sink;
         _log = log;
 
@@ -203,17 +185,11 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
             AppendLog(entry);
 
         _previewTimer = new DispatcherTimer { Interval = PreviewInterval };
-        _previewTimer.Tick += (_, _) => UiFireAndForget.Run(GrabPreviewAsync, _log);
-        _previewTimer.Start();
+        _previewTimer.Tick += OnPreviewTimerTick;
 
-        _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _statusTimer.Tick += (_, _) =>
-        {
-            IsTcpRunning = _tcp.IsRunning;
-            TcpStatus = $"TCP {_tcp.ConnectedClients} 客户端 · 队列 {_vision.QueueDepth}/{_vision.MaxQueueDepth}";
-            RefreshInterlock();
-        };
-        _statusTimer.Start();
+        _interlockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _interlockTimer.Tick += (_, _) => RefreshInterlock();
+        _interlockTimer.Start();
         RefreshInterlock();
     }
 
@@ -291,7 +267,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         IsBusy = true;
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(500, _tcp.TimeoutMs)));
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(500, _cfg.TimeoutMs)));
             TcpClientPose? pose = IncludeTriggerPose
                 ? new TcpClientPose(TriggerPoseX, TriggerPoseY, TriggerPoseRz)
                 : null;
@@ -375,10 +351,80 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
     {
         if (value)
             _showingSnapshot = false;
+        UpdatePreviewTimerState();
     }
 
-    private void HandlePreviewFailure(string statusMessage)
+    partial void OnMonitorActiveChanged(bool value) => UpdatePreviewTimerState();
+
+    partial void OnSelectedCameraChanged(string? value)
     {
+        if (MonitorActive)
+            InvalidatePreviewSession();
+    }
+
+    private void OnPreviewTimerTick(object? sender, EventArgs e)
+    {
+        var tick = GrabPreviewAsync();
+        _previewInFlightTask = tick;
+        UiFireAndForget.Run(tick, _log);
+    }
+
+    private void UpdatePreviewTimerState()
+    {
+        if (MonitorActive && PreviewEnabled)
+        {
+            ResetPreviewCancellation();
+            if (!_previewTimer.IsEnabled)
+                _previewTimer.Start();
+            return;
+        }
+
+        _previewTimer.Stop();
+        InvalidatePreviewSession();
+    }
+
+    private void InvalidatePreviewSession()
+    {
+        Interlocked.Increment(ref _previewGeneration);
+        CancelPreviewCts();
+    }
+
+    private void ResetPreviewCancellation()
+    {
+        CancelPreviewCts();
+        _previewCts = new CancellationTokenSource();
+    }
+
+    private void CancelPreviewCts()
+    {
+        var cts = _previewCts;
+        if (cts is null)
+            return;
+
+        _previewCts = null;
+        try
+        {
+            cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        cts.Dispose();
+    }
+
+    private bool CanApplyPreviewFrame(int generation, string cameraId) =>
+        MonitorActive &&
+        PreviewEnabled &&
+        !_showingSnapshot &&
+        generation == Volatile.Read(ref _previewGeneration) &&
+        string.Equals(SelectedCamera, cameraId, StringComparison.OrdinalIgnoreCase);
+
+    private void HandlePreviewFailure(string statusMessage, int generation, string cameraId)
+    {
+        if (!CanApplyPreviewFrame(generation, cameraId))
+            return;
+
         PreviewEnabled = false;
         StatusText = statusMessage + " · 已自动停止预览";
     }
@@ -391,59 +437,39 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         if (Interlocked.Exchange(ref _previewBusy, 1) == 1)
             return;
 
+        var generation = Volatile.Read(ref _previewGeneration);
         var cameraId = SelectedCamera;
+        var ct = _previewCts?.Token ?? CancellationToken.None;
         try
         {
             var recipeName = SelectedRecipe;
-            var image = await Task.Run(() =>
-            {
-                var frame = _cameras.Grab(cameraId!);
-                try
-                {
-                    string? stationId = null;
-                    if (!string.IsNullOrEmpty(recipeName))
-                    {
-                        try { stationId = _recipes.Get(recipeName).StationId; }
-                        catch { /* 预览不因配方无效失败 */ }
-                    }
+            var buffer = await Task.Run(
+                () => _preview.GrabDisplayFrame(cameraId!, recipeName, ct),
+                ct).ConfigureAwait(true);
 
-                    if (!string.IsNullOrEmpty(stationId) && _calibration.HasPolynomial(stationId))
-                        return frame.Image.Clone();
-                    if (_calibration.IsCalibrated(cameraId))
-                        return _calibration.Undistort(cameraId, frame.Image);
-                    return frame.Image.Clone();
-                }
-                finally
-                {
-                    frame.Dispose();
-                }
-            });
+            if (ct.IsCancellationRequested || !CanApplyPreviewFrame(generation, cameraId!))
+                return;
 
-            BitmapSource source;
-            try
-            {
-                source = ImageConverter.ToBitmapSource(image);
-            }
-            finally
-            {
-                image.Dispose();
-            }
+            var source = ImageConverter.ToBitmapSource(buffer);
 
             UiDispatch.Begin(() =>
             {
-                if (_showingSnapshot)
+                if (!CanApplyPreviewFrame(generation, cameraId!))
                     return;
                 DisplayImage = source;
                 StatusText = $"预览中 · {cameraId}";
             });
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
         catch (VisionException vex)
         {
-            UiDispatch.Begin(() => HandlePreviewFailure(FormatPreviewError(cameraId!, vex)));
+            UiDispatch.Begin(() => HandlePreviewFailure(FormatPreviewError(cameraId!, vex), generation, cameraId!));
         }
         catch (Exception ex)
         {
-            UiDispatch.Begin(() => HandlePreviewFailure($"预览失败 · {cameraId}: {ex.Message}"));
+            UiDispatch.Begin(() => HandlePreviewFailure($"预览失败 · {cameraId}: {ex.Message}", generation, cameraId!));
         }
         finally
         {
@@ -473,7 +499,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
                 var hints = _cfg.MonitorOverlayMode == MonitorOverlayMode.MatchRecipeTest
                     ? snapshot.DisplayHints
                     : RecipeDisplayHints.Production;
-                FrameOverlayComposer.Compose(snapshot.UndistortedImage, snapshot.Poses, hints);
+                _overlay.Compose(snapshot.UndistortedImage, snapshot.Poses, hints);
                 source = ImageConverter.ToBitmapSource(snapshot.UndistortedImage);
             }
 
@@ -518,6 +544,7 @@ public partial class MainViewModel : ObservableObject, ICommitPendingEdits, IDis
         _vision.FrameProcessed -= OnFrameProcessed;
         _sink.EntryAdded -= OnLogEntry;
         _previewTimer.Stop();
-        _statusTimer.Stop();
+        InvalidatePreviewSession();
+        _interlockTimer.Stop();
     }
 }

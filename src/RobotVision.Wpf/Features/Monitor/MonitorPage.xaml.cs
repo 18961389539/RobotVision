@@ -8,13 +8,13 @@ namespace RobotVision.WpfHost.Features.Monitor;
 
 public partial class MonitorPage : Page
 {
-    private readonly MainViewModel _vm;
+    private readonly MonitorViewModel _vm;
     private NotifyCollectionChangedEventHandler? _logsChanged;
 
-    public MonitorPage(MainViewModel viewModel)
+    public MonitorPage(MonitorViewModel viewModel)
     {
         _vm = viewModel;
-        ViewModelPageLifetime.Attach(this, viewModel, disposeViewModelOnUnload: false, onUnloading: () =>
+        ViewModelPageLifetime.Attach(this, viewModel, onUnloading: () =>
         {
             _vm.MonitorActive = false;
             DetachLogSubscription();

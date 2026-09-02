@@ -6,7 +6,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure.Communication;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Communication;
@@ -14,7 +13,7 @@ namespace RobotVision.WpfHost.Features.Communication;
 /// <summary>连接列表行：统计随请求事件实时更新。</summary>
 public partial class ClientRow : ObservableObject
 {
-    public ClientRow(TcpClientSnapshot snapshot)
+    public ClientRow(TcpClientView snapshot)
     {
         Id = snapshot.Id;
         Remote = snapshot.Remote;
@@ -155,8 +154,7 @@ public partial class CommunicationViewModel : ObservableObject, IDisposable
 
     public void StopTimer() => _timer.Stop();
 
-    /// <summary>进程退出时由 DI 容器级联调用（单例 VM）：退订挂在长命 TcpServerManager 上的 4 个事件，
-    /// 否则套接字线程会一直向已死的 VM 封送 UI 更新。</summary>
+    /// <summary>页面 Unload 时退订 TCP 事件并停表。</summary>
     public void Dispose()
     {
         _tcp.ClientConnected -= OnClientConnected;
@@ -166,10 +164,10 @@ public partial class CommunicationViewModel : ObservableObject, IDisposable
         _timer.Stop();
     }
 
-    private void OnClientConnected(TcpClientSnapshot snapshot) =>
+    private void OnClientConnected(TcpClientView snapshot) =>
         Dispatch(() => Clients.Add(new ClientRow(snapshot)));
 
-    private void OnClientDisconnected(TcpClientSnapshot snapshot) => Dispatch(() =>
+    private void OnClientDisconnected(TcpClientView snapshot) => Dispatch(() =>
     {
         for (var i = 0; i < Clients.Count; i++)
         {
@@ -181,7 +179,7 @@ public partial class CommunicationViewModel : ObservableObject, IDisposable
         }
     });
 
-    private void OnRequestStarted(TcpRequestRecord record) => Dispatch(() =>
+    private void OnRequestStarted(TcpRequestView record) => Dispatch(() =>
     {
         var row = Clients.FirstOrDefault(c => c.Id == record.ClientId);
         if (row is not null)
@@ -199,7 +197,7 @@ public partial class CommunicationViewModel : ObservableObject, IDisposable
         NotifyLists();
     });
 
-    private void OnRequestProcessed(TcpRequestRecord record) => Dispatch(() =>
+    private void OnRequestProcessed(TcpRequestView record) => Dispatch(() =>
     {
         var row = Clients.FirstOrDefault(c => c.Id == record.ClientId);
         if (row is not null)
@@ -231,7 +229,7 @@ public partial class CommunicationViewModel : ObservableObject, IDisposable
         NotifyLists();
     });
 
-    private static RequestRow ToRow(TcpRequestRecord record) => new(
+    private static RequestRow ToRow(TcpRequestView record) => new(
         record.Time, record.ClientId, record.Client,
         record.Request, record.Reply, record.Ok, record.ElapsedMs);
 
@@ -287,19 +285,7 @@ public partial class CommunicationViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasPlcDebugWarning));
         OnPropertyChanged(nameof(PlcDebugWarningText));
 
-        if (_vision.AnyInhibited)
-        {
-            var locked = stats.Where(s => s.ConsecutiveFails >= Math.Max(1, _vision.ConsecutiveFailLimit))
-                .Select(s => $"{s.Recipe}×{s.ConsecutiveFails}")
-                .ToList();
-            InterlockText = locked.Count == 0
-                ? "连续失败联锁已触发（1018）。排除现场问题后点「解除联锁」。"
-                : $"连续失败联锁：{string.Join("、", locked)}。TRIGGER 返回 1018，排除后点「解除联锁」。";
-        }
-        else
-        {
-            InterlockText = "";
-        }
+        InterlockText = InterlockBannerText.Format(_vision, includeTcpHint: true);
 
         OnPropertyChanged(nameof(HasInterlock));
         OnPropertyChanged(nameof(HasPlcDebugWarning));

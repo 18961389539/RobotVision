@@ -13,12 +13,13 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="FluentAssertions" />
-    <PackageReference Include="NSubstitute" />
     <PackageReference Include="coverlet.collector" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\RobotVision.Wpf\RobotVision.Wpf.csproj" />
+    <ProjectReference Include="..\..\src\RobotVision.Hosting\RobotVision.Hosting.csproj" />
+    <ProjectReference Include="..\..\src\RobotVision.Infrastructure\RobotVision.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\RobotVision.Teach\RobotVision.Teach.csproj" />
   </ItemGroup>
 

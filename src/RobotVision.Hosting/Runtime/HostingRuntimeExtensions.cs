@@ -17,11 +17,24 @@ public static class HostingRuntimeExtensions
         services.AddSingleton<ICalibrationRuntime>(sp => new CalibrationRuntime(sp.GetRequiredService<CalibrationManager>()));
         services.AddSingleton<ILightingRuntime>(sp => new LightingRuntime(sp.GetRequiredService<LightingManager>()));
         services.AddSingleton<IModelRuntime>(sp => new ModelRuntime(sp.GetRequiredService<ModelManager>()));
+        services.AddSingleton<IInferenceRuntime>(sp => new InferenceRuntime(sp.GetRequiredService<IInferenceEngineFactory>()));
+        services.AddSingleton<IRecipeSetupAnalysisService, RecipeSetupAnalysisService>();
+        services.AddSingleton<IMaskTemplateTeachService, MaskTemplateTeachService>();
+        services.AddSingleton<IImageFileReader, ImageFileReader>();
+        services.AddSingleton<IMonitorPreviewService, MonitorPreviewService>();
+        services.AddSingleton<ICalibrationWizardService>(sp => new CalibrationWizardService(
+            sp.GetRequiredService<ICameraRuntime>(),
+            sp.GetRequiredService<ICalibrationRuntime>()));
+        services.AddSingleton<IModelTestService>(sp => new ModelTestService(sp.GetRequiredService<ModelManager>()));
+        services.AddSingleton<ISegmentRefineGuidance, SegmentRefineGuidance>();
         services.AddSingleton<ITcpRuntime>(sp => new TcpRuntime(sp.GetRequiredService<TcpServerManager>()));
         services.AddSingleton<IAngleStrategyCatalog>(sp =>
             new AngleStrategyCatalog(sp.GetRequiredService<AngleStrategyTypeRegistry>()));
         return services;
     }
+
+    public static IInferenceRuntime AsInferenceRuntime(this IInferenceEngineFactory factory) =>
+        new InferenceRuntime(factory);
 
     public static ICameraRuntime AsRuntimeFacade(this CameraManager manager) => new CameraRuntime(manager);
 

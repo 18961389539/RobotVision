@@ -5,7 +5,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using ImageViewer.Models;
 using RobotVision.Core.Models;
-using ViewerControl = ImageViewer.Controls.ImageViewer;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
@@ -17,8 +17,8 @@ internal sealed class RecipeRoiLiveSync : IDisposable
     private enum LiveRoiKind { Detection, Template }
 
     private readonly RecipeRoiEditor _roi;
-    private readonly Func<ViewerControl> _activeViewer;
-    private readonly IReadOnlyList<ViewerControl> _viewers;
+    private readonly Func<IRoiViewport> _activeViewport;
+    private readonly IReadOnlyList<IRoiViewport> _viewports;
     private readonly Func<Roi?> _detectionRoi;
     private readonly Func<Roi?> _templateRoi;
     private readonly Func<bool> _usesFeatureTeachRoi;
@@ -34,16 +34,16 @@ internal sealed class RecipeRoiLiveSync : IDisposable
 
     public RecipeRoiLiveSync(
         RecipeRoiEditor roi,
-        Func<ViewerControl> activeViewer,
-        IReadOnlyList<ViewerControl> viewers,
+        Func<IRoiViewport> activeViewport,
+        IReadOnlyList<IRoiViewport> viewports,
         Func<Roi?> detectionRoi,
         Func<Roi?> templateRoi,
         Func<bool> usesFeatureTeachRoi,
         Func<bool> showTemplateRoi)
     {
         _roi = roi;
-        _activeViewer = activeViewer;
-        _viewers = viewers;
+        _activeViewport = activeViewport;
+        _viewports = viewports;
         _detectionRoi = detectionRoi;
         _templateRoi = templateRoi;
         _usesFeatureTeachRoi = usesFeatureTeachRoi;
@@ -74,8 +74,8 @@ internal sealed class RecipeRoiLiveSync : IDisposable
             return;
         _wired = true;
         _roi.PropertyChanged += OnRoiPropertyChanged;
-        foreach (var viewer in _viewers)
-            viewer.ViewerState.RectRois.CollectionChanged += OnRoiCollectionChanged;
+        foreach (var viewport in _viewports)
+            viewport.RectRoisChanged += OnRoiCollectionChanged;
     }
 
     public void Unwire()
@@ -84,8 +84,8 @@ internal sealed class RecipeRoiLiveSync : IDisposable
             return;
         _wired = false;
         _roi.PropertyChanged -= OnRoiPropertyChanged;
-        foreach (var viewer in _viewers)
-            viewer.ViewerState.RectRois.CollectionChanged -= OnRoiCollectionChanged;
+        foreach (var viewport in _viewports)
+            viewport.RectRoisChanged -= OnRoiCollectionChanged;
         ClearAllLiveRects();
     }
 
@@ -97,7 +97,7 @@ internal sealed class RecipeRoiLiveSync : IDisposable
     {
         if (_drawTarget == LiveRoiKind.Template)
             _roi.EnsureFeatureRoiDrawable();
-        _activeViewer().StartRoiMode();
+        _activeViewport().StartRoiMode();
     }
 
     public void OnPreviewImageReady()
@@ -323,7 +323,7 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         };
         StyleLiveRect(rect, isTemplate);
         rect.PropertyChanged += OnLiveRectPropertyChanged;
-        _activeViewer().ViewerState.AddRoi(rect);
+        _activeViewport().AddRoi(rect);
         return rect;
     }
 
@@ -349,8 +349,8 @@ internal sealed class RecipeRoiLiveSync : IDisposable
 
     private void RemoveRoiFromAll(RotatedRect rect)
     {
-        foreach (var viewer in _viewers)
-            viewer.ViewerState.RemoveRoi(rect);
+        foreach (var viewport in _viewports)
+            viewport.RemoveRoi(rect);
     }
 
     private void DetachRect(ref RotatedRect? slot)

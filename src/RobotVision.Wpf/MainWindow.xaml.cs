@@ -6,7 +6,7 @@ namespace RobotVision.WpfHost;
 
 public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 {
-    public MainWindow(MainViewModel shellViewModel, IPageService pageService)
+    public MainWindow(ShellViewModel shellViewModel, IPageService pageService)
     {
         InitializeComponent();
         DataContext = shellViewModel;
@@ -16,7 +16,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     protected override void OnClosed(EventArgs e)
     {
-        if (DataContext is MainViewModel vm)
+        if (DataContext is ShellViewModel vm)
             vm.Dispose();
         base.OnClosed(e);
     }

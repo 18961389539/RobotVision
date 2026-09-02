@@ -42,5 +42,6 @@ BenchmarkDotNet.Artifacts/
 /_recovered_maskcaliper/
 /build-*.txt
 
-# Visual Studio WPF 临时工程文件（编辑 XAML 时生成）
-*_wpftmp.csproj
+# 本机开发覆盖（从 appsettings.Development.json.example 复制）
+appsettings.Development.json
+

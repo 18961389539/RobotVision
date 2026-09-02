@@ -3,15 +3,16 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
-using OpenCvSharp;
 using RobotVision.Core;
+using RobotVision.Core.IO;
 using RobotVision.Core.Models;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure;
-using RobotVision.Infrastructure.Inference;
+using RobotVision.Core.Inference;
 using RobotVision.WpfHost.Shared;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -29,7 +30,7 @@ public sealed record TaskOption(InferenceTask Value, string Label);
 /// 测试推理不经过配方/相机/标定链路：选模型 + 选图片直接跑，用于验证模型本身
 /// （框/掩码/关键点）。测试走 <see cref="ModelManager"/> 会话（与产线同锁、同 GPU 会话），
 /// 避免另开引擎抢核显；探测任务类型仍用工厂短加载。
-/// 测试参数（模型/任务/阈值/图片目录）持久化到 exe 旁 model-test.prefs.json。
+/// 测试参数（模型/任务/阈值/图片目录）在变更后防抖写入 model-test.prefs.json（原子落盘）。
 /// </summary>
 public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
@@ -53,9 +54,13 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
     public Action? FlushPendingEdits { get; set; }
 
     private readonly IModelRuntime _models;
-    private readonly IInferenceEngineFactory _engineFactory;
+    private readonly IInferenceRuntime _inference;
+    private readonly IModelTestService _modelTest;
+    private readonly IImageFileReader _imageFiles;
     private readonly IDialogService _dialogs;
     private readonly ILogger<ModelsViewModel> _log;
+    private readonly DispatcherTimer _prefsSaveTimer;
+    private CancellationTokenSource? _refreshCts;
 
     public ObservableCollection<ModelFileItem> Files { get; } = [];
 
@@ -171,8 +176,17 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
     {
         if (value is null)
             return;
+        ScheduleSavePrefs();
         UiFireAndForget.Run(ApplyAutoTaskForSelectedModelAsync, _log);
     }
+
+    partial void OnSelectedTaskChanged(InferenceTask value) => ScheduleSavePrefs();
+
+    partial void OnConfidenceChanged(double value) => ScheduleSavePrefs();
+
+    partial void OnPixelConfidenceChanged(double value) => ScheduleSavePrefs();
+
+    partial void OnIouChanged(double value) => ScheduleSavePrefs();
 
     /// <summary>选中模型后自动匹配推理任务（已缓存会话 → 文件名启发式 → ONNX 元数据）。</summary>
     private async Task ApplyAutoTaskForSelectedModelAsync()
@@ -199,7 +213,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
         }
 
         // 2) 文件名启发式（即时）
-        var guess = InferenceTaskDetector.GuessFromFileName(file.Name);
+        var guess = InferenceTaskNaming.GuessFromFileName(file.Name);
         if (guess is InferenceTask guessed)
             SelectedTask = guessed;
 
@@ -224,7 +238,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
             var detected = await Task.Run(() =>
             {
                 cts.Token.ThrowIfCancellationRequested();
-                return _engineFactory.DetectTask(path);
+                return _inference.DetectTask(path);
             }, cts.Token);
 
             if (cts.IsCancellationRequested || !ReferenceEquals(SelectedFile, file))
@@ -253,32 +267,67 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
 
     public ModelsViewModel(
         IModelRuntime models,
-        IInferenceEngineFactory engineFactory,
+        IInferenceRuntime inference,
+        IModelTestService modelTest,
+        IImageFileReader imageFiles,
         IDialogService dialogs,
         ILogger<ModelsViewModel> log)
     {
         _models = models;
-        _engineFactory = engineFactory;
+        _inference = inference;
+        _modelTest = modelTest;
+        _imageFiles = imageFiles;
         _dialogs = dialogs;
         _log = log;
         LoadPrefs();
-        Refresh();
-        // 恢复上次选择的模型（不存在时保持 Refresh 选中的第一个）
-        var last = _lastModel;
-        if (!string.IsNullOrEmpty(last))
-            SelectedFile = Files.FirstOrDefault(f => string.Equals(f.Name, last, StringComparison.OrdinalIgnoreCase))
-                           ?? SelectedFile;
+        _prefsSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _prefsSaveTimer.Tick += (_, _) =>
+        {
+            _prefsSaveTimer.Stop();
+            SavePrefs();
+        };
     }
 
     private string? _lastModel;
 
     [RelayCommand]
-    public void Refresh()
+    public void Refresh() => ScheduleRefresh();
+
+    public void ScheduleRefresh() => UiFireAndForget.Run(RefreshAsync, _log);
+
+    public async Task RefreshAsync()
     {
-        // Clear 会使 ListBox 绑定把 SelectedFile 置空，须先记下名称再恢复选中项
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        var cts = _refreshCts = new CancellationTokenSource();
+        var token = cts.Token;
         var selectedName = SelectedFile?.Name;
+        var lastModel = _lastModel;
+
+        (List<ModelFileItem> files, string message) snapshot;
+        try
+        {
+            snapshot = await Task.Run(() => BuildFileListSnapshot(token), token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested)
+            return;
 
         Files.Clear();
+        foreach (var item in snapshot.files)
+            Files.Add(item);
+
+        SelectedFile = ListSelection.Restore(Files, selectedName ?? lastModel, f => f.Name);
+        Message = snapshot.message;
+    }
+
+    private (List<ModelFileItem> Files, string Message) BuildFileListSnapshot(CancellationToken ct)
+    {
+        var files = new List<ModelFileItem>();
         var groups = _models.LoadedKeys
             .GroupBy(k => k.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -294,8 +343,9 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
                          .EnumerateFiles("*.onnx")
                          .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
             {
+                ct.ThrowIfCancellationRequested();
                 var loadedText = loaded.TryGetValue(file.FullName, out var tasks) ? tasks : "未加载";
-                Files.Add(new ModelFileItem(
+                files.Add(new ModelFileItem(
                     file.Name,
                     $"{file.Length / 1024.0 / 1024.0:0.0} MB",
                     file.LastWriteTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
@@ -304,14 +354,12 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
             }
         }
 
-        SelectedFile = ListSelection.Restore(Files, selectedName, f => f.Name);
-
-        // 同一文件被多个任务打开时各占一份会话内存（缓存键含任务），提示用户代价
         var multiTask = groups.Count(g => g.Count() > 1);
-        Message = Directory.Exists(folder)
-            ? $"{Files.Count} 个模型文件 · 已缓存会话 {_models.LoadedCount} 个"
+        var message = Directory.Exists(folder)
+            ? $"{files.Count} 个模型文件 · 已缓存会话 {_models.LoadedCount} 个"
               + (multiTask > 0 ? $" · {multiTask} 个文件多任务双份缓存" : "")
             : $"模型目录不存在: {folder}";
+        return (files, message);
     }
 
     [RelayCommand]
@@ -328,7 +376,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
         }
         var name = SelectedFile.Name;
         _models.UnloadAll(name);
-        Refresh();
+        ScheduleRefresh();
         Message = $"已卸载 {name} 的推理会话（下次推理时重新加载）";
     }
 
@@ -337,8 +385,8 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
     private void UnloadAll()
     {
         var count = _models.LoadedCount;
-        _models.UnloadAll();
-        Refresh();
+        _models.        UnloadAll();
+        ScheduleRefresh();
         Message = count > 0
             ? $"已卸载全部 {count} 个推理会话"
             : "当前没有已加载的推理会话";
@@ -358,7 +406,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
         _folderResults = [];
         FolderResultIndex = 0;
         ResultImage = null;
-        SavePrefs();
+        ScheduleSavePrefs();
     }
 
     [RelayCommand(CanExecute = nameof(CanShowPrevFolderResult))]
@@ -379,6 +427,19 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
     {
         OnPropertyChanged(nameof(TestImageFileCount));
         OnPropertyChanged(nameof(TestImageFolderHint));
+        ScheduleSavePrefs();
+    }
+
+    private void ScheduleSavePrefs()
+    {
+        _prefsSaveTimer.Stop();
+        _prefsSaveTimer.Start();
+    }
+
+    internal void FlushPrefsForTests()
+    {
+        _prefsSaveTimer.Stop();
+        SavePrefs();
     }
 
     partial void OnFolderResultIndexChanged(int value) => ApplyFolderResultAtIndex();
@@ -441,44 +502,25 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
 
             var batch = await Task.Run(() =>
             {
-                var results = new List<FolderTestResult>(images.Count);
+                var serviceResults = _modelTest.RunFolderTest(
+                    new ModelFolderTestRequest(model, task, images, confidence, pixelConfidence, iou),
+                    cts.Token);
+                var results = new List<FolderTestResult>(serviceResults.Count);
                 var totalDetections = 0;
-                var session = _models.Open(model, task);
-                session.Run(engine =>
+                foreach (var item in serviceResults)
                 {
-                    InferenceTaskValidation.EnsureSupported(engine, task);
-                    return 0;
-                });
-
-                for (var i = 0; i < images.Count; i++)
-                {
-                    cts.Token.ThrowIfCancellationRequested();
-                    var path = images[i];
-                    var fileName = Path.GetFileName(path);
-                    try
+                    ImageSource? source = null;
+                    if (item.Image is { } buffer)
                     {
-                        using var mat = Cv2.ImDecode(File.ReadAllBytes(path), ImreadModes.Color);
-                        if (mat.Empty())
-                            throw new InvalidOperationException("图片解码失败");
-
-                        using var image = VisionImageCv.FromMat(mat, ownsMat: false);
-                        var detected = session.Run(engine => task switch
-                        {
-                            InferenceTask.ObjectDetection => DrawDetections(engine, image, mat, confidence, iou),
-                            InferenceTask.Segmentation => DrawSegmentations(engine, image, mat, confidence, pixelConfidence, iou),
-                            InferenceTask.PoseEstimation => DrawPoses(engine, image, mat, confidence, iou),
-                            _ => 0,
-                        });
-                        var source = ImageConverter.ToBitmapSource(mat);
+                        source = ImageConverter.ToBitmapSource(buffer);
                         if (source.CanFreeze)
                             source.Freeze();
-                        results.Add(new FolderTestResult(fileName, source, detected, mat.Width, mat.Height, null));
-                        totalDetections += detected;
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        results.Add(new FolderTestResult(fileName, null, 0, 0, 0, ex.Message));
-                    }
+
+                    results.Add(new FolderTestResult(
+                        item.FileName, source, item.DetectionCount,
+                        item.Image?.Width ?? 0, item.Image?.Height ?? 0, item.Error));
+                    totalDetections += item.DetectionCount;
                 }
 
                 return (results, totalDetections);
@@ -527,7 +569,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
         {
             var prefs = new TestPrefs(SelectedFile?.Name, TestImageFolder, SelectedTask,
                 Confidence, PixelConfidence, Iou);
-            File.WriteAllText(PrefsPath, JsonSerializer.Serialize(prefs));
+            AtomicFile.WriteAllText(PrefsPath, JsonSerializer.Serialize(prefs));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -575,23 +617,15 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-    private static BitmapSource? TryLoadPreviewImage(string path)
+    private BitmapSource? TryLoadPreviewImage(string path)
     {
-        try
-        {
-            using var mat = Cv2.ImDecode(File.ReadAllBytes(path), ImreadModes.Color);
-            if (mat.Empty())
-                return null;
-
-            var source = ImageConverter.ToBitmapSource(mat);
-            if (source.CanFreeze)
-                source.Freeze();
-            return source;
-        }
-        catch
-        {
+        var buffer = _imageFiles.TryReadColorImage(path);
+        if (buffer is null)
             return null;
-        }
+        var source = ImageConverter.ToBitmapSource(buffer);
+        if (source.CanFreeze)
+            source.Freeze();
+        return source;
     }
 
     private void ApplyFolderResultAtIndex()
@@ -618,28 +652,6 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
         OnPropertyChanged(nameof(FolderResultPosition));
     }
 
-    private static int DrawDetections(IInferenceEngine engine, VisionImage image, Mat mat, double confidence, double iou)
-    {
-        var results = engine.RunObjectDetection(image, confidence, iou);
-        ModelTestOverlay.DrawDetections(mat, results);
-        return results.Count;
-    }
-
-    private static int DrawSegmentations(IInferenceEngine engine, VisionImage image, Mat mat,
-        double confidence, double pixelConfidence, double iou)
-    {
-        var results = engine.RunSegmentation(image, confidence, pixelConfidence, iou);
-        ModelTestOverlay.DrawSegmentations(mat, results);
-        return results.Count;
-    }
-
-    private static int DrawPoses(IInferenceEngine engine, VisionImage image, Mat mat, double confidence, double iou)
-    {
-        var results = engine.RunPoseEstimation(image, confidence, iou);
-        ModelTestOverlay.DrawPoses(mat, results, confidence);
-        return results.Count;
-    }
-
     private static string TaskLabel(InferenceTask task) => task switch
     {
         InferenceTask.ObjectDetection => "检测",
@@ -650,6 +662,11 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
 
     public void Dispose()
     {
+        _prefsSaveTimer.Stop();
+        SavePrefs();
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
         _testCts?.Cancel();
         _testCts?.Dispose();
         _testCts = null;

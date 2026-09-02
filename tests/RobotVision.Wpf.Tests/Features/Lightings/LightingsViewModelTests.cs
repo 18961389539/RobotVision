@@ -31,9 +31,13 @@ public sealed class LightingsViewModelTests : IDisposable
         _dir.Dispose();
     }
 
-    private LightingsViewModel CreateVm() =>
-        new(_cfg, TestInfra.LightingFacade(_lighting), _store, _recipes,
+    private LightingsViewModel CreateVm()
+    {
+        var vm = new LightingsViewModel(_cfg, TestInfra.LightingFacade(_lighting), _store, _recipes,
             LightControllerTypeRegistry.CreateDefault(), new TestDialogService(), TestLog.Null<LightingsViewModel>());
+        vm.Refresh();
+        return vm;
+    }
 
     [Fact]
     public void Ctor_LoadsConfiguredControllers()

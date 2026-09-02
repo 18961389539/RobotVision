@@ -3,16 +3,12 @@ using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenCvSharp;
 using RobotVision.Core;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure;
-using RobotVision.Infrastructure.Cameras;
-using RobotVision.Infrastructure.Inference;
-using RobotVision.Infrastructure.Inference.Strategies;
 using RobotVision.Teach;
+using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 /// <summary>
@@ -25,6 +21,7 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
     private readonly IModelRuntime _models;
     private readonly ICalibrationRuntime _calibration;
     private readonly ILightingRuntime _lighting;
+    private readonly IRecipeSetupAnalysisService _analysis;
     private readonly RecipeRoiEditor _roi;
     private readonly RecipeTestSession _test;
 
@@ -38,7 +35,7 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
     private TabPolarityLock _tabPolarity;
     private Roi? _featureRoi;
     private IReadOnlyList<FeatureRoiCandidate> _featureRanks = [];
-    private Mat? _previewBase;
+    private BgraImageBuffer? _previewBuffer;
     private ImageSource? _previewBitmap;
     private bool _syncingFeature;
     private PlaybookAdvice? _playbook;
@@ -47,6 +44,7 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
     private bool _userPicked;
     private bool _syncingSelection;
     private bool _subscriptionsDetached;
+    private readonly PageAsyncSession _pageSession = new();
 
     public RecipeSetupWizardViewModel(
         IRecipeWorkspace host,
@@ -54,6 +52,7 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
         IModelRuntime models,
         ICalibrationRuntime calibration,
         ILightingRuntime lighting,
+        IRecipeSetupAnalysisService analysis,
         RecipeRoiEditor roi,
         RecipeTestSession test)
     {
@@ -62,6 +61,7 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
         _models = models;
         _calibration = calibration;
         _lighting = lighting;
+        _analysis = analysis;
         _roi = roi;
         _test = test;
         _test.PropertyChanged += OnTestPropertyChanged;
@@ -89,6 +89,7 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
 
     public void Dispose()
     {
+        _pageSession.Deactivate();
         DetachForClose();
         ReleasePreview();
         GC.SuppressFinalize(this);
@@ -266,8 +267,8 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
             : "点「试触发」验证当前建议参数。满意后点「完成并写入编辑器」。保存配方仍须在主页面。";
 
     public bool HasFeatureOverlay => FeatureOverlayRoi is not null;
-    public int PreviewPixelWidth => _previewBase?.Width ?? 0;
-    public int PreviewPixelHeight => _previewBase?.Height ?? 0;
+    public int PreviewPixelWidth => _previewBuffer?.Width ?? 0;
+    public int PreviewPixelHeight => _previewBuffer?.Height ?? 0;
 
     public event Action? RequestBeginDetectionRoiDraw;
     public event Action? RequestBeginFeatureRoiDraw;
@@ -299,9 +300,9 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
                 return "已勾选双 BLOB：可不跑分割。可取一张预览，或直接「按任务继续」。";
             if (_host.Editor.Models.Count == 0 || string.IsNullOrWhiteSpace(_host.Editor.Models[0]))
                 return "未选分割模型：回配方选择模型，或到任务勾选双 BLOB / 双特征。";
-            if (IsFileCamera)
+            if (HasPlaybackFiles)
             {
-                var n = TryPlaybackFiles()?.Count ?? 0;
+                var n = _cameras.GetPlaybackFiles(_host.Editor.CameraId)?.Count ?? 0;
                 return ScoreAllPlayback
                     ? $"文件夹相机，将分析目录内 {n} 张（磁盘解码，不推进产线回放下标）。"
                     : "将只分析下一张回放图。建议勾选整夹打分。";
@@ -324,11 +325,13 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
         _chosen?.Refine is { } r && TemplateOptions.UsesFeatureTeachRoi(r);
     public bool HasParamTuneRows => ParamTuneRows.Count > 0;
     public bool HasEnoughForResult => _scene is not null;
-    public bool IsFileCamera => TryPlaybackFiles() is { Count: > 0 };
+    public bool HasPlaybackFiles =>
+        !string.IsNullOrWhiteSpace(_host.Editor.CameraId)
+        && _cameras.GetPlaybackFiles(_host.Editor.CameraId) is { Count: > 0 };
     public string CameraHint =>
         string.IsNullOrWhiteSpace(_host.Editor.CameraId)
             ? "当前配方未选相机。"
-            : $"相机 {_host.Editor.CameraId}" + (IsFileCamera ? "（文件夹回放）" : "");
+            : $"相机 {_host.Editor.CameraId}" + (HasPlaybackFiles ? "（文件夹回放）" : "");
 
     public TaskConstraints Constraints => new(
         NeedDirectedAngle, TeachAllowed, AppearanceVaries, HasTwoLandmarks, UseBlobsWithoutModel,

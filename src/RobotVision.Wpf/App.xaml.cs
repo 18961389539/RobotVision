@@ -45,10 +45,13 @@ public partial class App : Application, IDisposable
     {
         base.OnStartup(e);
 
+        ApplicationPaths.EnsureUserSettings();
+
         var bootstrapCfg = new ConfigurationBuilder()
-            .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true)
+            .AddRobotVisionAppSettings()
             .Build()
             .Get<AppConfig>() ?? new AppConfig();
+        ApplicationPaths.NormalizeAppConfig(bootstrapCfg);
         AppThemeManager.Apply(bootstrapCfg.UiTheme);
 
         // 离屏快照模式：渲染主窗口到 PNG 后退出（不启动 TCP，避免与运行实例抢端口）
@@ -68,11 +71,14 @@ public partial class App : Application, IDisposable
         // 重入保护：MessageBox 自带嵌套消息泵，期间的新异常不允许再弹框（否则递归至栈溢出）
         DispatcherUnhandledException += OnDispatcherUnhandledException;
 
+        ApplicationPaths.EnsureUserSettings();
+
         var builder = Host.CreateApplicationBuilder();
-        builder.Configuration.AddJsonFile(
-            Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true, reloadOnChange: false);
+        builder.Configuration.AddJsonFile(ApplicationPaths.UserSettingsPath, optional: true, reloadOnChange: false);
+        builder.Configuration.AddJsonFile(ApplicationPaths.DevelopmentSettingsPath, optional: true, reloadOnChange: false);
 
         var cfg = builder.Configuration.Get<AppConfig>() ?? new AppConfig();
+        ApplicationPaths.NormalizeAppConfig(cfg);
         DataRootBinder.Apply(cfg);
         builder.Logging.AddRobotVisionFileLogging(cfg);
         builder.Services.AddRobotVision(cfg);
@@ -88,23 +94,31 @@ public partial class App : Application, IDisposable
         _host = builder.Build();
         _logger = _host.Services.GetRequiredService<ILogger<App>>();
 
-        var shellViewModel = _host.Services.GetRequiredService<MainViewModel>();
+        var shellViewModel = _host.Services.GetRequiredService<ShellViewModel>();
         var pageService = _host.Services.GetRequiredService<IPageService>();
 
-        // 先显示主窗口壳，避免 CameraManager / MainViewModel 组装期间长时间无界面
+        // 先显示主窗口壳，避免 CameraManager 组装期间长时间无界面
         var window = new MainWindow(shellViewModel, pageService);
         MainWindow = window;
         window.Show();
 
-        // 服务在首帧渲染后继续（仍可能在绑定 DataContext 时短暂卡顿，但窗口已可见）
+        // 服务在首帧渲染后继续：配方扫描放到后台，避免阻塞 UI 消息泵
         Dispatcher.BeginInvoke(() =>
         {
-            var logger = _host.Services.GetRequiredService<ILogger<App>>();
-            var recipeErrors = _host.Services.GetRequiredService<RobotVision.Core.Recipe.RecipeLoader>().LoadAll();
-            foreach (var (recipeName, error) in recipeErrors)
-                AppLog.RecipeLoadFailed(logger, recipeName, error);
+            var host = _host;
+            var logger = _logger;
+            if (host is null || logger is null)
+                return;
 
-            _host.Start();
+            UiFireAndForget.Run(async () =>
+            {
+                var loader = host.Services.GetRequiredService<RobotVision.Core.Recipe.RecipeLoader>();
+                var recipeErrors = await Task.Run(loader.LoadAll).ConfigureAwait(false);
+                foreach (var (recipeName, error) in recipeErrors)
+                    AppLog.RecipeLoadFailed(logger, recipeName, error);
+
+                await host.StartAsync().ConfigureAwait(false);
+            }, logger);
         }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
@@ -133,22 +147,36 @@ public partial class App : Application, IDisposable
 
         var host = _host;
         _host = null;
+
+        ShutdownOutcome outcome;
         try
         {
-            // 避免在 UI 线程同步等待 StopAsync 时与消息泵/同步上下文死锁
-            if (!Task.Run(() => host.StopAsync(TimeSpan.FromSeconds(5)))
-                    .Wait(TimeSpan.FromSeconds(6))
-                && _logger is not null)
-                AppLog.HostStopTimedOut(_logger);
+            var shutdownTask = Task.Run(() => ApplicationShutdownCoordinator.Shutdown(host, _logger));
+            if (!shutdownTask.Wait(ApplicationShutdownCoordinator.UiWaitBudget))
+                outcome = ShutdownOutcome.StopTimedOut;
+            else
+                outcome = shutdownTask.Result;
         }
         catch (Exception ex)
         {
             if (_logger is not null)
                 AppLog.HostStopFailed(_logger, ex);
+            outcome = ShutdownOutcome.StopFailed;
         }
-        finally
+
+        switch (outcome)
         {
-            host.Dispose();
+            case ShutdownOutcome.Completed:
+                break;
+            case ShutdownOutcome.StopTimedOut:
+            case ShutdownOutcome.DisposeTimedOut:
+                if (_logger is not null)
+                    AppLog.HostStopTimedOut(_logger);
+                break;
+            default:
+                if (_logger is not null)
+                    AppLog.HostShutdownIncomplete(_logger, outcome);
+                break;
         }
     }
 
@@ -285,7 +313,7 @@ public partial class App : Application, IDisposable
         _host = builder.Build();
 
         var sink = _host.Services.GetRequiredService<LogSink>();
-        var vm = _host.Services.GetRequiredService<MainViewModel>();
+        var vm = _host.Services.GetRequiredService<MonitorViewModel>();
         var pageService = _host.Services.GetRequiredService<IPageService>();
 
         // 示例数据：让快照呈现真实内容（日志行 + 结果行）
@@ -294,7 +322,7 @@ public partial class App : Application, IDisposable
         vm.Poses.Add(new PoseRow(1, 102.356, 88.412, 45.123, 0.95));
         vm.Poses.Add(new PoseRow(2, -15.004, 210.779, 132.050, 0.87));
 
-        var window = new MainWindow(vm, pageService);
+        var window = new MainWindow(_host.Services.GetRequiredService<ShellViewModel>(), pageService);
         window.Arrange(new Rect(0, 0, width, height));
         window.UpdateLayout();
 

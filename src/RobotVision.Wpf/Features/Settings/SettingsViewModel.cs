@@ -3,7 +3,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using RobotVision.Hosting;
-using RobotVision.Infrastructure.Inference;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Settings;
@@ -11,7 +10,7 @@ namespace RobotVision.WpfHost.Features.Settings;
 /// <summary>
 /// 服务参数管理：运行参数（超时/队列/连接上限/失败留存/白名单）保存即热生效；
 /// 并发槽位（MaxConcurrent）与 TCP backlog 修改需重启程序生效；
-/// 网络端点（IP/端口）保存后热重启监听（无需重启程序，失败自动回滚并提示）。
+/// 网络端点（IP/端口）先热重启监听，成功后再落盘（失败则回滚运行时、不写入 appsettings、UI 保持脏标记）。
 /// 校验集中在 AppSettingsStore（值域 + 相机取图超时联动），本页只负责展示与交互。
 /// </summary>
 public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, IDisposable
@@ -54,7 +53,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
     private readonly ResultLogStore _results;
     private readonly SuccessCaptureStore _captures;
     private readonly AppSettingsStore _store;
-    private readonly IInferenceEngineFactory? _inference;
+    private readonly IInferenceRuntime? _inference;
     private readonly IDialogService _dialogs;
     private readonly ILogger<SettingsViewModel> _log;
     private readonly DispatcherTimer _timer;
@@ -167,7 +166,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
     public string FileLoggingFolderPath => _cfg.ResolveDataPath(_cfg.FileLogging.Folder);
     public string ProcessHealthFolderPath => _cfg.ResolveDataPath(_cfg.ProcessHealth.Folder);
     public string DataRootPath =>
-        string.IsNullOrWhiteSpace(_cfg.DataRoot) ? "未设置（配方等写在程序目录）" : _cfg.ResolveDataRoot();
+        string.IsNullOrWhiteSpace(_cfg.DataRoot)
+            ? ApplicationPaths.DefaultDataRoot
+            : _cfg.ResolveDataRoot();
     public bool HasDataRoot => !string.IsNullOrWhiteSpace(_cfg.DataRoot);
 
     [ObservableProperty]
@@ -218,7 +219,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         AppSettingsStore store,
         IDialogService dialogs,
         ILogger<SettingsViewModel> log,
-        IInferenceEngineFactory? inference = null)
+        IInferenceRuntime? inference = null)
     {
         _cfg = cfg;
         _tcp = tcp;
@@ -320,8 +321,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         {
             this.Commit();
             var values = CurrentValues();
+            var rollbackBaseline = _baseline ?? values;
 
-            if (values.PlcDebugAlwaysOk && _baseline is { PlcDebugAlwaysOk: false } &&
+            if (values.PlcDebugAlwaysOk && rollbackBaseline is { PlcDebugAlwaysOk: false } &&
                 !_dialogs.ConfirmYesNo(
                     "启用后 TCP 将不再向 PLC 返回 ERR（失败时回设置的默认 OK 坐标）。\n" +
                     "视觉仍会照常采图推理，仅协议线伪装成功。\n\n" +
@@ -329,36 +331,41 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
                     "PLC 调试模式"))
                 return;
 
-            var endpointChanged = _baseline is null
-                || !string.Equals(_baseline.IpAddress, values.IpAddress, StringComparison.OrdinalIgnoreCase)
-                || _baseline.TcpPort != values.TcpPort;
+            AppSettingsStore.Validate(values);
 
-            _store.Save(values);
-
-            _tcp.TimeoutMs = values.TimeoutMs;
-            _tcp.IdleTimeoutMs = values.IdleTimeoutMs;
-            _vision.MaxQueueDepth = values.MaxQueueDepth;
-            _tcp.MaxConnections = values.MaxConnections;
-            _tcp.IpWhitelist = values.IpWhitelist;
-            _tcp.PlcAlwaysOkMode = values.PlcDebugAlwaysOk;
-            _tcp.PlcDebugDefaultX = values.PlcDebugDefaultX;
-            _tcp.PlcDebugDefaultY = values.PlcDebugDefaultY;
-            _tcp.PlcDebugDefaultRz = values.PlcDebugDefaultRz;
-            _failures.Enabled = values.FailureEnabled;
-            _failures.RetainedCount = values.FailureRetainedCount;
-            _failures.RetainedDays = values.FailureRetainedDays;
-            _captures.ApplyConfig(_cfg.CaptureSuccess);
-            _results.ApplyConfig(_cfg.ResultLog);
-            var restartNeeded = values.MaxConcurrent != _baseline?.MaxConcurrent ||
-                                values.TcpBacklog != _baseline?.TcpBacklog;
-            var restartForConfig = NeedsProgramRestart(_baseline, values);
+            var endpointChanged = !string.Equals(rollbackBaseline.IpAddress, values.IpAddress, StringComparison.OrdinalIgnoreCase)
+                || rollbackBaseline.TcpPort != values.TcpPort;
+            var restartNeeded = values.MaxConcurrent != rollbackBaseline.MaxConcurrent ||
+                                values.TcpBacklog != rollbackBaseline.TcpBacklog;
+            var restartForConfig = NeedsProgramRestart(rollbackBaseline, values);
             var endpointText = $"{values.IpAddress}:{values.TcpPort}";
+
+            ApplyHotRuntime(values);
+
+            if (endpointChanged && !_tcp.Restart(values.IpAddress, values.TcpPort))
+            {
+                ApplyHotRuntime(rollbackBaseline);
+                LoadFromRuntime();
+                Message = $"监听 {endpointText} 启动失败，未保存（当前仍监听 {_tcp.ListenEndPoint}，请检查端口占用）";
+                return;
+            }
+
+            try
+            {
+                _store.Save(values);
+            }
+            catch
+            {
+                ApplyHotRuntime(rollbackBaseline);
+                if (endpointChanged)
+                    _tcp.Restart(rollbackBaseline.IpAddress, rollbackBaseline.TcpPort);
+                throw;
+            }
+
             if (endpointChanged)
             {
-                var ok = _tcp.Restart(values.IpAddress, values.TcpPort);
-                Message = ok
-                    ? $"已保存并应用；监听已热重启到 {endpointText}（客户端将短暂断开）" + RestartSuffix(restartNeeded, restartForConfig)
-                    : $"已保存；监听 {endpointText} 启动失败，已回滚到 {_tcp.ListenEndPoint}（请检查端口占用）";
+                Message = $"已保存并应用；监听已热重启到 {endpointText}（客户端将短暂断开）"
+                          + RestartSuffix(restartNeeded, restartForConfig);
             }
             else
             {
@@ -370,8 +377,41 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         }
         catch (Exception ex)
         {
+            LoadFromRuntime();
             Message = $"保存失败: {ex.Message}";
         }
+    }
+
+    /// <summary>把可热生效的运行时参数同步到管理器（落盘前试探性应用；失败时由调用方回滚）。</summary>
+    private void ApplyHotRuntime(ServiceSettingsValues values)
+    {
+        _tcp.TimeoutMs = values.TimeoutMs;
+        _tcp.IdleTimeoutMs = values.IdleTimeoutMs;
+        _vision.MaxQueueDepth = values.MaxQueueDepth;
+        _tcp.MaxConnections = values.MaxConnections;
+        _tcp.IpWhitelist = values.IpWhitelist;
+        _tcp.PlcAlwaysOkMode = values.PlcDebugAlwaysOk;
+        _tcp.PlcDebugDefaultX = values.PlcDebugDefaultX;
+        _tcp.PlcDebugDefaultY = values.PlcDebugDefaultY;
+        _tcp.PlcDebugDefaultRz = values.PlcDebugDefaultRz;
+        _failures.Enabled = values.FailureEnabled;
+        _failures.RetainedCount = values.FailureRetainedCount;
+        _failures.RetainedDays = values.FailureRetainedDays;
+        _results.ApplyConfig(new ResultLogConfig
+        {
+            Enabled = values.ResultLogEnabled,
+            Jsonl = values.ResultLogJsonl,
+            Sqlite = values.ResultLogSqlite,
+            RetainedDays = values.ResultLogRetainedDays,
+            Folder = _cfg.ResultLog.Folder,
+        });
+        _captures.ApplyConfig(new CaptureSuccessConfig
+        {
+            Enabled = values.CaptureSuccessEnabled,
+            RetainedDays = values.CaptureSuccessRetainedDays,
+            MaxWidth = values.CaptureSuccessMaxWidth,
+            Folder = _cfg.CaptureSuccess.Folder,
+        });
     }
 
     [RelayCommand]

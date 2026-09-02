@@ -71,8 +71,13 @@ public class RecipeViewModelTests : IDisposable
 
     private RecipeViewModel CreateVm() =>
         new(_loader, _cfg, TestInfra.CameraFacade(_cameras), TestInfra.ModelFacade(_models),
-            TestInfra.CalibrationFacade(_calibration), _vision, TestInfra.LightingFacade(_lighting),
-            TestInfra.AngleCatalog(_angleRegistry), _assets, _dialogs, _recipeWindows, TestLog.Null<RecipeViewModel>());
+            TestInfra.CalibrationFacade(_calibration), TestInfra.LightingFacade(_lighting),
+            TestInfra.AngleCatalog(_angleRegistry), _assets, _dialogs, _recipeWindows,
+            TestInfra.CreateRecipeTestService(_vision, _cameras, _models, _calibration, _lighting),
+            TestInfra.MaskTeach(),
+            TestInfra.RefineGuidance(),
+            TestInfra.Overlay(),
+            TestLog.Null<RecipeViewModel>());
 
     [Fact]
     public void Ctor_LoadsRecipeList_SelectsFirst()
@@ -598,5 +603,6 @@ public class RecipeViewModelTests : IDisposable
 
     private RecipeSetupWizardViewModel CreateWizard(RecipeViewModel host) =>
         new(host, TestInfra.CameraFacade(_cameras), TestInfra.ModelFacade(_models),
-            TestInfra.CalibrationFacade(_calibration), TestInfra.LightingFacade(_lighting), host.Roi, host.Test);
+            TestInfra.CalibrationFacade(_calibration), TestInfra.LightingFacade(_lighting),
+            new NoopRecipeSetupAnalysis(), host.Roi, host.Test);
 }

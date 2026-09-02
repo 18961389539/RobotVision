@@ -30,8 +30,13 @@ public sealed class RefineMethodDetailsViewModelTests
 
         var vm = new RecipeViewModel(
             loader, cfg, TestInfra.CameraFacade(cameras), TestInfra.ModelFacade(models),
-            TestInfra.CalibrationFacade(calibration), vision, TestInfra.LightingFacade(lighting),
-            TestInfra.AngleCatalog(registry), assets, new TestDialogService(), new NullRecipeWindowService(), TestLog.Null<RecipeViewModel>());
+            TestInfra.CalibrationFacade(calibration), TestInfra.LightingFacade(lighting),
+            TestInfra.AngleCatalog(registry), assets, new TestDialogService(), new NullRecipeWindowService(),
+            TestInfra.CreateRecipeTestService(vision, cameras, models, calibration, lighting),
+            TestInfra.MaskTeach(),
+            TestInfra.RefineGuidance(),
+            TestInfra.Overlay(),
+            TestLog.Null<RecipeViewModel>());
         try
         {
             vm.Editor.Template.MatchThreshold = 0.42;

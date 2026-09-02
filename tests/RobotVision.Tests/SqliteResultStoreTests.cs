@@ -9,6 +9,7 @@ namespace RobotVision.Tests;
 /// 本机 SQLite 结果库：插入/查询/多目标位姿/筛选/超期清理。
 /// 不经管线线程；Insert 同步调用。ResultLogStore 双写通过轮询 Count 等待后台任务。
 /// </summary>
+[Collection("Serial")]
 public class SqliteResultStoreTests : IDisposable
 {
     private static readonly string[] ExpectedRecipeList = ["A01", "B02"];

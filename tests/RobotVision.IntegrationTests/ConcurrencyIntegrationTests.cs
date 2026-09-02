@@ -6,6 +6,7 @@ namespace RobotVision.IntegrationTests;
 /// 并发与压力集成测试：多连接同时触发、排队语义（Busy 拒绝）、
 /// 慢相机下的管线占用与状态机一致性。
 /// </summary>
+[Collection("Serial")]
 public class ConcurrencyIntegrationTests
 {
     [Fact]
