@@ -104,6 +104,9 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
 
     public bool ShowGeometryGates => Template.TeachAreaPx > 1;
 
+    /// <summary>精修范围语义提示：范围 = 实际角度窗 ±range°；NoFlip 时仅 0 支（无 ±180° 额外搜索）。</summary>
+    public string RefineRangeHint => TemplateOptions.RefineRangeHintText(Template);
+
     public IReadOnlyList<EnumItem<HousingEdgePolarity>> EdgePolarityOptions { get; } =
     [
         new(HousingEdgePolarity.Auto, "自动（先亮场再暗场）"),
@@ -145,6 +148,7 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowFeatureRoi));
         OnPropertyChanged(nameof(ShowPolarity));
         OnPropertyChanged(nameof(ShowGeometryGates));
+        OnPropertyChanged(nameof(RefineRangeHint));
         OnPropertyChanged(nameof(TeachGeometryHint));
         OnPropertyChanged(nameof(TeachPeakHint));
         OnPropertyChanged(nameof(RefineMethodScoreHint));

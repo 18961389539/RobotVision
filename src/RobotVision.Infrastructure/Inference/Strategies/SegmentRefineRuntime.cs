@@ -205,11 +205,32 @@ internal sealed class TemplateSegmentRefineRuntime : ISegmentRefineRuntime
             Pose = refined.Pose,
             TabMarker = refined.TabMarker,
             MatchWindow = refined.MatchWindow,
+            QualityNote = refined.QualityNote,
         };
     }
 
+    /// <summary>
+    /// 模板匹配失败归因（match 为 null）：读 MatchBest 写入的 LastDebug 诊断字段拼可读文案。
+    /// BestScore=NaN 表示"无候选"（目标过小/靠边被裁等）；BestScore ≥ 阈值但被拒 = 第二峰歧义；
+    /// 否则是"最佳峰低于阈值"并给出差距。
+    /// </summary>
+    private static string TemplateMissReason(RecipeConfig recipe)
+    {
+        var d = MaskTemplateMatcher.LastDebug;
+        var label = $"{recipe.Name} · 模板匹配未过门";
+        if (double.IsNaN(d.BestScore))
+            return $"{label}：转正窗内无匹配候选（目标过小 / 靠边被裁 / 角度窗外？）";
+        var maxRatio = recipe.Template.MaxSecondPeakRatio;
+        if (d.BestScore >= d.MinScore && maxRatio < 1.0 && d.SecondPeakRatio > maxRatio)
+            return $"{label}：第二峰歧义——次峰/主峰 {d.SecondPeakRatio:0.000} > 门 {maxRatio:0.000}" +
+                   $"（@{d.BestDeg:0.0}°，周期性纹理或近对称特征？）";
+        var gap = recipe.Template.MatchThreshold - d.BestScore;
+        return $"{label}：最佳 NCC {d.BestScore:0.000} < 阈值 {d.MinScore:0.000}" +
+               $"（差 {gap:0.000}，@{d.BestDeg:0.0}°，锐度 {d.PeakSharpness:0.000}）";
+    }
+
     private readonly record struct TemplateRefine(
-        PixelPose Pose, PixelPoint[]? TabMarker, PixelPoint[]? MatchWindow = null);
+        PixelPose Pose, PixelPoint[]? TabMarker, PixelPoint[]? MatchWindow = null, string? QualityNote = null);
 
     private static TemplateRefine RefineByTemplate(
         Mat roiView, Point2f[] contour, Mat template, RecipeConfig recipe, double segConfidence,
@@ -228,7 +249,9 @@ internal sealed class TemplateSegmentRefineRuntime : ISegmentRefineRuntime
         }
         catch (InvalidOperationException)
         {
-            return new TemplateRefine(SegmentRefineOps.Fallback(contour, segConfidence, recipe, 0), null);
+            var fallback = SegmentRefineOps.Fallback(contour, segConfidence, recipe, 0);
+            return new TemplateRefine(fallback, null,
+                QualityNote: $"{recipe.Name} · 转正裁剪失败（目标轮廓异常 / 过小？）");
         }
 
         try
@@ -267,7 +290,10 @@ internal sealed class TemplateSegmentRefineRuntime : ISegmentRefineRuntime
             }
 
             if (match is null)
-                return new TemplateRefine(SegmentRefineOps.Fallback(contour, segConfidence, recipe, 0), null);
+            {
+                var fallback = SegmentRefineOps.Fallback(contour, segConfidence, recipe, 0);
+                return new TemplateRefine(fallback, null, QualityNote: TemplateMissReason(recipe));
+            }
 
             var tplSigned = AngleGeometry.NormalizeSignedDeg(crop.WarpAngleDeg + match.RotationDeg);
             var angled = AngleGeometry.FuseDirected(housing.LongAxisDeg, tplSigned);
@@ -290,13 +316,17 @@ internal sealed class TemplateSegmentRefineRuntime : ISegmentRefineRuntime
         double refineRangeDeg, double searchOriginDeg, bool forceZeroBranch = false)
     {
         double? branch = forceZeroBranch ? searchOriginDeg : null;
+        var maxSecond = recipe.Template.MaxSecondPeakRatio < 1.0
+            ? recipe.Template.MaxSecondPeakRatio
+            : (double?)null;
         return recipe.Template.UseEdgeMatch
             ? MaskTemplateMatcher.MatchBestHybrid(
                 upright, template, refineRangeDeg, recipe.Template.MatchThreshold,
                 pack?.Gray, pack?.Edge, branch, searchOriginDeg)
             : MaskTemplateMatcher.MatchBest(
                 upright, template, refineRangeDeg, recipe.Template.MatchThreshold,
-                pack?.Gray, orientationBranchDeg: branch, searchOriginDeg: searchOriginDeg);
+                pack?.Gray, orientationBranchDeg: branch, searchOriginDeg: searchOriginDeg,
+                maxSecondPeakRatio: maxSecond);
     }
 }
 

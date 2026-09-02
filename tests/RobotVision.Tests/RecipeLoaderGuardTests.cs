@@ -304,6 +304,20 @@ public sealed class RecipeLoaderGuardTests : IDisposable
     }
 
     [Fact]
+    public void RefineRangeHintText_DescribesAngleWindow()
+    {
+        // 范围语义提示：NoFlip 只搜 0 支；默认双支。供精修参数窗展示（Core 层纯函数，UI 可单测）。
+        var noFlip = TemplateOptions.RefineRangeHintText(new TemplateOptions { RefineRangeDeg = 40, NoFlipConstraint = true });
+        Assert.Contains("±40", noFlip, StringComparison.Ordinal);
+        Assert.Contains("0 支", noFlip, StringComparison.Ordinal);
+        Assert.DoesNotContain("翻转支", noFlip, StringComparison.Ordinal);
+
+        var dual = TemplateOptions.RefineRangeHintText(new TemplateOptions { RefineRangeDeg = 5 });
+        Assert.Contains("±5", dual, StringComparison.Ordinal);
+        Assert.Contains("翻转支", dual, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Validate_EccentricTool_WithMinAreaRect_Throws()
     {
         var recipe = new RecipeConfig

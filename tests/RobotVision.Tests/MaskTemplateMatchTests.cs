@@ -62,6 +62,25 @@ public sealed class MaskTemplateMatchTests : IDisposable
     }
 
     [Fact]
+    public void MatchBest_SecondPeakAmbiguity_RejectsWhenRatioAboveGate()
+    {
+        // 第二峰歧义门：maxSecondPeakRatio 极严时，正常匹配若存在任何次峰即被拒。
+        // 锁定"歧义拒绝"路径生效 + LastDebug.SecondPeakRatio 被写入（供归因诊断）。
+        using var upright = MakeUpright(_template, objectDeg: 3.2);
+        // 先看正常门（=1 关闭）能匹配，确认图像有峰
+        var normal = MaskTemplateMatcher.MatchBest(upright, _template, refineRangeDeg: 5, minScore: 0.3);
+        Assert.NotNull(normal);
+        // 极严歧义门：次峰/主峰 > 0.02 即拒（任何非纯单峰纹理都会触发）
+        var gated = MaskTemplateMatcher.MatchBest(upright, _template, refineRangeDeg: 5, minScore: 0.3,
+            maxSecondPeakRatio: 0.02);
+        var ratio = MaskTemplateMatcher.LastDebug.SecondPeakRatio;
+        Assert.False(double.IsNaN(ratio));
+        if (gated is null)
+            Assert.True(ratio > 0.02,
+                $"歧义拒绝但记录的次峰比 {ratio:0.000} 未超门 0.02——归因自相矛盾");
+    }
+
+    [Fact]
     public void MatchBest_ForceZeroBranch_StillMatchesSmallRotation()
     {
         // NoFlip 下小角度目标应正常匹配（0 支覆盖 -range~+range）
@@ -119,6 +138,20 @@ public sealed class MaskTemplateMatchTests : IDisposable
         using var upright = new Mat(120, 240, MatType.CV_8UC3, new Scalar(200, 200, 200));
         var match = MaskTemplateMatcher.MatchBest(upright, _template, refineRangeDeg: 5, minScore: 0.85);
         Assert.Null(match);
+    }
+
+    [Fact]
+    public void MatchBest_MissBelowThreshold_WritesDiagnostic()
+    {
+        // 失败归因：minScore 不过时 LastDebug 携带最佳峰分数/阈值/角度，供调用方拼"差多少"
+        using var upright = new Mat(120, 240, MatType.CV_8UC3, new Scalar(200, 200, 200));
+        var match = MaskTemplateMatcher.MatchBest(upright, _template, refineRangeDeg: 5, minScore: 0.95);
+        Assert.Null(match);
+        Assert.False(double.IsNaN(MaskTemplateMatcher.LastDebug.BestScore));
+        Assert.Equal(0.95, MaskTemplateMatcher.LastDebug.MinScore);
+        Assert.True(MaskTemplateMatcher.LastDebug.BestScore < 0.95,
+            $"纯色图最佳峰应低于 0.95，实际 {MaskTemplateMatcher.LastDebug.BestScore:0.000}");
+        Assert.False(double.IsNaN(MaskTemplateMatcher.LastDebug.BestDeg));
     }
 
     [Fact]

@@ -96,7 +96,8 @@
                             <TextBlock Text="精修范围(°)" FontSize="11" Margin="0,0,0,4" />
                             <ui:NumberBox Value="{Binding Template.RefineRangeDeg}"
                                           Minimum="1" Maximum="45" SmallChange="1"
-                                          SpinButtonPlacementMode="Compact" />
+                                          SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged" />
                         </StackPanel>
                     </WrapPanel>
                     <CheckBox Content="转正裁剪窗" FontSize="11" Margin="0,4,0,4"
@@ -106,7 +107,10 @@
                     <CheckBox Content="目标永不翻转 180°（省一半计算，杜绝误判 180°）" FontSize="11"
                               Margin="0,0,0,4"
                               IsChecked="{Binding Template.NoFlipConstraint}"
+                              Checked="OnRangeOrNoFlipChanged" Unchecked="OnRangeOrNoFlipChanged"
                               ToolTip="仅当工位分向限定、产品角度不会落在翻转支时勾选；会跳过 180° 分支搜索与翻转重试。" />
+                    <TextBlock Text="{Binding RefineRangeHint}" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4" />
                     <TextBlock Text="{Binding TeachPeakHint}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
                 </StackPanel>
 
@@ -126,11 +130,15 @@
                             <TextBlock Text="精修范围(°)" FontSize="11" Margin="0,0,0,4" />
                             <ui:NumberBox Value="{Binding Template.RefineRangeDeg}"
                                           Minimum="1" Maximum="45" SmallChange="1"
-                                          SpinButtonPlacementMode="Compact" />
+                                          SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged" />
                         </StackPanel>
                     </WrapPanel>
                     <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                Text="固定使用转正裁剪（与模板「转正裁剪窗」无关）。试触发/监控会叠青色命中点、红色未命中点。" />
+                    <TextBlock Text="{Binding RefineRangeHint}" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"
+                               Visibility="{Binding ShowRefineRange, Converter={StaticResource BoolToVisibilityConverter}}" />
                     <TextBlock Text="{Binding RefineMethodScoreHint}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
                                Foreground="{DynamicResource SystemFillColorCautionBrush}"
                                Visibility="{Binding HasRefineMethodScoreHint, Converter={StaticResource BoolToVisibilityConverter}}" />

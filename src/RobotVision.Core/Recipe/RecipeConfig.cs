@@ -227,6 +227,14 @@ public sealed class TemplateOptions
     public bool NoFlipConstraint { get; set; }
 
     /// <summary>
+    /// 运行时第二峰歧义门 (0,1]：最佳匹配峰同支次峰比值 ≤ 该值才接受。
+    /// 目标纹理周期性/对称导致两个角度几乎同分（如齿距角、180° 近对称）时，
+    /// 单一 NCC 峰不可靠——次峰/主峰 > 该值判歧义拒绝。默认 1 = 关闭。
+    /// 建议 0.9~0.98；误拒时调大。
+    /// </summary>
+    public double MaxSecondPeakRatio { get; set; } = 1.0;
+
+    /// <summary>
     /// true = 精修失败时仍输出无向粗角 [0,180)（旧行为，偏心工具可能差 180°）。
     /// false（默认）= 分割到了但精修不过门时该目标不可用，全部不可用则 TRIGGER 返回 1019。
     /// </summary>
@@ -276,6 +284,16 @@ public sealed class TemplateOptions
         return Math.Clamp(teachPeak * factor, 0.40, 0.92);
     }
 
+    /// <summary>精修范围语义提示：范围即实际角度窗 ±range°。NoFlip 仅 0 支（不搜 180°±range）。</summary>
+    public static string RefineRangeHintText(TemplateOptions t)
+    {
+        var range = t.RefineRangeDeg;
+        if (t.NoFlipConstraint)
+            return $"角度窗 = ±{range:0}°（仅 0 支，无 180° 翻转）。目标实际姿态差有多大，范围就设多大（如 ±40° 输入 40）。";
+        return $"角度窗 = ±{range:0}°（另搜 180°±{range:0} 翻转支）。仅当产物可反放（需判头尾）才保留两支；" +
+               "分向限定可勾选「目标永不翻转 180°」省一半计算并杜绝误判。";
+    }
+
     public TemplateOptions Clone(bool includeTemplateImage = true)
     {
         var copy = new TemplateOptions();
@@ -294,6 +312,7 @@ public sealed class TemplateOptions
         target.UseUprightCrop = UseUprightCrop;
         target.UseEdgeMatch = UseEdgeMatch;
         target.NoFlipConstraint = NoFlipConstraint;
+        target.MaxSecondPeakRatio = MaxSecondPeakRatio;
         target.AllowCoarseFallback = AllowCoarseFallback;
         target.TeachPeakScore = TeachPeakScore;
         target.HousingEdgePolarity = HousingEdgePolarity;

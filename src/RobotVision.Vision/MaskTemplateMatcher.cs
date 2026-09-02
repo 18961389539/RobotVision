@@ -237,7 +237,8 @@ public static partial class MaskTemplateMatcher
     public static MaskTemplateMatchResult? MatchBest(
         Mat upright, Mat template, double refineRangeDeg, double minScore,
         RotatedTemplateBank? rotated = null, double? orientationBranchDeg = null,
-        bool useMatchedPolarity = true, double searchOriginDeg = 0)
+        bool useMatchedPolarity = true, double searchOriginDeg = 0,
+        double? maxSecondPeakRatio = null)
     {
         LastDebug = default;
         if (Math.Abs(NormalizeSigned(searchOriginDeg)) >= 1.0)
@@ -255,7 +256,11 @@ public static partial class MaskTemplateMatcher
             SampleAngleBand(upright, template, rotated, rotations, centerDeg: searchOriginDeg + 180.0,
                 rangeDeg: refineRangeDeg, step: SearchCoarseStep);
         if (rotations.Count == 0)
+        {
+            // 无任何可匹配角度（目标靠边被裁 / 转正图过小 / range 内全部跳过）：NaN 标记"无候选"
+            LastDebug = LastDebug with { BestScore = double.NaN, MinScore = minScore };
             return null;
+        }
 
         if (searchZero)
         {
@@ -275,8 +280,21 @@ public static partial class MaskTemplateMatcher
         var best0 = BestInBand(rotations, zeroBand: true, searchOriginDeg);
         var best180 = BestInBand(rotations, zeroBand: false, searchOriginDeg);
         var best = PickOrientation(upright, template, best0, best180, useMatchedPolarity);
-        LastDebug = LastDebug with { PeakSharpness = MeasurePeakSharpness(rotations, best, searchOriginDeg) };
+        // 第二峰比值：同支次峰 / 主峰。接近 1 = 歧义（周期性纹理/对称特征），匹配不可靠。
+        var second = FindSecondPeak(rotations, best, searchOriginDeg);
+        var secondRatio = best.Score <= 1e-9 ? 0 : second / best.Score;
+        LastDebug = LastDebug with
+        {
+            PeakSharpness = MeasurePeakSharpness(rotations, best, searchOriginDeg),
+            // 失败归因：即使 minScore 不过也保留最佳峰分数/阈值/角度，供调用方诊断"差多少"
+            BestScore = best.Score,
+            MinScore = minScore,
+            BestDeg = best.Deg,
+            SecondPeakRatio = secondRatio,
+        };
         if (best.Score < minScore)
+            return null;
+        if (maxSecondPeakRatio is { } maxRatio && secondRatio > maxRatio)
             return null;
 
         // 抛物线亚度插值：两端候选必须真实存在（值类型 FirstOrDefault 缺失时 Score=0，会把峰拉歪）
@@ -507,13 +525,11 @@ public static partial class MaskTemplateMatcher
     }
 
     /// <summary>同头尾支上，距主峰 ≥2.5° 的次高峰缺口 (best−second)/best。钝峰趋近 0。</summary>
-    private static double MeasurePeakSharpness(List<AngleSample> samples, AngleSample best, double originDeg = 0)
+    /// <summary>主峰同头尾支上、距主峰 ≥2.5° 的最高次峰分数；无次峰返回 0。</summary>
+    private static double FindSecondPeak(List<AngleSample> samples, AngleSample best, double originDeg = 0)
     {
-        if (best.Score <= 1e-9)
-            return 0;
         var bestZero = Math.Abs(NormalizeSigned(best.Deg - originDeg)) < 90;
         var second = 0.0;
-        var found = false;
         foreach (var s in samples)
         {
             var sZero = Math.Abs(NormalizeSigned(s.Deg - originDeg)) < 90;
@@ -521,14 +537,19 @@ public static partial class MaskTemplateMatcher
                 continue;
             if (Math.Abs(NormalizeSigned(s.Deg - best.Deg)) < 2.5)
                 continue;
-            if (!found || s.Score > second)
-            {
+            if (s.Score > second)
                 second = s.Score;
-                found = true;
-            }
         }
 
-        if (!found)
+        return second;
+    }
+
+    private static double MeasurePeakSharpness(List<AngleSample> samples, AngleSample best, double originDeg = 0)
+    {
+        if (best.Score <= 1e-9)
+            return 0;
+        var second = FindSecondPeak(samples, best, originDeg);
+        if (second <= 0)
             return 1;
         return Math.Clamp((best.Score - second) / best.Score, 0, 1);
     }

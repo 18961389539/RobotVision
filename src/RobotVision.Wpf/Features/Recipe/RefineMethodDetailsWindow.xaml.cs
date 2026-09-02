@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Threading;
 using Wpf.Ui.Controls;
 
 namespace RobotVision.WpfHost.Features.Recipe;
@@ -40,6 +41,14 @@ public partial class RefineMethodDetailsWindow : FluentWindow
 
     private void Polarity_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) =>
         (DataContext as RefineMethodDetailsViewModel)?.NotifyPolarityHintChanged();
+
+    /// <summary>精修范围/永不翻转变更 → 刷新角度窗提示（延迟到绑定提交后）。</summary>
+    private void OnRangeOrNoFlipChanged(object sender, EventArgs e)
+    {
+        if (DataContext is not RefineMethodDetailsViewModel vm)
+            return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () => vm.NotifyMethodUiChanged());
+    }
 
     private void OnClosed(object? sender, EventArgs e)
     {

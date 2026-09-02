@@ -26,7 +26,10 @@ public static partial class MaskTemplateMatcher
 {
     internal readonly record struct MatchOrientationDebug(
         double Score0, double Score180, int? TemplateSign, int? SceneSign, double PeakDistPx,
-        double PeakSharpness = 0);
+        double PeakSharpness = 0,
+        // 失败归因（minScore 不过 / 无候选时写入，供调用方拼接可读诊断）：
+        double BestScore = double.NaN, double MinScore = double.NaN, double BestDeg = double.NaN,
+        double SecondPeakRatio = double.NaN);
 
     [ThreadStatic]
     internal static MatchOrientationDebug LastDebug;
