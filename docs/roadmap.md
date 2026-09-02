@@ -21,6 +21,9 @@
 | `d789230` | **拆分纯视觉算法为独立类库 RobotVision.Vision**：9 算法文件（模板匹配/卡尺/SIFT/形状匹配/壳体/缓存）从 Infrastructure 拆出，仅依赖 Core+OpenCvSharp4，零硬件与推理会话依赖；引用链 Hosting/Teach/tests/benchmarks 显式引用，零行为回归 |
 | `6533809` | **配方 NoFlipConstraint 开关**（产线需求）：目标永不翻转 180° 时跳过 180° 分支搜索与翻转重试——缓存/计算省一半、杜绝近对称件误判 180°；Core/Vision/Runtime/UI 四层 + 4 测试 |
 | `0af54c1` | **三项工业强化**：①失败归因诊断（LastDebug 写 BestScore/MinScore/歧义比，Runtime 拼可读 QualityNote→试触发 UI，1019 可归因）；②第二峰歧义门 `MaxSecondPeakRatio`（抽 FindSecondPeak 复用，挡周期纹理/近对称误匹配）；③角度窗 UI 提示（Core 抽 RefineRangeHintText 纯函数 + NumberBox/CheckBox Dispatcher 刷新）。+4 测试 |
+| `8594047` | ShapeMatch 方向一致性诊断（DirAgree 进 DebugInfo/QualityNote，可区分"距离 vs 方向"失败归因） |
+| `d32b6ad` | **UprightCrop 裁剪窗显式长/短边**：修复 MinAreaRect 表示歧义（Width 可能为短边）导致的转正窗错向（-33° 目标被裁）；warp 保持原口径；参考实现同步 |
+| `87c921d` | **ShapeMatch 接入 NoFlipConstraint**：跳过翻转窗判决（±20° 内极性不可靠误走 180° 支）；UprightCrop 无向 warp 已处理整体 180° |
 
 对应评审报告：`docs/review/2026-09-02-Wpf-CodeReview.md`、`docs/review/2026-09-02-Repo-Audit.md`。
 
@@ -47,7 +50,7 @@
 | 8 | **BaslerCamera 锁内长阻塞**：`_grabLock` 内 `GrabOne(_grabTimeoutMs 默认 60000ms)` + 连接期 `Thread.Sleep(1000)`，UI 预览/标定/管线取图共用同一相机锁。WPF 已包 `Task.Run` 不卡 UI，但长超时互相排队拖吞吐。需真实相机验证，排 .NET 10 窗口。 | `Infrastructure/Cameras/BaslerCamera.cs` | 未开始 |
 | 9 | **ShapeMatch 对标 HALCON 迭代**（`5e2ecb0` v1 有向 Chamfer 已落地）：
     - v1 已做：梯度方向通道（16 bin 折叠 180°）、方向一致性代价（失配只扣 hit）、弱梯度豁免、67.5° 容差
-    - 待迭代：①UprightCrop 转正缺陷——**根因已定位(2026-09-02 实证)**：OpenCV MinAreaRect 的 Angle 指向 Width 边且 Width 不保证是长边；`MaskHousing.Fit`/`UprightCrop` 的 `Width>=Height ? Angle : Angle+90` 假设相反(0°/37° 侥幸正确、-33° 错：实测 0°横条返回 W=90 H=240 Angle=90；-33° 返回 W=90 Angle=57)。修复须整链自洽(warp 公式+crop 尺寸+MapUprightToSource 逆变换)，非局部补丁——曾试 crop 宽高归一化致 MaskTemplateCropMappingTests 117vs312 映射断裂。②方向图抗插值漂移(金字塔粗到细)；③正交干扰定量测试；④32 bin | `Vision/MaskShapeMatch.cs`+`MaskTemplateMatcher.cs` | 迭代中 |
+    - 待迭代：①UprightCrop 转正缺陷——**根因已定位(2026-09-02 实证)**：OpenCV MinAreaRect 的 Angle 指向 Width 边且 Width 不保证是长边；`MaskHousing.Fit`/`UprightCrop` 的 `Width>=Height ? Angle : Angle+90` 假设相反(0°/37° 侥幸正确、-33° 错：实测 0°横条返回 W=90 H=240 Angle=90；-33° 返回 W=90 Angle=57)。**修复部分落地**(`d32b6ad`)：UprightCrop 裁剪窗显式长/短边(warp 保持原口径,改 warp 会破坏 FeatureRoiAdvisor)。**ShapeMatch NoFlip 接线**(`87c921d`)：跳过翻转窗判决(±20° 内极性不可靠误走 180° 支)。②方向图抗插值漂移(金字塔粗到细)；③正交干扰定量测试(需真机)；④32 bin | `Vision/MaskShapeMatch.cs`+`MaskTemplateMatcher.cs` | 迭代中 |
 
 ### P2（性能/工程化，建议配合 .NET 10 升级）
 
