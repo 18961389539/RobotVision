@@ -8,7 +8,7 @@
 - **版本**:语义化版本(SemVer) `主.次.修订`;产线固件号 = Git tag(如 `v1.0.0`)
 - **写法**:
   - 面向"现场/用户"描述,避免内部实现细节(写"支持 GigE 相机",不写"重构 CameraManager")
-  - 破坏性变更必须标注,升级手册(DEPLOYMENT.md)同步更新
+  - 破坏性变更必须标注,升级手册([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md))同步更新
   - 每次发布时:把 `[Unreleased]` 内容挪到新版本小节,补发布日期
 - **关联**:每条变更尽量标注关联 Issue/PR 编号(如 `#12`)
 
@@ -48,7 +48,7 @@
 - 失败现场留存(限流+缩图)与 Serilog 日志
 - GitHub Actions:自动构建 + 全量测试 + 自包含 win-x64 发布(Release 下载)
 - 冒烟测试补全:成功路径端到端 / TCP 应答格式 / 灯光链路 / 压力 / 失败图落盘 / 标定漂移
-- 文档:错误码总表、部署升级手册、PLC 通信与 TRIGGER 协议
+- 文档:[PLC 通信与 TRIGGER 协议](docs/PLC-TRIGGER-Protocol.md)、[错误码总表](docs/ERROR-CODES.md)、[部署升级手册](docs/DEPLOYMENT.md)
 
 ### 修复
 

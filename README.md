@@ -64,6 +64,14 @@ RobotVision.sln
 > `src/ImageViewerControl` 是当前体量最大的工程（约 3.2 万行，占 src 的 82%），
 > 与视觉业务完全解耦，可独立复用到其他图像处理项目。详见文末「已知技术债」。
 
+## 文档
+
+| 文档 | 说明 |
+|---|---|
+| [docs/PLC-TRIGGER-Protocol.md](docs/PLC-TRIGGER-Protocol.md) | PLC 通信、TRIGGER 时序、超时与重试 |
+| [docs/ERROR-CODES.md](docs/ERROR-CODES.md) | 错误码 1000–1020 / 1099 总表与联锁规则 |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | 部署目录、环境变量、升级与回滚 |
+
 ## 构建与测试
 
 ```powershell
@@ -140,7 +148,8 @@ Windows 服务/计划任务启动时 CWD 是 `System32`，部署时务必把资�
 
 ## TCP 协议（ASCII；请求有无换行均可，应答以 `\n` 结尾）
 
-完整协议规范（含 PLC 集成指引、时序与处置流程）见 `docs/PLC-TRIGGER-Protocol.md`。
+完整协议规范（含 PLC 集成指引、时序与处置流程）见 [docs/PLC-TRIGGER-Protocol.md](docs/PLC-TRIGGER-Protocol.md)。
+错误码详解见 [docs/ERROR-CODES.md](docs/ERROR-CODES.md)。
 
 | 请求 | 应答 | 说明 |
 |---|---|---|
