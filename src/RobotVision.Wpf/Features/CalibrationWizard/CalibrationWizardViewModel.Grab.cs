@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using RobotVision.Core;
 using RobotVision.Hosting;
 using RobotVision.WpfHost.Shared;
@@ -141,7 +142,11 @@ public partial class CalibrationWizardViewModel
             if (Directory.Exists(_intrinsicTempFolder))
                 Directory.Delete(_intrinsicTempFolder, true);
         }
-        catch (IOException) { /* 下次换新目录 */ }
+        catch (IOException ex)
+        {
+            // 删除失败不阻塞清空（下次换新目录），Debug 级留痕
+            WpfUiLog.CalibTempClearFailed(_log, ex, _intrinsicTempFolder);
+        }
         _intrinsicTempFolder = "";
         CollectedFrames = 0;
         ClearPendingResult(WizardMode.Intrinsic);

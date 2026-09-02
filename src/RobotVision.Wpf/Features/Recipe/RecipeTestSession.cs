@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -198,9 +199,10 @@ public sealed partial class RecipeTestSession : ObservableObject, IDisposable
             var source = ImagePresentation.FromVisionImage(frame.UndistortedImage);
             UiDispatch.Begin(() => ResultImage = source);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // 绘制失败不影响试触发结论
+            // 绘制失败不影响试触发结论，但留痕以便排查
+            Trace.TraceWarning("[RecipeTestSession] 预览帧绘制失败: {0}", ex);
         }
         finally
         {

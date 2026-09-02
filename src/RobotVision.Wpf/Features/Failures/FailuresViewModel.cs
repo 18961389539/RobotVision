@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows.Media.Imaging;
@@ -275,8 +276,10 @@ public partial class FailuresViewModel : ObservableObject, IDisposable
             img.Freeze();
             return img;
         }
-        catch
+        catch (Exception ex)
         {
+            // 坏图/缺失图属预期（占位图兜底），Debug 级留痕便于排查
+            Trace.TraceWarning("[Failures] 缩略图加载失败: {0} ({1})", path, ex.Message);
             return null;
         }
     }
@@ -317,8 +320,9 @@ public partial class FailuresViewModel : ObservableObject, IDisposable
                 $"耗时 {GetString(root, "ElapsedMs")}ms");
             return (recipe, code, meta);
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceWarning("[Failures] 留存元数据解析失败: {0} ({1})", jsonPath, ex.Message);
             return ("", "", "（元数据解析失败）");
         }
     }

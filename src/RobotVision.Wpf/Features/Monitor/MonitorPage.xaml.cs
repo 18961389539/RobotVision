@@ -74,9 +74,10 @@ public partial class MonitorPage : Page
         {
             Clipboard.SetText(line.ClipboardText);
         }
-        catch
+        catch (Exception ex)
         {
-            // 剪贴板被其他进程占用时忽略
+            // 剪贴板被其他进程占用时忽略，但留痕便于排查
+            System.Diagnostics.Trace.TraceWarning("[Monitor] 复制日志到剪贴板失败: {0}", ex.Message);
         }
     }
 }

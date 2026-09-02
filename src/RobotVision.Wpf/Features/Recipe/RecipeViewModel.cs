@@ -881,9 +881,10 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
                 ScenePlaybook.FromTemplate(Editor.Template),
                 RecipeHealthAdvisor.ToPlaybookPrior(hints, current, Editor.Template.RefinePolicyOrder));
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // 结果库读失败不影响编辑
+            // 结果库读失败不影响编辑，但需留痕以便排查
+            WpfUiLog.RecipeHealthHintFailed(_log, ex, name);
         }
     }
 }

@@ -610,6 +610,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            WpfUiLog.ModelPrefsSaveFailed(_log, ex, PrefsPath);
         }
     }
 
@@ -640,6 +641,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
+            WpfUiLog.ModelPrefsLoadFailed(_log, ex, PrefsPath);
         }
     }
 

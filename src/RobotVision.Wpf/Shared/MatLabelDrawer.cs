@@ -16,6 +16,9 @@ internal static class MatLabelDrawer
 {
     private const int Pad = 3;
 
+    /// <summary>渲染缓存上限：键含完整文本，若标签嵌入配方名/时间戳等动态文本将无限增长，须限容。</summary>
+    private const int MaxCacheEntries = 256;
+
     private static readonly ConcurrentDictionary<LabelCacheKey, RenderedLabel> LabelCache = new();
 
     private readonly record struct LabelCacheKey(string Text, int FontSizeQ, byte R, byte G, byte B);
@@ -54,6 +57,10 @@ internal static class MatLabelDrawer
             return cached;
 
         var rendered = WpfOffscreenRender.Invoke(() => RenderLabelCore(text, fontSizePx, foreground));
+        // 超限整体清空：缓存仅是渲染加速，重建单个标签成本 <1ms，避免动态文本导致无限增长。
+        // ConcurrentDictionary 并发安全；竞态下最多略超上限或丢一个刚插入项，均可接受。
+        if (LabelCache.Count >= MaxCacheEntries)
+            LabelCache.Clear();
         LabelCache[key] = rendered;
         return rendered;
     }

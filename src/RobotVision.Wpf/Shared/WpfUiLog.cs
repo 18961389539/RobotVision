@@ -31,4 +31,17 @@ internal static partial class WpfUiLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Preview in-flight grab did not finish within {TimeoutMs} ms; disposing session anyway")]
     public static partial void PreviewDrainTimeout(ILogger logger, double timeoutMs);
+
+    // P2-5：此前完全静默的 catch 补留痕（失败不影响功能，但须可观测）
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to save model test prefs {Path}")]
+    public static partial void ModelPrefsSaveFailed(ILogger logger, Exception ex, string path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load model test prefs {Path}; falling back to defaults")]
+    public static partial void ModelPrefsLoadFailed(ILogger logger, Exception ex, string path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load recipe health hints for recipe {Name}")]
+    public static partial void RecipeHealthHintFailed(ILogger logger, Exception ex, string name);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to clear calibration temp folder {Folder}")]
+    public static partial void CalibTempClearFailed(ILogger logger, Exception ex, string folder);
 }
