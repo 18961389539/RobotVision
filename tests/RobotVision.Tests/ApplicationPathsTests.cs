@@ -4,6 +4,8 @@ using Xunit;
 
 namespace RobotVision.Tests;
 
+/// <summary>改进程环境变量，须串行（与 CameraConfigStore/FailureImageStore 等同一队列）。</summary>
+[Collection("Serial")]
 public class ApplicationPathsTests : IDisposable
 {
     private readonly string? _settingsEnv;
@@ -59,7 +61,7 @@ public class ApplicationPathsTests : IDisposable
         var cfg = new AppConfig();
         ApplicationPaths.NormalizeAppConfig(cfg);
         Assert.Equal(Path.Combine(root, "Data"), cfg.DataRoot);
-        Directory.Delete(root, true);
+        // NormalizeAppConfig 只写配置不建目录：无目录可清理，删 Delete 避免 DirectoryNotFound
     }
 
     [Fact]

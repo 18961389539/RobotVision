@@ -238,7 +238,7 @@ public sealed class MaskTemplateMatchTests : IDisposable
         Assert.True(pack.Gray.Source.IsDisposed);
     }
 
-    [Fact]
+    [SkippableFact]
     public void PreferOrientationBranch_RealOsdpTemplate_FlippedIs180()
     {
         var path = Path.GetFullPath(Path.Combine(

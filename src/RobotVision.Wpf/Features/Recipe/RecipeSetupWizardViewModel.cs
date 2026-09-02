@@ -89,7 +89,7 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
 
     public void Dispose()
     {
-        _pageSession.Deactivate();
+        _pageSession.Dispose();
         DetachForClose();
         ReleasePreview();
         GC.SuppressFinalize(this);

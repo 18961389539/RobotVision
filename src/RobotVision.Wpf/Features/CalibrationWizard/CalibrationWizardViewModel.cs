@@ -747,7 +747,7 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
 
     {
 
-        _pageSession.Deactivate();
+        _pageSession.Dispose();
 
         IsBusy = false;
 

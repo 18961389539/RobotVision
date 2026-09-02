@@ -74,7 +74,7 @@ public class ModelManagerRaceTests : IDisposable
         Assert.Equal(0, manager.LoadedCount);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Open_MissingFile_FailureNotCached_RetrySucceedsAfterFileArrives()
     {
         TestPreconditions.RequireOnnx(RealModel);
@@ -89,7 +89,7 @@ public class ModelManagerRaceTests : IDisposable
         Assert.Equal(1, manager.LoadedCount);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Open_SameModelConcurrent_LoadsExactlyOnce()
     {
         TestPreconditions.RequireOnnx(RealModel);
@@ -103,7 +103,7 @@ public class ModelManagerRaceTests : IDisposable
         Assert.Equal(1, manager.LoadedCount); // Lazy 保证单一物化，并发 GetOrAdd 不产生输家泄漏
     }
 
-    [Fact]
+    [SkippableFact]
     public void Open_TaskIsPartOfCacheKey_FailedTaskDoesNotEvictWorkingOne()
     {
         TestPreconditions.RequireOnnx(RealModel);
@@ -123,7 +123,7 @@ public class ModelManagerRaceTests : IDisposable
         Assert.Equal(1, manager.LoadedCount);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Open_PathCaseInsensitive_SharesCache()
     {
         TestPreconditions.RequireOnnx(RealModel);
@@ -145,7 +145,7 @@ public class ModelManagerRaceTests : IDisposable
         manager.Dispose(); // 缓存为空/仅含未物化项，Dispose 不应触发加载或抛异常
     }
 
-    [Fact]
+    [SkippableFact]
     public void Unload_RemovesSingleTask_AndReloadsOnNextOpen()
     {
         TestPreconditions.RequireOnnx(RealModel);
@@ -162,7 +162,7 @@ public class ModelManagerRaceTests : IDisposable
         Assert.Equal(1, manager.LoadedCount);
     }
 
-    [Fact]
+    [SkippableFact]
     public void UnloadAll_File_RemovesEveryTaskOfThatModel()
     {
         TestPreconditions.RequireOnnx(RealModel);
@@ -183,7 +183,7 @@ public class ModelManagerRaceTests : IDisposable
         Assert.Equal(0, manager.LoadedCount);
     }
 
-    [Fact]
+    [SkippableFact]
     public void UnloadAll_Everything_ClearsCache()
     {
         TestPreconditions.RequireOnnx(RealModel);
@@ -199,7 +199,7 @@ public class ModelManagerRaceTests : IDisposable
         Assert.Equal(0, manager.LoadedCount);
     }
 
-    [Fact]
+    [SkippableFact]
     public void MaxSessions_TrimsOldestUnusedSession()
     {
         TestPreconditions.RequireOnnx(RealModel);
@@ -220,7 +220,7 @@ public class ModelManagerRaceTests : IDisposable
             StringComparer.OrdinalIgnoreCase); // 最旧的 RealModel 会话被裁剪
     }
 
-    [Fact]
+    [SkippableFact]
     public void MaxSessions_Zero_MeansUnlimited()
     {
         TestPreconditions.RequireOnnx(RealModel);

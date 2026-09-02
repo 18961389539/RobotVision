@@ -13,5 +13,5 @@ internal static class TestSkip
 
     public static void Unless(bool condition, string reason) => When(!condition, reason);
 
-    public static void Throw(string reason) => throw SkipException.ForSkip(reason);
+    public static void Throw(string reason) => Xunit.Skip.If(true, reason);
 }

@@ -139,6 +139,8 @@ public partial class CamerasViewModel
     public void Dispose()
     {
         StopPreview();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
         _previewSink.Dispose();
     }
 

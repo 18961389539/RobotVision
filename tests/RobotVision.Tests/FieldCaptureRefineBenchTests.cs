@@ -50,7 +50,7 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
         return (dir, recipeDir, modelsDir);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Bench_field_captures_compare_refine_paths()
     {
         var dir = RequireCaptureDir();
@@ -97,7 +97,7 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
         PrintSummary(rows, "剪影轮廓（ROI+亮目标）");
     }
 
-    [Fact]
+    [SkippableFact]
     public void Bench_field_captures_product_recipe_yolo()
     {
         var (dir, recipeDir, modelsDir) = ResolveBenchAssets();
@@ -159,7 +159,7 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
     /// <summary>
     /// 同一批现场图：SIFT（示教首帧裁剪）对照卡尺；并对比配方 NCC 模板。
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public void Bench_field_captures_sift_vs_caliper()
     {
         var (dir, recipeDir, modelsDir) = ResolveBenchAssets();

@@ -22,7 +22,7 @@ namespace RobotVision.Tests;
 public sealed class ProductLiveAdvisorTests(ITestOutputHelper output)
 {
 
-    [Fact]
+    [SkippableFact]
     public void Product_Live_Caliper_And_BakeOff_Agree()
     {
         TestPreconditions.RequireHardware();

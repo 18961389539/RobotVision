@@ -45,3 +45,6 @@ BenchmarkDotNet.Artifacts/
 # 本机开发覆盖（从 appsettings.Development.json.example 复制）
 appsettings.Development.json
 
+# WPF XAML 编译器临时工程文件（每次构建生成，含本机绝对路径，勿入库）
+*_wpftmp.csproj
+

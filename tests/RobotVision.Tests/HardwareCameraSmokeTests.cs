@@ -21,7 +21,7 @@ public class HardwareCameraSmokeTests(ITestOutputHelper output)
     private static string OutDir =>
         Path.Combine(Path.GetTempPath(), "RobotVision-camera-test");
 
-    [Fact]
+    [SkippableFact]
     public void GigE_Discover_And_Grab_EachCamera()
     {
         TestPreconditions.RequireHardware();
@@ -60,7 +60,7 @@ public class HardwareCameraSmokeTests(ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void Pylon_Discover_And_Grab_EachCamera()
     {
         TestPreconditions.RequireHardware();
@@ -108,7 +108,7 @@ public class HardwareCameraSmokeTests(ITestOutputHelper output)
     /// 内容有变化——运动场景下全黑/全白即异常）、帧间隔无异常尖峰。
     /// 单帧冒烟只证明"能取到图"，产线最常见的间歇花屏/丢帧需要连续帧才能暴露。
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public void GigE_ContinuousGrab_30Frames_Stable()
     {
         TestPreconditions.RequireHardware();
@@ -169,7 +169,7 @@ public class HardwareCameraSmokeTests(ITestOutputHelper output)
     /// 取帧均值应显著上升（参数写入 → 传感器生效 → 图像变化 的完整链路）。
     /// 参数没生效是现场常见故障（配置"改了"但图像不变），此用例直接暴露。
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public void Exposure_ChangeAffectsBrightness()
     {
         TestPreconditions.RequireHardware();

@@ -26,21 +26,21 @@ public sealed class MaskTemplateLiveOsdpTests(ITestOutputHelper output)
     private static string RepoRoot => TestBuildPaths.FindRepoRoot()
                                       ?? throw new InvalidOperationException("Repo root not found.");
 
-    [Fact]
+    [SkippableFact]
     public void OsdpLive_AngleDoesNotFlip180()
     {
         TestPreconditions.RequireHardware();
         RunOsdpLive(SegmentRefineMethod.Template, "template");
     }
 
-    [Fact]
+    [SkippableFact]
     public void OsdpLive_CaliperTab_DoesNotFlip180()
     {
         TestPreconditions.RequireHardware();
         RunOsdpLive(SegmentRefineMethod.CaliperTab, "caliper");
     }
 
-    [Fact]
+    [SkippableFact]
     public void OsdpLive_CaliperVsTemplate_RefineTime()
     {
         TestPreconditions.RequireHardware();

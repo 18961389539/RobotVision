@@ -34,10 +34,14 @@ public sealed class SegmentRefineBakeOffTests
     {
         using var img = new Mat(200, 320, MatType.CV_8UC3, new Scalar(200, 200, 200));
         Cv2.Rectangle(img, new Point(40, 70), new Point(280, 130), new Scalar(190, 190, 190), -1);
-        Point2f[] contour =
-        [
-            new(40, 70), new(280, 70), new(280, 130), new(40, 130),
-        ];
+        // 用 FindContours 提取真实轮廓（点数充足），而非手写 4 角点——
+        // RefineByLineFitBands 要求每条边 band ≥8 点，4 点手写轮廓永远拟合不出直线。
+        using var mask = new Mat(200, 320, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(mask, new Point(40, 70), new Point(280, 130), Scalar.All(255), -1);
+        Cv2.FindContours(mask, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxNone);
+        var contour = contours.OrderByDescending(c => Cv2.ContourArea(c)).First()
+            .Select(p => new Point2f(p.X, p.Y)).ToArray();
+
         var candidates = SegmentRefineBakeOff.Run(img, contour);
         var winner = SegmentRefineBakeOff.PickWinner(candidates);
         Assert.NotNull(winner);

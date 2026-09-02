@@ -114,7 +114,7 @@ public sealed partial class RecipeTestSession : ObservableObject, IDisposable
                 Editor.Clone(),
                 _host.PlaybookPrior,
                 cameraId,
-                Editor.LightControllerId,
+                Editor.LightControllerId ?? "",
                 Editor.Lighting)).ConfigureAwait(true);
 
             Editor.Template.TemplateImageBase64 = shot.TemplateImageBase64;

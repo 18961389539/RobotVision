@@ -14,7 +14,7 @@ namespace RobotVision.Tests;
 [Trait("Category", "Bench")]
 public sealed class MaskCaliperTabTimingTests(ITestOutputHelper output)
 {
-    [Fact]
+    [SkippableFact]
     public void RefineOnly_CaliperFasterThanTemplate_OsdpScale()
     {
         var recipeDir = TestBuildPaths.ResolveRecipesDir()
