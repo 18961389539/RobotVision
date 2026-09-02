@@ -47,7 +47,7 @@
 | 8 | **BaslerCamera 锁内长阻塞**：`_grabLock` 内 `GrabOne(_grabTimeoutMs 默认 60000ms)` + 连接期 `Thread.Sleep(1000)`，UI 预览/标定/管线取图共用同一相机锁。WPF 已包 `Task.Run` 不卡 UI，但长超时互相排队拖吞吐。需真实相机验证，排 .NET 10 窗口。 | `Infrastructure/Cameras/BaslerCamera.cs` | 未开始 |
 | 9 | **ShapeMatch 对标 HALCON 迭代**（`5e2ecb0` v1 有向 Chamfer 已落地）：
     - v1 已做：梯度方向通道（16 bin 折叠 180°）、方向一致性代价（失配只扣 hit）、弱梯度豁免、67.5° 容差
-    - 待迭代：①UprightCrop 对 90°/-33° 转正缺陷（方向关闭时亦失败=既有 bug，疑似 minAreaRect 长短轴互换）；②方向图抗插值漂移（任意角转正后方向误差 45-67°，现靠放宽容差而非根治——金字塔/粗到细可解）；③正交干扰定量区分测试（构造同窗 90° 干扰）；④考虑 32 bin 提精度 | `Vision/MaskShapeMatch.cs` | 迭代中 |
+    - 待迭代：①UprightCrop 转正缺陷——**根因已定位(2026-09-02 实证)**：OpenCV MinAreaRect 的 Angle 指向 Width 边且 Width 不保证是长边；`MaskHousing.Fit`/`UprightCrop` 的 `Width>=Height ? Angle : Angle+90` 假设相反(0°/37° 侥幸正确、-33° 错：实测 0°横条返回 W=90 H=240 Angle=90；-33° 返回 W=90 Angle=57)。修复须整链自洽(warp 公式+crop 尺寸+MapUprightToSource 逆变换)，非局部补丁——曾试 crop 宽高归一化致 MaskTemplateCropMappingTests 117vs312 映射断裂。②方向图抗插值漂移(金字塔粗到细)；③正交干扰定量测试；④32 bin | `Vision/MaskShapeMatch.cs`+`MaskTemplateMatcher.cs` | 迭代中 |
 
 ### P2（性能/工程化，建议配合 .NET 10 升级）
 
