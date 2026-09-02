@@ -53,12 +53,12 @@
 
 影响：UI 预览 / 标定取图 / 产线管线共用同一相机锁——任一请求长超时，**其余全部排队等锁**。WPF 调用已包 `Task.Run`（不卡 UI 线程），但管线吞吐会被拖到秒级。建议：取图移出锁（用 pylon 并发策略或门闩+超时收窄）、连接/发现不与取图争锁。
 
-### P1-3 推理层静态全局状态，多线程互相污染
+### P1-3 推理层静态全局状态（⚠ 实证后降级为 P2 设计债，非运行时 bug）
 
 - `MaskTemplateMatcher.cs:239/150/560`：静态 `LastDebug` + 跨调用魔法阈值（NeedsUprightAlign 0.08、PickOrientation 0.12）
 - `MaskCaliperTab.cs:105` / `MaskShapeMatch.cs:63` / `MaskSiftRefine.cs:61`：`[ThreadStatic] LastDebug` 隐式全局，`PickAutoLayout` 依赖其副作用选布局
 
-影响：多线程推理（不同模型并行时）调试状态互相串扰；阈值藏于调用间无名字，调参只能靠猜。建议：LastDebug 改为按调用返回或 `AsyncLocal`/参数传递；阈值集中为命名常量表。
+**实证复核（推翻"多线程互相污染"）**：4 处 LastDebug 均带 `[ThreadStatic]`，所有读取方（SegmentRefineBakeOff/SegmentRefineRuntime/Advisor/ScenePlaybook）都在**同一同步调用栈内**紧随策略调用（无 await/无 Task.Run 夹在中间），且每个策略入口先 `LastDebug = default` 重置——实际不存在跨线程污染或同线程串扰。真实问题是隐式状态传递 + PickAutoLayout 副作用耦合，属可维护性债。**已登记 roadmap #7，建议显式返回 DebugInfo，非本迭代。**
 
 ### P1-4 CA2213 资源泄漏警告 ×4（另有 1 处潜在 null）
 
@@ -150,15 +150,16 @@ Wpf 强制重建后 16 个警告，其中真实泄漏：
 
 ## 遗留待办（本次未动）
 
-- P1-2 BaslerCamera 锁拆分、P1-3 推理静态全局、P1-5 空 catch 留痕
-- P2 魔法阈值 / 超长方法 / 仓库体积 / CalibrationWizardViewModel.cs 的「每行空一行」怪异格式（提交时即存在，建议格式化）
+- P1-2 BaslerCamera 锁拆分（需真实相机验证，登记 roadmap #8）
+- P1-3 已实证降级为 P2 设计债（登记 roadmap #7）
+- P2 魔法阈值 / 超长方法 / 仓库体积 / CalibrationWizardViewModel.cs 的「每行空一行」怪异格式（提交时即存在，登记 roadmap #14）
 - 上述建议打包进 .NET 8→10 升级窗口
 
 ## 建议优先级
 
-1. P0-1 git rm wpftmp + .gitignore（十分钟，收益最高）
-2. P1-1 修 Skip 机制（升级 runner 或启用 SkippableFact）——让 13 个环境性失败从「红」变「黄」，恢复回归信号
-3. P1-4 补 4 处 CA2213 Dispose（各一行）
-4. P1-2 Basler 锁拆分（需设计，排下迭代）
-5. P1-3 / P1-5 推理静态状态与空 catch 留痕（低成本）
+1. ~~P0-1 git rm wpftmp + .gitignore~~ ✅ `177ae7d`
+2. ~~P1-1 修 Skip 机制~~ ✅ `177ae7d`（环境性失败从「红」变「跳过」，恢复回归信号）
+3. ~~P1-4 补 4 处 CA2213 Dispose~~ ✅ `177ae7d`
+4. ~~P1-5 空 catch 留痕~~ ✅ `7c50a0b`
+5. P1-2 Basler 锁拆分（需设计 + 真机验证，排 .NET 10 窗口）
 6. P2 项建议打包进 .NET 8→10 升级窗口（与 roadmap 既有条目一致）

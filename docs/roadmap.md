@@ -14,8 +14,11 @@
 | `f4b4e0b` | 评审 P0×2 + P1-2~6：全局异常兜底(AppDomain+Unobserved)、配方失败禁覆盖、预览位图双缓冲复用、Unloaded 误触发防护、四页脏检查、引用检查 fail-safe、IsFinite 防线 5 处、7 个防线测试 |
 | `6f18b60` | 评审 P1-1/P1-7 + P2-6/P2-10：WebView2 泄漏修复、Chat 护栏补洞(set_camera 全量走护栏、clear_inhibit 去硬编码词)、帧计数先存后计、过期注释、5 个护栏测试 |
 | `8ad24bb` | 评审 P2-5 + LabelCache：8 处静默 catch 补留痕(LoggerMessage)、MatLabelDrawer 缓存限容 256 |
+| `177ae7d` | 全仓复查 P0-1 + P1-1 + P1-4：git rm 两个 `_wpftmp.csproj`（WPF 临时工程文件，泄本机路径）+ .gitignore 防回归；Skip 机制修复（xunit 2.9.2+runner 2.8.2 不支持 `SkipException.ForSkip` → 启用 SkippableFact，22 处 `[Fact]→[SkippableFact]`，13 环境性失败→11 跳过）；CA2213 泄漏 ×4（`_refreshCts` + 两个 `_pageSession` Dispose + CS8604）；顺带修 2 个真实测试 bug（SmoothRectangle 4 角点轮廓不满足 band≥8 契约、ApplicationPaths 对未创建目录 Delete） |
+| `7c50a0b` | 全仓复查 P1-5：4 处空 catch 补留痕（AtomicFile/ProcessHealthStore/CameraManager/LightingManager） |
+| `1aeab71` | 复查报告 `docs/review/2026-09-02-Repo-Audit.md` 补修复闭环 |
 
-对应评审报告：`docs/review/2026-09-02-Wpf-CodeReview.md`。
+对应评审报告：`docs/review/2026-09-02-Wpf-CodeReview.md`、`docs/review/2026-09-02-Repo-Audit.md`。
 
 ---
 
@@ -34,8 +37,10 @@
 |---|---|---|---|
 | 3 | **Core 层统一 IsFinite 校验**（纵深防御）。评审建议 Core 层统一后 UI 层可简化；当前 WPF 层已单点拦截（`f4b4e0b`），Core/Infrastructure 仍有 62 处分散 `IsFinite/IsNaN`，未统一入口。 | Core/Infrastructure | 未开始 |
 | 4 | **ChatDangerousActionGuard 剩余风险**：`targets.Count == 0 → 放行` 通用规则——manage_recipe 漏填 name 时只要意图词即放行（工具实现层拒绝空 name，风险当前可控）。以及 IntentKeywords 单字词（"改"/"停"）误命中。 | `Hosting/Chat/ChatDangerousActionGuard.cs:49-50` | 未开始 |
-| 5 | **13 个环境性测试失败**：HardwareCameraSmoke×4（需 pylon/GigE 真机）、Live/BakeOff/Bench×8（需现场采集数据）、ApplicationPaths×1（TempDir 清理竞态）。CI 需 mock/跳过策略，或标注 `[Trait("RequiresHardware")]` 过滤。 | `tests/RobotVision.Tests` | 未开始 |
+| 5 | ~~13 个环境性测试失败~~ → **已解决**（`177ae7d`）：Skip 机制修复后 Hardware/Live/BakeOff/Bench 11 项转跳过；SmoothRectangle 与 ApplicationPaths 2 个真实 bug 已修。全量 935 通过 + 11 跳过 + 0 失败。 | `tests/RobotVision.Tests` | ✅ `177ae7d` |
 | 6 | **ONNX Runtime 版本**：`Intel.ML.OnnxRuntime.OpenVino 1.22.0`（换包源），上游已 1.29+。评估升级收益与 OpenVino EP 兼容性。 | `Directory.Packages.props` | 未开始 |
+| 7 | **推理策略静态 `[ThreadStatic] LastDebug`（降级自 P1-3）**：4 个策略（MaskCaliperTab/MaskShapeMatch/MaskSiftRefine/MaskTemplateMatcher）各有一份，**实证非运行时 bug**——所有读取方与策略调用同一同步调用栈、入口 `default` 重置、ThreadStatic 天然线程隔离。真实问题是隐式状态传递 + `PickAutoLayout` 依赖副作用选布局，属可维护性债。建议后续改为显式返回 DebugInfo（非本迭代）。 | `Inference/Strategies/*.cs`（9 文件 36 处） | 降级 P2，未开始 |
+| 8 | **BaslerCamera 锁内长阻塞**：`_grabLock` 内 `GrabOne(_grabTimeoutMs 默认 60000ms)` + 连接期 `Thread.Sleep(1000)`，UI 预览/标定/管线取图共用同一相机锁。WPF 已包 `Task.Run` 不卡 UI，但长超时互相排队拖吞吐。需真实相机验证，排 .NET 10 窗口。 | `Infrastructure/Cameras/BaslerCamera.cs` | 未开始 |
 
 ### P2（性能/工程化，建议配合 .NET 10 升级）
 
@@ -48,6 +53,7 @@
 | 11 | 本地化缺失（中文硬编码进 XAML，`.resx` 数量 0） | 721 处 | 未开始 |
 | 12 | 硬编码尺寸/颜色（`UseLayoutRounding` 仅 1 处） | 924 Margin / 655 尺寸 / 111 颜色 | 未开始 |
 | 13 | 布局嵌套过深 | `CommunicationPage.xaml:238` 最深 18 层 | 未开始 |
+| 14 | **CalibrationWizardViewModel.cs「每行空一行」怪异格式**（454 空行/769 行，提交时即存在，git HEAD 同款）——疑似历史格式化工具误写，建议一次格式化收敛 | `Wpf/Features/CalibrationWizard/CalibrationWizardViewModel.cs` | 未开始 |
 
 ### 环境/流程注意事项（勿当 bug）
 
