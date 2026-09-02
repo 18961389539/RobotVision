@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="appsettings.Development.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- 仅拷贝示例配方 JSON；大体积 ONNX 与运行时数据由 appsettings DataRoot / ModelsFolder 指向，避免每次构建复制整包。 -->
     <None Include="..\..\recipes\*.json" CopyToOutputDirectory="PreserveNewest" Link="recipes.samples\%(Filename)%(Extension)" />
     <!-- MaskCaliperTabTimingTests 从 bin 的 recipes\ 读 OSDP.json；上面的通配只拷到 recipes.samples\，这里显式补拷一份。 -->
