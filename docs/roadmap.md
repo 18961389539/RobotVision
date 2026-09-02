@@ -25,6 +25,7 @@
 | `d32b6ad` | **UprightCrop 裁剪窗显式长/短边**：修复 MinAreaRect 表示歧义（Width 可能为短边）导致的转正窗错向（-33° 目标被裁）；warp 保持原口径；参考实现同步 |
 | `87c921d` | **ShapeMatch 接入 NoFlipConstraint**：跳过翻转窗判决（±20° 内极性不可靠误走 180° 支）；UprightCrop 无向 warp 已处理整体 180° |
 | `f2b8f6c` | **翻转判决极性证据门**：两支极性(polar0/polar180)须分离 ≥0.5×|PolarTeach| 才可判 180° 相位，否则信任主窗——默认(NoFlip=false)配置下 8.7°/20° 误翻转 174° 事故修复(err 1.33°/5.65°)；FollowsRotation(37/180) 正向对照仍绿；+2 回归 |
+| `a3969f3` | **精度基线回归** `PrecisionBaselineTests`(+10)：固化实测可达精度——TPL 角度 ≤0.2/0.6/0.6°(0°/1.3°/3.2° 残差)、TPL XY ≤±0.8px、SHP 恒等 ≤1.0°(rng3)、SHP 平移 ≤0.75px(基线校正)；合成基线非规格书，真机标定后收紧 |
 
 对应评审报告：`docs/review/2026-09-02-Wpf-CodeReview.md`、`docs/review/2026-09-02-Repo-Audit.md`。
 
