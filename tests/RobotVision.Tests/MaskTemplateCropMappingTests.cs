@@ -332,8 +332,11 @@ public sealed class MaskTemplateCropMappingTests
         using var m = Cv2.GetRotationMatrix2D(rect.Center, -warpAngleDeg, 1.0);
         using var rotated = new Mat();
         Cv2.WarpAffine(src, rotated, m, src.Size(), InterpolationFlags.Linear, BorderTypes.Reflect101);
-        var cropW = (int)Math.Ceiling(rect.Size.Width * (1 + 2 * marginRatio));
-        var cropH = (int)Math.Ceiling(rect.Size.Height * (1 + 2 * marginRatio));
+        // 与 UprightCrop 同口径：显式长/短边（MinAreaRect 的 Width/Height 表示顺序不保证）
+        var longLen = Math.Max(rect.Size.Width, rect.Size.Height);
+        var shortLen = Math.Min(rect.Size.Width, rect.Size.Height);
+        var cropW = (int)Math.Ceiling(longLen * (1 + 2 * marginRatio));
+        var cropH = (int)Math.Ceiling(shortLen * (1 + 2 * marginRatio));
         var x = Math.Clamp((int)Math.Floor(rect.Center.X - cropW / 2.0), 0, Math.Max(0, rotated.Width - 1));
         var y = Math.Clamp((int)Math.Floor(rect.Center.Y - cropH / 2.0), 0, Math.Max(0, rotated.Height - 1));
         cropW = Math.Min(cropW, rotated.Width - x);

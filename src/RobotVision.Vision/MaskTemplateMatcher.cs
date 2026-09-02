@@ -26,10 +26,15 @@ public static partial class MaskTemplateMatcher
                            + extraWarpDeg;
         var center = housing is { } hh ? hh.Center : rect.Center;
 
-        var marginX = rect.Size.Width * marginRatio;
-        var marginY = rect.Size.Height * marginRatio;
-        var cropW = (int)Math.Ceiling(rect.Size.Width + 2 * marginX);
-        var cropH = (int)Math.Ceiling(rect.Size.Height + 2 * marginY);
+        // 裁剪窗尺寸显式用长/短边（max/min），不随 MinAreaRect 的 Width/Height 表示顺序变化：
+        // OpenCV 对同一矩形可返回 (Width=长边,A=α) 或 (Width=短边,A=α±90)，直接读 Size 会让
+        // 转正后的窗方向与目标错位（如 -33° 目标被裁）。warp 角保持原口径（不在此改动）。
+        var longLen = Math.Max(rect.Size.Width, rect.Size.Height);
+        var shortLen = Math.Min(rect.Size.Width, rect.Size.Height);
+        var marginX = longLen * marginRatio;
+        var marginY = shortLen * marginRatio;
+        var cropW = (int)Math.Ceiling(longLen + 2 * marginX);
+        var cropH = (int)Math.Ceiling(shortLen + 2 * marginY);
         var x = (int)Math.Floor(center.X - cropW / 2.0);
         var y = (int)Math.Floor(center.Y - cropH / 2.0);
 
