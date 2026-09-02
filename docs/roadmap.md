@@ -35,10 +35,10 @@
 
 | # | 项 | 位置 | 状态 |
 |---|---|---|---|
-| 3 | **Core 层统一 IsFinite 校验**（纵深防御）。评审建议 Core 层统一后 UI 层可简化；当前 WPF 层已单点拦截（`f4b4e0b`），Core/Infrastructure 仍有 62 处分散 `IsFinite/IsNaN`，未统一入口。 | Core/Infrastructure | 未开始 |
-| 4 | **ChatDangerousActionGuard 剩余风险**：~~IntentKeywords 单字词（"改"/"停"）误命中~~ → **已修复**（移除单字词，保留双字"修改/停止/停用"等；新增闲聊不绕过回归测试）。`targets.Count==0 → 放行` 通用规则经核实：所有危险工具（manage_recipe/set_camera/clear_inhibit/manage_calibration）工具层均有空参校验，放行后会被工具层拒绝——风险已闭环，维持现状。 | `Hosting/Chat/ChatDangerousActionGuard.cs:49-50` | ✅ 部分修复 |
-| 5 | ~~13 个环境性测试失败~~ → **已解决**（`177ae7d`）：Skip 机制修复后 Hardware/Live/BakeOff/Bench 11 项转跳过；SmoothRectangle 与 ApplicationPaths 2 个真实 bug 已修。全量 935 通过 + 11 跳过 + 0 失败。 | `tests/RobotVision.Tests` | ✅ `177ae7d` |
-| 6 | **ONNX Runtime 版本**：`Intel.ML.OnnxRuntime.OpenVino 1.22.0`（换包源），上游已 1.29+。评估升级收益与 OpenVino EP 兼容性。 | `Directory.Packages.props` | 未开始 |
+| 3 | **Core 层统一 IsFinite 校验**。~~62 处分散~~ → **2026-09-02 实证复核：关闭**——实测仅 39 处，且分布于几何/校准/推理各计算点的中间值校验（AngleGeometry/PolynomialCalibrator/MaskCaliperTab 等），每处上下文不同属正常防御，强制统一入口反损可读性。与既往 grep 误报同型（数字≠真问题）。 | Core/Infrastructure | ✅ 关闭 |
+| 4 | **ChatDangerousActionGuard 剩余风险**：~~IntentKeywords 单字词（"改"/"停"）误命中~~ → **已修复**（`4398062`，移除单字词，保留双字"修改/停止/停用"等；新增闲聊不绕过回归测试）。`targets.Count==0 → 放行` 通用规则经核实：所有危险工具（manage_recipe/set_camera/clear_inhibit/manage_calibration）工具层均有空参校验，放行后会被工具层拒绝——风险已闭环，维持现状。 | `Hosting/Chat/ChatDangerousActionGuard.cs:49-50` | ✅ `4398062` |
+| 5 | ~~13 个环境性测试失败~~ → **已解决**（`177ae7d`）：Skip 机制修复后 Hardware/Live/BakeOff/Bench 11 项转跳过；SmoothRectangle 与 ApplicationPaths 2 个真实 bug 已修。全量 936 通过 + 11 跳过 + 0 失败。 | `tests/RobotVision.Tests` | ✅ `177ae7d` |
+| 6 | **ONNX Runtime（OpenVINO EP）升级评估**（2026-09-02 完成）→ **版本线澄清**：`Intel.ML.OnnxRuntime.OpenVino` 1.22.0 已是 OpenVINO EP 专用线，镜像最高 1.24.1（=OpenVINO 2025.4.1）；记忆"落后到 1.29"混淆了 `Microsoft.ML.OnnxRuntime.Managed`（1.29.0，本项目未用）。**兼容性**：lock `[1.22.0,)` 开区间无冲突；`YoloDotNetEngineFactory.cs:126-134` 的 `OpenVino{Precision=FP16/FP32}` 属 ORT 1.23 起弃用 options（precision→load_config），EP 1.1.0 内部翻译，升级后 precision 语义可能变。**建议**：随 .NET 10 升级一并评估（需真机 OpenVINO 精度回归），不急单独升。 | `Directory.Packages.props` | 已评估，待 .NET 10 |
 | 7 | **推理策略静态 `[ThreadStatic] LastDebug`（降级自 P1-3）**：4 个策略（MaskCaliperTab/MaskShapeMatch/MaskSiftRefine/MaskTemplateMatcher）各有一份，**实证非运行时 bug**——所有读取方与策略调用同一同步调用栈、入口 `default` 重置、ThreadStatic 天然线程隔离。真实问题是隐式状态传递 + `PickAutoLayout` 依赖副作用选布局，属可维护性债。建议后续改为显式返回 DebugInfo（非本迭代）。 | `Inference/Strategies/*.cs`（9 文件 36 处） | 降级 P2，未开始 |
 | 8 | **BaslerCamera 锁内长阻塞**：`_grabLock` 内 `GrabOne(_grabTimeoutMs 默认 60000ms)` + 连接期 `Thread.Sleep(1000)`，UI 预览/标定/管线取图共用同一相机锁。WPF 已包 `Task.Run` 不卡 UI，但长超时互相排队拖吞吐。需真实相机验证，排 .NET 10 窗口。 | `Infrastructure/Cameras/BaslerCamera.cs` | 未开始 |
 
