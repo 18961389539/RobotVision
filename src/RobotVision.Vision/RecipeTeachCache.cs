@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using RobotVision.Core.Recipe;
 
-namespace RobotVision.Infrastructure.Inference.Strategies;
+namespace RobotVision.Vision.Inference.Strategies;
 
 internal interface IRecipeTeachCache
 {

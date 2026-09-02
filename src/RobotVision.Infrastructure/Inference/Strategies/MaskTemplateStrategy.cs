@@ -4,6 +4,7 @@ using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
+using RobotVision.Vision.Inference.Strategies;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Inference;
 

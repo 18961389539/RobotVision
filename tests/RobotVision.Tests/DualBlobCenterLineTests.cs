@@ -3,6 +3,7 @@ using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Vision.Inference.Strategies;
 using Xunit;
 
 namespace RobotVision.Tests;

@@ -4,7 +4,7 @@ using OpenCvSharp.Features2D;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Recipe;
 
-namespace RobotVision.Infrastructure.Inference.Strategies;
+namespace RobotVision.Vision.Inference.Strategies;
 
 /// <summary>
 /// 示教模板与当前分割框内原图做 SIFT 匹配，RANSAC 相似变换给出有向角和中心。

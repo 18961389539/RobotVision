@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Recipe;
-using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Vision.Inference.Strategies;
 
 namespace RobotVision.Teach;
 

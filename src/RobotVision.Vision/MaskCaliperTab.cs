@@ -2,7 +2,7 @@ using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Recipe;
 
-namespace RobotVision.Infrastructure.Inference.Strategies;
+namespace RobotVision.Vision.Inference.Strategies;
 
 /// <summary>卡尺探针布局：齿列/缺口在上下时优先沿短轴布探针，抓左右两条长边。</summary>
 public enum CaliperProbeLayout

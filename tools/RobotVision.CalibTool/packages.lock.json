@@ -93,9 +93,17 @@
           "OpenCvSharp4": "[4.10.0.20240615, )",
           "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )",
+          "RobotVision.Vision": "[1.0.0, )",
           "System.IO.Ports": "[8.0.0, )",
           "YoloDotNet": "[4.2.0, )",
           "YoloDotNet.ExecutionProvider.OpenVino": "[1.1.0, )"
+        }
+      },
+      "robotvision.vision": {
+        "type": "Project",
+        "dependencies": {
+          "OpenCvSharp4": "[4.10.0.20240615, )",
+          "RobotVision.Core": "[1.0.0, )"
         }
       },
       "Basler.Pylon.NET.x64": {

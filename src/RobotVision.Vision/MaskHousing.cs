@@ -1,7 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
 
-namespace RobotVision.Infrastructure.Inference.Strategies;
+namespace RobotVision.Vision.Inference.Strategies;
 
 /// <summary>壳体框：剔除短轴一侧凸起后的外接矩形，用于粗角/转正中心，避免分割把凸起画肥时中心被拖偏。</summary>
 public readonly record struct HousingFrame(

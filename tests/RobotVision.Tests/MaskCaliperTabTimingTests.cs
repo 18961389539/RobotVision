@@ -2,6 +2,7 @@ using System.Diagnostics;
 using OpenCvSharp;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Vision.Inference.Strategies;
 using Xunit;
 using Xunit.Abstractions;
 

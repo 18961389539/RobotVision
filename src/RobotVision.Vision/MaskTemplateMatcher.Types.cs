@@ -1,6 +1,6 @@
 using OpenCvSharp;
 
-namespace RobotVision.Infrastructure.Inference.Strategies;
+namespace RobotVision.Vision.Inference.Strategies;
 
 /// <summary>模板匹配结果：匹配分数、相对转正模板的旋转角（度）、匹配中心在转正图坐标系的位置。</summary>
 public sealed record MaskTemplateMatchResult(double Score, double RotationDeg, Point2d CenterInUpright);

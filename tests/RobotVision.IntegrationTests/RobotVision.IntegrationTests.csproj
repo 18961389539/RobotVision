@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\RobotVision.Hosting\RobotVision.Hosting.csproj" />
     <ProjectReference Include="..\..\src\RobotVision.Infrastructure\RobotVision.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\RobotVision.Vision\RobotVision.Vision.csproj" />
     <ProjectReference Include="..\..\src\RobotVision.Core\RobotVision.Core.csproj" />
   </ItemGroup>
 

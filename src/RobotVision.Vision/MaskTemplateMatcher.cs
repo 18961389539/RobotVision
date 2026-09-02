@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
 
-namespace RobotVision.Infrastructure.Inference.Strategies;
+namespace RobotVision.Vision.Inference.Strategies;
 
 public static partial class MaskTemplateMatcher
 {

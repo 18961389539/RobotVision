@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- 纯视觉算法库：模板匹配/卡尺/SIFT/形状匹配/壳体几何，零硬件与推理会话依赖 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RobotVision.Core\RobotVision.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4" />
+  </ItemGroup>
+
+  <!-- 算法内部成员(LastDebug/FormatQualityNote 等调试与质量口径)仍供推理编排层访问；
+       不扩大为 public 以保持算法 API 面最小。 -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="RobotVision.Infrastructure" />
+    <InternalsVisibleTo Include="RobotVision.Teach" />
+    <InternalsVisibleTo Include="RobotVision.Tests" />
+  </ItemGroup>
+
+</Project>

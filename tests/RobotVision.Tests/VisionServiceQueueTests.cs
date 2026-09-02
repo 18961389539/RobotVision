@@ -5,6 +5,7 @@ using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Calibration;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Vision.Inference.Strategies;
 using RobotVision.Infrastructure.Lighting;
 using Xunit;
 

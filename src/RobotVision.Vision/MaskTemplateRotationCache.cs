@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using OpenCvSharp;
 using RobotVision.Core.Recipe;
 
-namespace RobotVision.Infrastructure.Inference.Strategies;
+namespace RobotVision.Vision.Inference.Strategies;
 
 /// <summary>
 /// 按配方当前 <c>refineRangeDeg</c> 预旋转的模板库（1° 网格，0°±range ∪ 180°±range）。

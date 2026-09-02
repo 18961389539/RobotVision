@@ -1,6 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using OpenCvSharp;
 using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Vision.Inference.Strategies;
 
 namespace RobotVision.Benchmarks;
 

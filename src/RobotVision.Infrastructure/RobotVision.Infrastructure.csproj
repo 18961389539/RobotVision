@@ -48,6 +48,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RobotVision.Core\RobotVision.Core.csproj" />
+    <ProjectReference Include="..\RobotVision.Vision\RobotVision.Vision.csproj" />
   </ItemGroup>
 
   <ItemGroup>

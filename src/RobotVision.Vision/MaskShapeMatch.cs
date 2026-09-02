@@ -2,7 +2,7 @@ using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Recipe;
 
-namespace RobotVision.Infrastructure.Inference.Strategies;
+namespace RobotVision.Vision.Inference.Strategies;
 
 /// <summary>
 /// 开源几何匹配（Chamfer）：示教 Canny 点落在当前转正窗距离场上的平均距离。

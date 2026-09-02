@@ -1,6 +1,7 @@
 using FluentAssertions;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Vision.Inference.Strategies;
 using RobotVision.Teach;
 using RobotVision.WpfHost.Features.Recipe;
 

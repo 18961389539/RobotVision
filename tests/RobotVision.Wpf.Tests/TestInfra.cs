@@ -10,6 +10,7 @@ using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
+using RobotVision.Vision.Inference.Strategies;
 using RobotVision.Infrastructure.Lighting;
 using RobotVision.WpfHost;
 using RobotVision.WpfHost.Shared;

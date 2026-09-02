@@ -2,6 +2,7 @@ using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
+using RobotVision.Vision.Inference.Strategies;
 using RobotVision.Infrastructure.Inference;
 
 namespace RobotVision.Infrastructure.Inference.Strategies;

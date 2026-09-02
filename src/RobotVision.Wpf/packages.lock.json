@@ -552,6 +552,7 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.11, )",
           "RobotVision.Infrastructure": "[1.0.0, )",
           "RobotVision.Teach": "[1.0.0, )",
+          "RobotVision.Vision": "[1.0.0, )",
           "Serilog": "[4.0.2, )",
           "Serilog.Extensions.Logging": "[8.0.0, )",
           "Serilog.Sinks.File": "[6.0.0, )"
@@ -568,6 +569,7 @@
           "OpenCvSharp4": "[4.10.0.20240615, )",
           "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )",
+          "RobotVision.Vision": "[1.0.0, )",
           "System.IO.Ports": "[8.0.0, )",
           "YoloDotNet": "[4.2.0, )",
           "YoloDotNet.ExecutionProvider.OpenVino": "[1.1.0, )"
@@ -579,7 +581,15 @@
           "OpenCvSharp4": "[4.10.0.20240615, )",
           "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )",
-          "RobotVision.Infrastructure": "[1.0.0, )"
+          "RobotVision.Infrastructure": "[1.0.0, )",
+          "RobotVision.Vision": "[1.0.0, )"
+        }
+      },
+      "robotvision.vision": {
+        "type": "Project",
+        "dependencies": {
+          "OpenCvSharp4": "[4.10.0.20240615, )",
+          "RobotVision.Core": "[1.0.0, )"
         }
       },
       "Basler.Pylon.NET.x64": {
@@ -778,84 +788,6 @@
         "dependencies": {
           "Intel.ML.OnnxRuntime.OpenVino": "1.22.0",
           "YoloDotNet": "4.0.0"
-        }
-      }
-    },
-    "net10.0-windows7.0/win-x64": {
-      "Microsoft.Web.WebView2": {
-        "type": "Direct",
-        "requested": "[1.0.2903.40, )",
-        "resolved": "1.0.2903.40",
-        "contentHash": "THrzYAnJgE3+cNH+9Epr44XjoZoRELdVpXlWGPs6K9C9G6TqyDfVCeVAR/Er8ljLitIUX5gaSkPsy9wRhD1sgQ=="
-      },
-      "runtime.linux-arm.runtime.native.System.IO.Ports": {
-        "type": "Transitive",
-        "resolved": "8.0.0",
-        "contentHash": "gK720fg6HemDg8sXcfy+xCMZ9+hF78Gc7BmREbmkS4noqlu1BAr9qZtuWGhLzFjBfgecmdtl4+SYVwJ1VneZBQ=="
-      },
-      "runtime.linux-arm64.runtime.native.System.IO.Ports": {
-        "type": "Transitive",
-        "resolved": "8.0.0",
-        "contentHash": "KYG6/3ojhEWbb3FwQAKgGWPHrY+HKUXXdVjJlrtyCLn3EMcNTaNcPadb2c0ndQzixZSmAxZKopXJr0nLwhOrpQ=="
-      },
-      "runtime.linux-x64.runtime.native.System.IO.Ports": {
-        "type": "Transitive",
-        "resolved": "8.0.0",
-        "contentHash": "Wnw5vhA4mgGbIFoo6l9Fk3iEcwRSq49a1aKwJgXUCUtEQLCSUDjTGSxqy/oMUuOyyn7uLHsH8KgZzQ1y3lReiQ=="
-      },
-      "runtime.osx-arm64.runtime.native.System.IO.Ports": {
-        "type": "Transitive",
-        "resolved": "8.0.0",
-        "contentHash": "rbUBLAaFW9oVkbsb0+XSrAo2QdhBeAyzLl5KQ6Oci9L/u626uXGKInsVJG6B9Z5EO8bmplC8tsMiaHK8wOBZ+w=="
-      },
-      "runtime.osx-x64.runtime.native.System.IO.Ports": {
-        "type": "Transitive",
-        "resolved": "8.0.0",
-        "contentHash": "IcfB4jKtM9pkzP9OpYelEcUX1MiDt0IJPBh3XYYdEISFF+6Mc+T8WWi0dr9wVh1gtcdVjubVEIBgB8BHESlGfQ=="
-      },
-      "SkiaSharp.NativeAssets.macOS": {
-        "type": "Transitive",
-        "resolved": "3.119.1",
-        "contentHash": "6hR3BdLhApjDxR1bFrJ7/lMydPfI01s3K+3WjIXFUlfC0MFCFCwRzv+JtzIkW9bDXs7XUVQS+6EVf0uzCasnGQ=="
-      },
-      "SkiaSharp.NativeAssets.Win32": {
-        "type": "Transitive",
-        "resolved": "3.119.1",
-        "contentHash": "8C4GSXVJqSr0y3Tyyv5jz6MJSTVUyYkMjeKrzK+VyZPGLo89MNoUEclVuYahzOCDdtbfXrd2HtxXfDuvoSXrUw=="
-      },
-      "SQLitePCLRaw.lib.e_sqlite3": {
-        "type": "Transitive",
-        "resolved": "2.1.12",
-        "contentHash": "fWi8Dbknuhgg72fWinIdjXVaqO1hHL4YBBwVLnr7e1c9TAZwJ0QE38j9syW1hwx6HaqEVTwI+O07WPdZn8Rp0w=="
-      },
-      "Intel.ML.OnnxRuntime.OpenVino": {
-        "type": "CentralTransitive",
-        "requested": "[1.22.0, )",
-        "resolved": "1.22.0",
-        "contentHash": "jn+XCTMHQ7Sz2ncaSMoR0HPFIbVhViLvUiZSUzJ2VwLMVXpYpTkAaFgDpTjwqL9kQLvxoUGqYFRKvK2S3/D+Ew==",
-        "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.22.0"
-        }
-      },
-      "LDVisionCamera.Net": {
-        "type": "CentralTransitive",
-        "requested": "[1.0.0-rc.37, )",
-        "resolved": "1.0.0-rc.37",
-        "contentHash": "03Ui4e6Mq7K8XjAg+CjKllIR4GRyGr3RoGsaV/Pm+p1iheKhlneQOvPmrMLpNrbb/9xtVahDDloQT34JknVs6Q=="
-      },
-      "OpenCvSharp4.runtime.win": {
-        "type": "CentralTransitive",
-        "requested": "[4.10.0.20240615, )",
-        "resolved": "4.10.0.20240615",
-        "contentHash": "+BmRAXnKdwJxJ8qzjrXXK/bbQ/KpEwe9RM+X+/wf9hQ+ULPY1BP7k31LQTQRiEpPLGZGWfJUF2bchkW9cqT8cw=="
-      },
-      "System.IO.Ports": {
-        "type": "CentralTransitive",
-        "requested": "[8.0.0, )",
-        "resolved": "8.0.0",
-        "contentHash": "MaiPbx2/QXZc62gm/DrajRrGPG1lU4m08GWMoWiymPYM+ba4kfACp2PbiYpqJ4QiFGhHD00zX3RoVDTucjWe9g==",
-        "dependencies": {
-          "runtime.native.System.IO.Ports": "8.0.0"
         }
       }
     }

@@ -1,4 +1,4 @@
-namespace RobotVision.Infrastructure.Inference.Strategies;
+namespace RobotVision.Vision.Inference.Strategies;
 
 /// <summary>
 /// 按键缓存带租约的本机资源：Acquire 增加租约，Remove / 指纹重建只退役条目；
