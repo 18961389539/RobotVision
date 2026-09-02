@@ -491,6 +491,44 @@ public sealed class MaskTemplateMatchTests : IDisposable
     }
 
     [Fact]
+    public void MatchBest_SubPixelCenter_TracksHalfPixelPlacement()
+    {
+        // 亚像素定位：模板放画布中心后整体平移 (0.5, -0.3)px（Linear 插值等效目标亚像素放置），
+        // 整像素匹配必然差 ≥0.3px；亚像素修正应使 CenterInUpright 贴近真实位置。
+        const int canvas = 400;
+        using var full = new Mat(canvas, canvas, MatType.CV_8UC3, new Scalar(55, 55, 55));
+        var px = (canvas - _template.Width) / 2;
+        var py = (canvas - _template.Height) / 2;
+        _template.CopyTo(full[new Rect(px, py, _template.Width, _template.Height)]);
+
+        using var shifted = new Mat();
+        using var m = new Mat(2, 3, MatType.CV_64FC1);
+        m.SetArray(new double[] { 1, 0, 0.5, 0, 1, -0.3 });
+        Cv2.WarpAffine(full, shifted, m, new Size(canvas, canvas), InterpolationFlags.Linear,
+            BorderTypes.Constant, new Scalar(55, 55, 55));
+
+        // 直接匹配（不转正，模拟平移匹配）；模板与目标同朝向、range=1 避免角度歧义
+        using var bank = MaskTemplateMatcher.CreateRotationBank(_template, 1);
+        var match = MaskTemplateMatcher.MatchBest(shifted, _template, refineRangeDeg: 1, minScore: 0.3,
+            rotated: bank, orientationBranchDeg: 0);
+        Assert.NotNull(match);
+
+        // 匹配峰（结果图左上角）→ 模板中心 = maxLoc + tpl/2 = CenterInUpright；
+        // 真实模板中心 = (canvas/2 + 0.5, canvas/2 - 0.3)（原中心 200,200 + 平移）
+        var expectX = canvas / 2.0 + 0.5;
+        var expectY = canvas / 2.0 - 0.3;
+        var dx = Math.Abs(match.CenterInUpright.X - expectX);
+        var dy = Math.Abs(match.CenterInUpright.Y - expectY);
+        // X 方向（竖线周期纹理）峰锐利，亚像素应 <0.25（断言裕量 0.35）。
+        // Y 方向 PaintTemplate 无横向边缘（竖线贯穿），NCC 峰钝，抛物线插值不保证
+        // 亚像素——只断言不劣化超整像素（≤0.7），避免把模板纹理缺陷当算法失败。
+        Assert.True(dx < 0.35,
+            $"X 亚像素应贴近真实位置：期望 {expectX:0.0}，实际 {match.CenterInUpright.X:0.00}，误差 {dx:0.00}");
+        Assert.True(dy < 0.7,
+            $"Y 不应劣化超整像素：期望 {expectY:0.0}，实际 {match.CenterInUpright.Y:0.00}，误差 {dy:0.00}");
+    }
+
+    [Fact]
     public void RotationCache_SkipWhenUprightCropOff()
     {
         using var cache = new MaskTemplateRotationCache();

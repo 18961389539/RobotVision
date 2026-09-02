@@ -302,7 +302,7 @@ public static partial class MaskTemplateMatcher
         var hasNext = TryScoreAt(rotations, best.Deg + SearchFineStep, out var next);
         var delta = hasPrev && hasNext ? SubDegreeOffset(prev, best.Score, next) : 0;
 
-        // 中心位置按插值角微调可忽略（1° 内平移 <1px），直接用最佳匹配中心
+        // 中心已是亚像素（SampleAngleBand 内抛物线插值）；按插值角微调可忽略（1° 内平移 <1px）
         return new MaskTemplateMatchResult(best.Score, best.Deg + delta, best.Center);
     }
 
@@ -338,8 +338,11 @@ public static partial class MaskTemplateMatcher
                     continue;
                 using var result = upright.MatchTemplate(rotated, TemplateMatchModes.CCoeffNormed);
                 Cv2.MinMaxLoc(result, out _, out var maxVal, out _, out var maxLoc);
+                // 亚像素中心：响应峰抛物线插值 ±0.5px（最佳角度即最终 XY，亚像素修正提升贴合精度）
+                var sub = SubPixelPeakOffset(result, maxLoc);
                 rotations.Add(new AngleSample(deg, maxVal,
-                    new Point2d(maxLoc.X + rotated.Width / 2.0, maxLoc.Y + rotated.Height / 2.0),
+                    new Point2d(maxLoc.X + sub.X + rotated.Width / 2.0,
+                        maxLoc.Y + sub.Y + rotated.Height / 2.0),
                     rotated.Width, rotated.Height));
             }
             finally
@@ -739,8 +742,11 @@ public static partial class MaskTemplateMatcher
                 return null;
             using var result = upright.MatchTemplate(rotated, TemplateMatchModes.CCoeffNormed);
             Cv2.MinMaxLoc(result, out _, out var maxVal, out _, out var maxLoc);
+            // 亚像素中心：响应峰抛物线插值 ±0.5px，较整像素 maxLoc 提升贴合精度
+            var sub = SubPixelPeakOffset(result, maxLoc);
             return new MaskTemplateMatchResult(maxVal, deg,
-                new Point2d(maxLoc.X + rotated.Width / 2.0, maxLoc.Y + rotated.Height / 2.0));
+                new Point2d(maxLoc.X + sub.X + rotated.Width / 2.0,
+                    maxLoc.Y + sub.Y + rotated.Height / 2.0));
         }
         finally
         {
@@ -988,5 +994,44 @@ public static partial class MaskTemplateMatcher
             return 0;
         var offset = 0.5 * (prev - next) / denom;
         return Math.Clamp(offset, -0.5, 0.5);
+    }
+
+    /// <summary>
+    /// MatchTemplate 响应图（CV_32F，CCoeffNormed）在整像素峰附近的亚像素偏移：
+    /// 沿 X/Y 各做一维抛物线插值，clamp ±0.5px。响应峰接近高斯时精度 ~0.1px；
+    /// 边缘/边界取不到邻点时返回 0（退回整像素）。
+    /// </summary>
+    private static Point2d SubPixelPeakOffset(Mat response, Point maxLoc)
+    {
+        static double OffsetAt(Mat r, int x, int y, bool horizontal)
+        {
+            int xm, xc, xp;
+            if (horizontal)
+            {
+                xm = Math.Max(0, x - 1);
+                xc = x;
+                xp = Math.Min(r.Cols - 1, x + 1);
+                if (xm == xc || xp == xc)
+                    return 0;
+                var (a, b, c) = (r.At<float>(y, xm), r.At<float>(y, xc), r.At<float>(y, xp));
+                var denom = a - 2 * b + c;
+                return Math.Abs(denom) < 1e-9 ? 0 : Math.Clamp(0.5 * (a - c) / denom, -0.5, 0.5);
+            }
+            else
+            {
+                xm = Math.Max(0, y - 1);
+                xc = y;
+                xp = Math.Min(r.Rows - 1, y + 1);
+                if (xm == xc || xp == xc)
+                    return 0;
+                var (a, b, c) = (r.At<float>(xm, x), r.At<float>(xc, x), r.At<float>(xp, x));
+                var denom = a - 2 * b + c;
+                return Math.Abs(denom) < 1e-9 ? 0 : Math.Clamp(0.5 * (a - c) / denom, -0.5, 0.5);
+            }
+        }
+
+        var dx = OffsetAt(response, maxLoc.X, maxLoc.Y, horizontal: true);
+        var dy = OffsetAt(response, maxLoc.X, maxLoc.Y, horizontal: false);
+        return new Point2d(dx, dy);
     }
 }
