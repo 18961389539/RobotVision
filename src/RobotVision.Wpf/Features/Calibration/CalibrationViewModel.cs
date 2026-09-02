@@ -51,6 +51,27 @@ public partial class ScaleCardItem : ObservableObject
     [NotifyPropertyChangedFor(nameof(Quality))]
     private double _scaleY;
 
+    private double _initialX;
+    private double _initialY;
+
+    /// <summary>卡片 X/Y 相对加载时初始值是否有未保存修改（切页提示用）。</summary>
+    [ObservableProperty]
+    private bool _isDirty;
+
+    partial void OnScaleXChanged(double value) => RefreshDirty();
+
+    partial void OnScaleYChanged(double value) => RefreshDirty();
+
+    private void RefreshDirty() => IsDirty = ScaleX != _initialX || ScaleY != _initialY;
+
+    /// <summary>从档案载入后调用：记录初始值并清脏（QuickSave 成功后经 Refresh 重建也会走这里）。</summary>
+    internal void MarkClean()
+    {
+        _initialX = ScaleX;
+        _initialY = ScaleY;
+        IsDirty = false;
+    }
+
     public string Resolution => Width > 0 ? $"{Width}×{Height}" : "未记录";
 
     public string FieldOfView =>
@@ -60,16 +81,21 @@ public partial class ScaleCardItem : ObservableObject
 
     public string Quality => CalibrationViewModel.AssessScaleQuality(ScaleX, ScaleY);
 
-    public static ScaleCardItem FromProfile(ScaleProfile p) => new()
+    public static ScaleCardItem FromProfile(ScaleProfile p)
     {
-        StationId = p.StationId,
-        CameraId = p.CameraId,
-        Width = p.Width,
-        Height = p.Height,
-        ScaleX = p.ScaleX,
-        ScaleY = p.ScaleY,
-        CalibratedAt = p.CalibratedAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
-    };
+        var item = new ScaleCardItem
+        {
+            StationId = p.StationId,
+            CameraId = p.CameraId,
+            Width = p.Width,
+            Height = p.Height,
+            ScaleX = p.ScaleX,
+            ScaleY = p.ScaleY,
+            CalibratedAt = p.CalibratedAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+        };
+        item.MarkClean();
+        return item;
+    }
 }
 
 /// <summary>标定档案浏览：内参/外参/旋转中心/多项式档案的当前加载状态（含质量评估与删除），
@@ -93,6 +119,9 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
     public ObservableCollection<ScaleCardItem> Scales { get; } = [];
 
     public IReadOnlyList<string> CameraIds => _cameras.CameraIds.ToList();
+
+    /// <summary>比例卡片 X/Y 有就地编辑未保存（切页提示用）。</summary>
+    public bool HasUnsavedChanges => Scales.Any(s => s.IsDirty);
 
     public IReadOnlyList<CameraOption> CameraOptions =>
         CameraOption.FromRegistered(_cfg.Cameras, _cameras.CameraIds);
@@ -317,7 +346,9 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
     private void ApplyRefToX()
     {
         this.Commit();
-        if (RefLengthMm <= 0 || RefLengthPx <= 0)
+        // NaN 与任何数值比较均为 false，会穿透 "<= 0" 校验，必须显式检查 IsFinite
+        if (!double.IsFinite(RefLengthMm) || !double.IsFinite(RefLengthPx)
+            || RefLengthMm <= 0 || RefLengthPx <= 0)
         {
             ScaleFormMessageIsError = true;
             ScaleFormMessage = "换算助手需先填写物长 (mm) 与图上像素 (px)，均为正数";
@@ -331,7 +362,8 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
     private void ApplyRefToY()
     {
         this.Commit();
-        if (RefLengthMm <= 0 || RefLengthPx <= 0)
+        if (!double.IsFinite(RefLengthMm) || !double.IsFinite(RefLengthPx)
+            || RefLengthMm <= 0 || RefLengthPx <= 0)
         {
             ScaleFormMessageIsError = true;
             ScaleFormMessage = "换算助手需先填写物长 (mm) 与图上像素 (px)，均为正数";
@@ -537,6 +569,14 @@ public partial class CalibrationViewModel : ObservableObject, ICommitPendingEdit
 
     private void TryPersistScale(ScaleProfile profile, Func<string, string> successMessage)
     {
+        // 保存入口统一防线：任何来源（手改文件/换算助手/就地编辑）的 NaN/Infinity 比例都不得落盘
+        if (!double.IsFinite(profile.ScaleX) || !double.IsFinite(profile.ScaleY)
+            || profile.ScaleX <= 0 || profile.ScaleY <= 0)
+        {
+            ScaleFormMessageIsError = true;
+            ScaleFormMessage = $"比例值非法（必须为有限正数）：X {profile.ScaleX} · Y {profile.ScaleY}，未保存";
+            return;
+        }
         try
         {
             if (_calibration.GetScale(profile.StationId) is { } old &&

@@ -78,6 +78,32 @@ public sealed class LightingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public void BrightnessSetter_RejectsNonFinite_KeepPreviousValue()
+    {
+        var vm = CreateVm();
+        vm.Brightness = 128;
+
+        vm.Brightness = double.NaN;
+        vm.Brightness.Should().Be(128);
+
+        vm.Brightness = double.PositiveInfinity;
+        vm.Brightness.Should().Be(128);
+
+        vm.Brightness = double.NegativeInfinity;
+        vm.Brightness.Should().Be(128);
+    }
+
+    [Fact]
+    public void BrightnessSetter_RoundsToInteger()
+    {
+        var vm = CreateVm();
+
+        vm.Brightness = 12.6;
+
+        vm.Brightness.Should().Be(13);
+    }
+
+    [Fact]
     public void Delete_Selected_RemovesController()
     {
         var vm = CreateVm();

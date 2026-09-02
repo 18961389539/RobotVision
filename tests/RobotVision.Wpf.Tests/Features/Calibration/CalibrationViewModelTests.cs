@@ -532,4 +532,33 @@ public class CalibrationViewModelTests
         vm.ScaleFormMessage.Should().Contain("正数");
         vm.ScaleX.Should().Be(0);
     }
+
+    [Fact]
+    public void ApplyRef_WithNonFiniteInputs_ShowsError()
+    {
+        // NaN 会穿透 "<= 0" 校验（NaN 与任何数比较均为 false），必须被 IsFinite 显式拦截
+        var vm = CreateVm(new CalibrationManager());
+
+        vm.RefLengthMm = double.NaN;
+        vm.RefLengthPx = 1000;
+        vm.ApplyRefToXCommand.Execute(null);
+
+        vm.ScaleFormMessageIsError.Should().BeTrue();
+        vm.ScaleX.Should().Be(0);
+    }
+
+    [Fact]
+    public void SaveScale_WithNonFiniteRatio_BlocksPersist()
+    {
+        var calibration = new CalibrationManager();
+        var vm = CreateVm(calibration);
+
+        vm.ScaleStationId = "s_nan";
+        vm.ScaleX = double.NaN;
+        vm.ScaleY = 0.05;
+        vm.SaveScaleCommand.Execute(null);
+
+        vm.ScaleFormMessage.Should().Contain("未保存");
+        calibration.GetScale("s_nan").Should().BeNull();
+    }
 }

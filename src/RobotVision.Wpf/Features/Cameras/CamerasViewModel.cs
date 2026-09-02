@@ -319,7 +319,8 @@ public partial class CamerasViewModel : ObservableObject, ICommitPendingEdits, I
         }
         set
         {
-            if (_exposureMax <= _exposureMin)
+            // Math.Clamp 对 NaN 无效（NaN 比较恒为 false），直接返回 NaN 比例
+            if (!double.IsFinite(value) || _exposureMax <= _exposureMin)
                 return;
             ExposureUs = _exposureMin * Math.Pow(_exposureMax / _exposureMin, Math.Clamp(value, 0, 1000) / 1000);
         }

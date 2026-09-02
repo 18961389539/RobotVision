@@ -93,6 +93,36 @@ public sealed class ModelsViewModelTests : IDisposable
     }
 
     [Fact]
+    public void ThresholdSetters_RejectNonFinite_KeepPreviousValue()
+    {
+        var vm = CreateVm();
+        vm.Confidence = 0.42;
+        vm.PixelConfidence = 0.55;
+        vm.Iou = 0.61;
+
+        vm.Confidence = double.NaN;
+        vm.PixelConfidence = double.PositiveInfinity;
+        vm.Iou = double.NegativeInfinity;
+
+        vm.Confidence.Should().Be(0.42);
+        vm.PixelConfidence.Should().Be(0.55);
+        vm.Iou.Should().Be(0.61);
+    }
+
+    [Fact]
+    public void ThresholdSetters_AcceptFiniteRange_AndRaisePropertyChanged()
+    {
+        var vm = CreateVm();
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.Confidence = 0.9;
+
+        vm.Confidence.Should().Be(0.9);
+        changed.Should().Contain(nameof(vm.Confidence));
+    }
+
+    [Fact]
     public void Unload_WithoutSelection_ShowsHint()
     {
         var vm = CreateVm();

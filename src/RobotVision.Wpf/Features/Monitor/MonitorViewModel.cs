@@ -37,6 +37,7 @@ public partial class MonitorViewModel : ObservableObject, ICommitPendingEdits, I
     private readonly ILogger<MonitorViewModel> _log;
     private readonly DispatcherTimer _previewTimer;
     private readonly DispatcherTimer _interlockTimer;
+    private readonly PreviewBitmapSink _displaySink = new();
     private readonly Random _random = new();
 
     public Action? FlushPendingEdits { get; set; }
@@ -450,13 +451,12 @@ public partial class MonitorViewModel : ObservableObject, ICommitPendingEdits, I
             if (ct.IsCancellationRequested || !CanApplyPreviewFrame(generation, cameraId!))
                 return;
 
-            var source = ImageConverter.ToBitmapSource(buffer);
-
             UiDispatch.Begin(() =>
             {
                 if (!CanApplyPreviewFrame(generation, cameraId!))
                     return;
-                DisplayImage = source;
+                // 复用双缓冲 WriteableBitmap 写像素，避免每帧 new BitmapSource（须在 UI 线程）
+                DisplayImage = _displaySink.Write(buffer);
                 StatusText = $"预览中 · {cameraId}";
             });
         }
@@ -546,5 +546,6 @@ public partial class MonitorViewModel : ObservableObject, ICommitPendingEdits, I
         _previewTimer.Stop();
         InvalidatePreviewSession();
         _interlockTimer.Stop();
+        _displaySink.Dispose();
     }
 }

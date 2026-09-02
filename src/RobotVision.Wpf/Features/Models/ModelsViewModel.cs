@@ -64,6 +64,9 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
 
     public ObservableCollection<ModelFileItem> Files { get; } = [];
 
+    /// <summary>测试偏好有未落盘的修改（防抖定时器还在倒计时；切页提示用）。</summary>
+    public bool HasUnsavedChanges => _prefsSaveTimer.IsEnabled;
+
     /// <summary>推理任务下拉（中文：检测/分割/关键点），SelectedValue 绑定枚举。</summary>
     public IReadOnlyList<TaskOption> TaskOptions { get; } =
         Enum.GetValues<InferenceTask>().Select(t => new TaskOption(t, TaskLabel(t))).ToArray();
@@ -82,15 +85,48 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
     [NotifyPropertyChangedFor(nameof(TaskParamsHint))]
     private InferenceTask _selectedTask = InferenceTask.ObjectDetection;
 
-    [ObservableProperty]
     private double _confidence = 0.5;
 
+    /// <summary>置信度阈值。手写 setter 拒绝 NaN/Infinity（NaN 会穿透一切范围校验且令 Math.Clamp 失效）。</summary>
+    public double Confidence
+    {
+        get => _confidence;
+        set
+        {
+            var v = double.IsFinite(value) ? value : _confidence;
+            if (SetProperty(ref _confidence, v))
+                OnConfidenceChanged(v);
+        }
+    }
+
     /// <summary>分割掩码的像素置信度阈值（仅分割任务使用）。</summary>
-    [ObservableProperty]
     private double _pixelConfidence = 0.65;
 
-    [ObservableProperty]
+    /// <summary>像素置信度阈值，同 Confidence 的有限性防线。</summary>
+    public double PixelConfidence
+    {
+        get => _pixelConfidence;
+        set
+        {
+            var v = double.IsFinite(value) ? value : _pixelConfidence;
+            if (SetProperty(ref _pixelConfidence, v))
+                OnPixelConfidenceChanged(v);
+        }
+    }
+
     private double _iou = 0.7;
+
+    /// <summary>IoU 阈值，同 Confidence 的有限性防线。</summary>
+    public double Iou
+    {
+        get => _iou;
+        set
+        {
+            var v = double.IsFinite(value) ? value : _iou;
+            if (SetProperty(ref _iou, v))
+                OnIouChanged(v);
+        }
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TestImageFileCount))]
@@ -182,11 +218,12 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
 
     partial void OnSelectedTaskChanged(InferenceTask value) => ScheduleSavePrefs();
 
-    partial void OnConfidenceChanged(double value) => ScheduleSavePrefs();
+    /// <summary>阈值已改为手写属性，由 setter 在 SetProperty 成功后显式调用（不再由源生成器触发）。</summary>
+    private void OnConfidenceChanged(double value) => ScheduleSavePrefs();
 
-    partial void OnPixelConfidenceChanged(double value) => ScheduleSavePrefs();
+    private void OnPixelConfidenceChanged(double value) => ScheduleSavePrefs();
 
-    partial void OnIouChanged(double value) => ScheduleSavePrefs();
+    private void OnIouChanged(double value) => ScheduleSavePrefs();
 
     /// <summary>选中模型后自动匹配推理任务（已缓存会话 → 文件名启发式 → ONNX 元数据）。</summary>
     private async Task ApplyAutoTaskForSelectedModelAsync()

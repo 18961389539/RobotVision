@@ -70,6 +70,11 @@ public partial class App : Application, IDisposable
 
         // 重入保护：MessageBox 自带嵌套消息泵，期间的新异常不允许再弹框（否则递归至栈溢出）
         DispatcherUnhandledException += OnDispatcherUnhandledException;
+        // 兜底层：Dispatcher 之外的异常路径（后台线程、TaskScheduler 未观察的异步命令 fault）
+        // 此前缺失导致异步命令异常完全静默；两者均不能阻止进程终止（AppDomain）或已发生的丢弃，
+        // 但能保证任何异常至少留下日志/诊断文件。
+        AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
         ApplicationPaths.EnsureUserSettings();
 
@@ -187,17 +192,7 @@ public partial class App : Application, IDisposable
         var text = $"[第 {count} 次] {ex}";
         Console.Error.WriteLine(text);
         System.Diagnostics.Debug.WriteLine(text);
-        try
-        {
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rv-ui-exception.txt"),
-                DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture) + " " + text
-                + Environment.NewLine + new string('-', 80) + Environment.NewLine);
-        }
-        catch
-        {
-            // 诊断文件写入失败不影响后续处理
-        }
+        WriteDiagnosticsFile(text);
 
         if (_logger is not null)
             AppLog.DispatcherUnhandled(_logger, ex, count);
@@ -232,6 +227,50 @@ public partial class App : Application, IDisposable
 
     private static bool IsFatalUiException(Exception ex) =>
         ex is StackOverflowException or OutOfMemoryException or AccessViolationException;
+
+    /// <summary>AppDomain 级兜底：非 UI 线程的致命异常（进程将终止）。只留痕，不弹框（弹框无意义）。</summary>
+    private void OnAppDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is not Exception ex)
+            return;
+        var text = $"[AppDomain] {ex}";
+        Console.Error.WriteLine(text);
+        System.Diagnostics.Debug.WriteLine(text);
+        WriteDiagnosticsFile(text);
+        if (_logger is not null)
+            AppLog.AppDomainUnhandled(_logger, ex);
+    }
+
+    /// <summary>TaskScheduler 兜底：异步命令（AsyncRelayCommand）fault 被丢弃时由 GC 在此汇合。
+    /// 此前零注册导致产线静默失败；此处保证留痕并标记已观察（防止策略性杀进程）。</summary>
+    private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        var ex = e.Exception;
+        var text = $"[UnobservedTask] {ex}";
+        Console.Error.WriteLine(text);
+        System.Diagnostics.Debug.WriteLine(text);
+        WriteDiagnosticsFile(text);
+        if (_logger is not null)
+            AppLog.UnobservedTaskFault(_logger, ex);
+        e.SetObserved();
+    }
+
+    /// <summary>异常兜底统一落盘：UI 线程异常之外，后台线程/异步命令 fault 也写入同一诊断文件。
+    /// 写入失败不影响流程（诊断文件仅辅助现场排查）。</summary>
+    private static void WriteDiagnosticsFile(string text)
+    {
+        try
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rv-ui-exception.txt"),
+                DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture) + " " + text
+                + Environment.NewLine + new string('-', 80) + Environment.NewLine);
+        }
+        catch
+        {
+            // 诊断文件写入失败不影响后续处理
+        }
+    }
 
     private void PromptFatalAndShutdown(Exception ex)
     {

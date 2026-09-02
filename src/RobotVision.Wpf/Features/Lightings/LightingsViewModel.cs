@@ -27,6 +27,13 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
     private readonly IDialogService _dialogs;
     private readonly ILogger<LightingsViewModel> _log;
 
+    /// <summary>编辑区参数相对上次加载/保存是否有未保存修改（切页提示用）。</summary>
+    private bool _editDirty;
+
+    public bool HasUnsavedChanges => _editDirty;
+
+    private void MarkEditDirty() => _editDirty = true;
+
     public Action? FlushPendingEdits { get; set; }
 
     public ObservableCollection<LightListItem> Items { get; } = [];
@@ -45,6 +52,9 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         get => _brightness;
         set
         {
+            // NaN/Infinity 拒绝写入：NaN 令 Math.Round/差值比较静默失效，Infinity 会以 int.MinValue 形式下发
+            if (!double.IsFinite(value))
+                return;
             var rounded = Math.Round(value);
             if (Math.Abs(_brightness - rounded) > 0.001)
             {
@@ -180,6 +190,22 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
     [ObservableProperty]
     private string _debugResult = "";
 
+    // ---- 编辑区字段变更 → 标记未保存（OnSelectedChanged 加载表单 / SaveSelected 成功后清除） ----
+
+    partial void OnEditPortChanged(string value) => MarkEditDirty();
+
+    partial void OnEditBaudRateChanged(int value) => MarkEditDirty();
+
+    partial void OnEditEndpointChanged(string value) => MarkEditDirty();
+
+    partial void OnEditProtocolChanged(string value) => MarkEditDirty();
+
+    partial void OnEditLocalEndpointChanged(string value) => MarkEditDirty();
+
+    partial void OnEditTimeoutMsChanged(int value) => MarkEditDirty();
+
+    partial void OnEditReconnectAttemptsChanged(int value) => MarkEditDirty();
+
     /// <summary>发送原始指令到选中的光源控制器（协议调试）。</summary>
     [RelayCommand]
     private void SendDebug()
@@ -305,6 +331,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         }
 
         OnPropertyChanged(nameof(IsEditTcp));
+        _editDirty = false; // 表单刚由当前选中项加载，无未保存修改
         Message = value.Registered
             ? (value.IsNoop
                 ? $"{value.Id} 是无操作控制器（None）：开灯不会点亮任何硬件，仅用于配方联调"
@@ -364,6 +391,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
             if (_registry.Create(entry) is { } newInstance)
                 _lighting.Register(newInstance);
             ApplyRefresh(id);
+            _editDirty = false;
             Message = $"已保存 {id}（{entry.Type}）";
         }
         catch (Exception ex)

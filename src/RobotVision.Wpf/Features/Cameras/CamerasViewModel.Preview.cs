@@ -131,10 +131,14 @@ public partial class CamerasViewModel
         _previewCts = null;
     }
 
+    /// <summary>预览帧位图复用器：双缓冲 WriteableBitmap，替代每帧 new（UI 线程专用）。</summary>
+    private readonly PreviewBitmapSink _previewSink = new();
+
     /// <summary>页面 Unload / 进程退出时停预览循环并释放会话相机。</summary>
     public void Dispose()
     {
         StopPreview();
+        _previewSink.Dispose();
     }
 
     private void DisposePreviewSession()
@@ -240,7 +244,7 @@ public partial class CamerasViewModel
     }
 
     private sealed record GrabSnapshot(
-        BitmapSource Image,
+        BgraImageBuffer Buffer,
         int Width,
         int Height,
         double ElapsedMs,
@@ -332,9 +336,12 @@ public partial class CamerasViewModel
     private static GrabSnapshot ToGrabSnapshot(CameraFrame frame, double elapsedMs)
     {
         var image = frame.Image;
-        var source = ImageConverter.ToBitmapSource(image);
+        // 后台线程只拷贝像素（BgraImageBuffer 托管数组），不再每帧创建 BitmapSource；
+        // WritePixels 下沉到 UI 线程的 PreviewBitmapSink（复用双缓冲）。
+        using var mat = VisionImageMat.AsMat(image);
+        var buffer = BgraImageBuffer.FromBgrMat(mat);
         return new GrabSnapshot(
-            source,
+            buffer,
             image.Width,
             image.Height,
             elapsedMs,
@@ -346,7 +353,7 @@ public partial class CamerasViewModel
 
     private void ApplyPreview(GrabSnapshot snap, string caption)
     {
-        PreviewImage = snap.Image;
+        PreviewImage = _previewSink.Write(snap.Buffer);
         PreviewCaption = caption;
         PreviewToolTip = FormatCaptureToolTip(snap.CapturedAtLocal);
     }

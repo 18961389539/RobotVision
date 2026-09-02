@@ -14,6 +14,8 @@ internal interface IRecipeListHost
     RecipeConfig Editor { get; set; }
     bool IsNew { get; set; }
     bool IsBusy { get; }
+    /// <summary>最近一次从磁盘加载配方失败：此时 Editor 为空壳，保存会覆盖磁盘真实文件，必须禁用。</summary>
+    bool EditorLoadFailed { get; set; }
     bool HasUnsavedChanges { get; }
     string Message { get; set; }
     string OriginalName { get; set; }
@@ -108,7 +110,16 @@ public sealed partial class RecipeListCatalog : ObservableObject
         return false;
     }
 
-    private bool CanRunWhenIdle => !_host.IsBusy;
+    private bool CanRunWhenIdle => !_host.IsBusy && !_host.EditorLoadFailed;
+
+    /// <summary>CanExecute 依赖 _host 状态（IsBusy/EditorLoadFailed）的命令需由宿主显式刷新。</summary>
+    internal void NotifyIdleCommands()
+    {
+        SaveCommand.NotifyCanExecuteChanged();
+        NewCommand.NotifyCanExecuteChanged();
+        CopyCommand.NotifyCanExecuteChanged();
+        RefreshCommand.NotifyCanExecuteChanged();
+    }
 
     [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
     public void Refresh() => Refresh(preferName: null, reloadEditor: true);
@@ -152,6 +163,7 @@ public sealed partial class RecipeListCatalog : ObservableObject
             return;
         ClearListSelectionForDraft();
         _host.IsNew = true;
+        _host.EditorLoadFailed = false;
         _host.OriginalName = "";
         _host.Editor = new RecipeConfig
         {
@@ -183,6 +195,7 @@ public sealed partial class RecipeListCatalog : ObservableObject
         copy.OutputOffset = new();
         ClearListSelectionForDraft();
         _host.IsNew = true;
+        _host.EditorLoadFailed = false;
         _host.OriginalName = "";
         _host.Editor = copy;
         _host.Baseline = copy.Clone();
@@ -204,6 +217,12 @@ public sealed partial class RecipeListCatalog : ObservableObject
     {
         try
         {
+            if (_host.EditorLoadFailed)
+            {
+                ShowSaveBlocked("配方读取失败，保存已禁用（防止覆盖磁盘上的真实配方）。请先刷新列表或重新选择配方。");
+                return;
+            }
+
             _host.CommitEdits();
 
             var saveError = RecipeEditorValidator.TryValidateForSave(_host.Editor, _loader);
@@ -356,6 +375,7 @@ public sealed partial class RecipeListCatalog : ObservableObject
         try
         {
             var loaded = _loader.Get(name);
+            _host.EditorLoadFailed = false;
             _host.Editor = loaded.Clone();
             _host.Baseline = _host.Editor.Clone();
             _host.ResetDirtyCache();
@@ -364,11 +384,13 @@ public sealed partial class RecipeListCatalog : ObservableObject
         }
         catch (Exception ex)
         {
+            // 关键：不得在失败后提供可保存的空白 Editor —— IsNew=false + 同名保存会用空壳覆盖磁盘真实文件
+            _host.EditorLoadFailed = true;
             _host.Editor = new RecipeConfig { Name = name };
             _host.Baseline = _host.Editor.Clone();
             _host.ResetDirtyCache();
             _host.NotifyEditorBindings();
-            _host.Message = $"读取失败：{ex.Message}";
+            _host.Message = $"读取失败：{ex.Message}（保存已禁用，防止覆盖磁盘配方）";
         }
     }
 
@@ -376,6 +398,7 @@ public sealed partial class RecipeListCatalog : ObservableObject
     {
         ClearListSelectionForDraft();
         _host.IsNew = true;
+        _host.EditorLoadFailed = false;
         _host.OriginalName = "";
         _host.Editor = new RecipeConfig
         {

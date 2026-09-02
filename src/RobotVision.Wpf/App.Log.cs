@@ -22,4 +22,10 @@ internal static partial class AppLog
 
     [LoggerMessage(Level = LogLevel.Critical, Message = "Too many unhandled UI exceptions; shutting down")]
     public static partial void TooManyUnhandledUiExceptions(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "Unhandled AppDomain exception (process terminating)")]
+    public static partial void AppDomainUnhandled(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Unobserved task exception (async command fault)")]
+    public static partial void UnobservedTaskFault(ILogger logger, Exception ex);
 }

@@ -52,6 +52,10 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private string? _testTriggerBlockReason;
     private string _assetPinStatus = AssetPinStatusText.Unpinned;
 
+    /// <summary>最近一次从磁盘加载配方失败（Editor 为空壳）。为 true 时禁用保存/新建/复制/刷新（见 List.CanRunWhenIdle）。</summary>
+    [ObservableProperty]
+    private bool _editorLoadFailed;
+
     public Action? FlushPendingEdits { get; set; }
 
     int IRecipeWorkspace.RecipeTestTimeoutMs => _cfg.RecipeTestTimeoutMs;
@@ -109,6 +113,14 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         get => _baseline;
         set => _baseline = value;
     }
+
+    bool IRecipeListHost.EditorLoadFailed
+    {
+        get => EditorLoadFailed;
+        set => EditorLoadFailed = value;
+    }
+
+    partial void OnEditorLoadFailedChanged(bool value) => List.NotifyIdleCommands();
 
     string IRecipeListHost.OriginalName
     {

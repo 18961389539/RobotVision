@@ -490,6 +490,9 @@ public partial class CalibrationWizardViewModel : ObservableObject, ICommitPendi
 
     private int _collectedFrames;
 
+    /// <summary>已采集但未保存为标定档案的数据（切页提示用）。</summary>
+    public bool HasUnsavedChanges => CollectedFrames > 0;
+
 
 
     [ObservableProperty]

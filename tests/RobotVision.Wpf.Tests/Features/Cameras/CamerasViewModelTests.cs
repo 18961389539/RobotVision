@@ -410,4 +410,21 @@ public class CamerasViewModelTests : IDisposable
             vm.IsPreviewing.Should().BeFalse();
         });
     }
+
+    [Fact]
+    public void ExposureSlider_RejectsNonFinite_DoesNotCorruptExposure()
+    {
+        TestInfra.RunSta(() =>
+        {
+            var vm = CreateVm();
+            vm.ExposureUs = 10000;
+            var before = vm.ExposureUs;
+
+            vm.ExposureSlider = double.NaN;
+            vm.ExposureUs.Should().Be(before);
+
+            vm.ExposureSlider = double.PositiveInfinity;
+            vm.ExposureUs.Should().Be(before);
+        });
+    }
 }

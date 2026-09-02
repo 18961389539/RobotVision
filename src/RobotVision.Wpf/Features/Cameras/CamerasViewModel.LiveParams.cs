@@ -89,6 +89,12 @@ public partial class CamerasViewModel
         IsBusy = true;
         try
         {
+            // NaN/Infinity 会穿透 Math.Clamp 与滑块校验，直接下发会污染硬件参数（NaN 曝光会令相机异常）
+            if (!double.IsFinite(ExposureUs) || !double.IsFinite(Gain) || ExposureUs <= 0 || Gain < 0)
+            {
+                Message = $"光度参数非法（曝光/增益必须为有限正数）：曝光 {ExposureUs} · 增益 {Gain}，未下发";
+                return;
+            }
             var label = PreviewCameraLabel();
             Message = $"下发光度参数并取图中 · {label}";
             var entry = _cfg.Cameras.FirstOrDefault(c => string.Equals(c.Id, id, StringComparison.OrdinalIgnoreCase))

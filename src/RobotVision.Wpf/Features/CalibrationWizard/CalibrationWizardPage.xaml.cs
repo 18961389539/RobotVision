@@ -11,12 +11,18 @@ public partial class CalibrationWizardPage : Page
     private readonly CalibrationWizardViewModel _vm;
     private CalibrationWizardImageHost? _imageHost;
 
-    public CalibrationWizardPage(CalibrationWizardViewModel viewModel)
+    public CalibrationWizardPage(CalibrationWizardViewModel viewModel, IDialogService dialogs)
     {
         _vm = viewModel;
         ViewModelPageLifetime.Attach(this, viewModel, onUnloading: () =>
         {
             _imageHost?.Unwire();
+            if (_vm.HasUnsavedChanges)
+            {
+                dialogs.ConfirmDiscard(
+                    $"标定向导已采集 {_vm.CollectedFrames} 帧但尚未保存为标定档案，离开将丢弃。选择「否」可返回继续编辑（若导航已切换，请手动回到本页）。",
+                    "未保存修改");
+            }
         });
         InitializeComponent();
         NumberBoxCommit.Bind(this, _vm);
