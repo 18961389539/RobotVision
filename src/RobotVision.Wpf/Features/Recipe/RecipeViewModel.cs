@@ -478,6 +478,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     public bool IsTemplateMethod => TemplateUi.IsTemplateMethod;
     public bool UsesFeatureTeachRoi => TemplateUi.UsesFeatureTeachRoi;
+    public bool UsesRefineLine =>
+        Editor.Template is { } tmpl && TemplateOptions.UsesTaughtRefineLine(tmpl.RefineMethod);
     public bool NeedsTaughtTemplate => TemplateUi.NeedsTaughtTemplate;
     public bool ShowRefineRange => TemplateUi.ShowRefineRange;
     public string RefineDetailsSummary => TemplateUi.RefineDetailsSummary;

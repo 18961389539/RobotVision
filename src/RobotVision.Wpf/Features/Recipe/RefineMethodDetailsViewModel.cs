@@ -199,6 +199,13 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ClearRefineLine()
+    {
+        _host.Roi.ClearRefineLine();
+        _host.NotifyEditorMutated();
+    }
+
+    [RelayCommand]
     private void Accept()
     {
         AcceptedByUser = true;

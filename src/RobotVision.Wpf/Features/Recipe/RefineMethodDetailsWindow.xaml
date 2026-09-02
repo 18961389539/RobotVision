@@ -186,7 +186,14 @@
                             Visibility="{Binding ShowLineFitPanel, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ui:TextBlock FontTypography="BodyStrong" Text="直线拟合" Margin="0,0,0,8" />
                     <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="#FFE8A33D"
-                               Text="角度无方向 [0,180)，不能与偏心工具同用。弱纹理矩形件适用。" />
+                               Text="默认角度无方向 [0,180)，不能与偏心工具同用。弱纹理矩形件适用。可画「示教基准线」消 180°、输出有向角。" />
+                    <TextBlock Text="{Binding Roi.RefineLineStatusText}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,6" />
+                    <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               Text="示教：关闭本窗口后，在配方页用 ImageViewer 的「线」工具画一段——起点=尾、终点=头，落在零件两端明暗不同处（对称件判不了）。" />
+                    <ui:Button Content="清除基准线" FontSize="11" Padding="10,4" HorizontalAlignment="Left"
+                               Command="{Binding ClearRefineLineCommand}"
+                               Visibility="{Binding Roi.HasRefineLine, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </StackPanel>
 
                 <!-- 特征框 -->

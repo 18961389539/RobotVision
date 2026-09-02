@@ -236,6 +236,95 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         }
     }
 
+    public bool HasRefineLine => Editor.Template?.RefineLine is not null;
+
+    public string RefineLineStatusText => Editor.Template?.RefineLine is not { } line
+        ? "未示教基准线（直线拟合无向 [0,180)，不判头尾）"
+        : line.HasReliableSignature
+            ? $"基准线已示教：头尾明暗差 {line.HeadMinusTailGray:0.#}（可消 180°，输出有向角）"
+            : $"基准线已画，但头尾明暗差仅 {line.HeadMinusTailGray:0.#}（<4，对称件判不了头尾，建议端头留明暗差或改用卡尺）";
+
+    /// <summary>
+    /// 用户在 ImageViewer 用「线」工具画的基准线回填：两端点（设备像素，比例于 <see cref="RoiRefWidth"/>/<see cref="RoiRefHeight"/>）
+    /// → 归一化存入配方；并采 PreviewImage 上 P2(头)/P1(尾) 邻域均值差作为 180° 头尾签名。
+    /// </summary>
+    public void ApplyRefineLineFromPx(double x1Px, double y1Px, double x2Px, double y2Px)
+    {
+        if (RoiRefWidth <= 0 || RoiRefHeight <= 0)
+            return;
+        Editor.Template ??= new();
+        var nx1 = Math.Clamp(x1Px / RoiRefWidth, 0, 1);
+        var ny1 = Math.Clamp(y1Px / RoiRefHeight, 0, 1);
+        var nx2 = Math.Clamp(x2Px / RoiRefWidth, 0, 1);
+        var ny2 = Math.Clamp(y2Px / RoiRefHeight, 0, 1);
+        var headMinusTail = TrySampleHeadTailGray(x1Px, y1Px, x2Px, y2Px, out var gray) ? gray : 0.0;
+        Editor.Template.RefineLine = new RefineLine(nx1, ny1, nx2, ny2, headMinusTail);
+        NotifyRefineLineChanged();
+    }
+
+    public void ClearRefineLine()
+    {
+        if (Editor.Template is not { } t || t.RefineLine is null)
+            return;
+        t.RefineLine = null;
+        NotifyRefineLineChanged();
+    }
+
+    private bool TrySampleHeadTailGray(double x1Px, double y1Px, double x2Px, double y2Px, out double headMinusTail)
+    {
+        headMinusTail = 0;
+        if (PreviewImage is not BitmapSource src || src.PixelWidth < 1 || src.PixelHeight < 1)
+            return false;
+
+        var bgra = src.Format == PixelFormats.Bgra32
+            ? src
+            : new FormatConvertedBitmap(src, PixelFormats.Bgra32, null, 0);
+        var w = bgra.PixelWidth;
+        var h = bgra.PixelHeight;
+        var stride = w * 4;
+        var buf = new byte[stride * h];
+        bgra.CopyPixels(buf, stride, 0);
+
+        var sx = RoiRefWidth > 0 ? (double)w / RoiRefWidth : 1.0;
+        var sy = RoiRefHeight > 0 ? (double)h / RoiRefHeight : 1.0;
+        var tail = MeanGrayAt(buf, w, h, stride, x1Px * sx, y1Px * sy);
+        var head = MeanGrayAt(buf, w, h, stride, x2Px * sx, y2Px * sy);
+        headMinusTail = head - tail;
+        return true;
+    }
+
+    private static double MeanGrayAt(byte[] bgra, int w, int h, int stride, double cx, double cy)
+    {
+        const int half = RefineLine.TeachProbePx / 2;
+        var x0 = Math.Clamp((int)Math.Round(cx) - half, 0, w - 1);
+        var x1 = Math.Clamp((int)Math.Round(cx) + half, 0, w - 1);
+        var y0 = Math.Clamp((int)Math.Round(cy) - half, 0, h - 1);
+        var y1 = Math.Clamp((int)Math.Round(cy) + half, 0, h - 1);
+        if (x1 <= x0) x1 = x0;
+        if (y1 <= y0) y1 = y0;
+        double sum = 0;
+        var count = 0;
+        for (var y = y0; y <= y1; y++)
+        {
+            var row = y * stride;
+            for (var x = x0; x <= x1; x++)
+            {
+                var o = row + x * 4;
+                // BGRA → luma
+                sum += 0.114 * bgra[o] + 0.587 * bgra[o + 1] + 0.299 * bgra[o + 2];
+                count++;
+            }
+        }
+        return count == 0 ? 0 : sum / count;
+    }
+
+    private void NotifyRefineLineChanged()
+    {
+        OnPropertyChanged(nameof(HasRefineLine));
+        OnPropertyChanged(nameof(RefineLineStatusText));
+        _host.NotifyDirty();
+    }
+
     public void ApplyRoiFromRect(double centerXPx, double centerYPx, double widthPx, double heightPx)
     {
         if (RoiRefWidth <= 0 || RoiRefHeight <= 0)
@@ -322,6 +411,8 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         OnPropertyChanged(nameof(TemplateRoiPxY));
         OnPropertyChanged(nameof(TemplateRoiPxWidth));
         OnPropertyChanged(nameof(TemplateRoiPxHeight));
+        OnPropertyChanged(nameof(HasRefineLine));
+        OnPropertyChanged(nameof(RefineLineStatusText));
     }
 
     public void NotifyCanExecuteChanged() => PreviewRoiCommand.NotifyCanExecuteChanged();

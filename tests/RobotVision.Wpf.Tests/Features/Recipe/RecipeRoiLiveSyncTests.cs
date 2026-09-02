@@ -82,7 +82,9 @@ public sealed class RecipeRoiLiveSyncTests : IDisposable
             () => vm.Editor.Roi,
             () => vm.Editor.Template?.Roi,
             () => usesFeatureTeach,
-            () => showTemplate);
+            () => showTemplate,
+            () => vm.Editor.Template?.RefineLine,
+            () => false);
         return (sync, active, other, vm);
     }
 

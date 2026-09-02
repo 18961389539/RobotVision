@@ -470,9 +470,48 @@ internal sealed class LineFitSegmentRefineRuntime : ISegmentRefineRuntime
 
         var residual = Math.Abs(AngleGeometry.UndirectedDeltaDeg(angle, housing.LongAxisDeg));
         var score = Math.Clamp(1.0 - residual / 5.0, 0.2, 1);
-        return new SegmentRefineHit
+        var line = request.Recipe.Template.RefineLine;
+
+        // 无示教基准线：与旧版完全一致（无向 [0,180)）。
+        if (line is null)
         {
-            Pose = SegmentRefineOps.Ok(center.X, center.Y, angle, score, request.SegmentConfidence),
-        };
+            return new SegmentRefineHit
+            {
+                Pose = SegmentRefineOps.Ok(center.X, center.Y, angle, score, request.SegmentConfidence),
+            };
+        }
+
+        // 有基准线：用长轴两端明暗探针 vs 示教头尾签名消 180°，输出有向角。
+        using (var gray = ToGray(request.RoiView))
+        {
+            var probeHousing = housing with { Center = new Point2f((float)center.X, (float)center.Y) };
+            var res = LineFitHeading.Resolve(gray, probeHousing, angle, line);
+            if (!res.Resolved)
+            {
+                // 不可定：保持无向 + 提示（不阻断，仍按无向输出，与旧行为一致，只是多给现场一条归因）
+                return new SegmentRefineHit
+                {
+                    Pose = SegmentRefineOps.Ok(center.X, center.Y, angle, score, request.SegmentConfidence),
+                    QualityNote = $"{request.Recipe.Name} · 直线拟合 {res.Note}",
+                };
+            }
+
+            return new SegmentRefineHit
+            {
+                Pose = SegmentRefineOps.Ok(center.X, center.Y, res.DirectedDeg, score, request.SegmentConfidence),
+                TabMarker = SegmentRefineOps.HeadingMarker(res.HeadPoint, res.DirectedDeg, request.Points),
+            };
+        }
+    }
+
+    private static Mat ToGray(Mat view)
+    {
+        if (view.Channels() == 1)
+            return view.Clone();
+        var gray = new Mat();
+        Cv2.CvtColor(view, gray, view.Channels() == 4
+            ? ColorConversionCodes.BGRA2GRAY
+            : ColorConversionCodes.BGR2GRAY);
+        return gray;
     }
 }

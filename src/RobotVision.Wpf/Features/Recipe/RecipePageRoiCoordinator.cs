@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using ImageViewer.Controls;
+using RobotVision.Core.Recipe;
 using RobotVision.WpfHost.Shared;
 using ViewerControl = ImageViewer.Controls.ImageViewer;
 
@@ -31,7 +32,9 @@ internal sealed class RecipePageRoiCoordinator : IDisposable
             () => _vm.Roi.UseRoi ? _vm.Editor.Roi : null,
             () => _vm.UsesFeatureTeachRoi ? _vm.Editor.Template?.Roi : null,
             () => _vm.UsesFeatureTeachRoi,
-            ShowTeachFeatureRect);
+            ShowTeachFeatureRect,
+            () => _vm.Editor.Template?.RefineLine,
+            () => TemplateOptions.UsesTaughtRefineLine(_vm.Editor.Template?.RefineMethod ?? SegmentRefineMethod.Template));
     }
 
     public void Wire()
@@ -114,6 +117,7 @@ internal sealed class RecipePageRoiCoordinator : IDisposable
             _sync.OnViewContextChanged();
         if (e.PropertyName is nameof(RecipeViewModel.IsTemplateMethod)
             or nameof(RecipeViewModel.UsesFeatureTeachRoi)
+            or nameof(RecipeViewModel.UsesRefineLine)
             or nameof(RecipeViewModel.Editor))
         {
             if (_vm.Roi.HasRoiRefFrame)

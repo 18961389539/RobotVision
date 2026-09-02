@@ -11,11 +11,17 @@ public interface IRoiViewport
 {
     event NotifyCollectionChangedEventHandler? RectRoisChanged;
 
+    event NotifyCollectionChangedEventHandler? LineRoisChanged;
+
     void StartRoiMode();
 
     void AddRoi(RotatedRect rect);
 
     void RemoveRoi(RotatedRect rect);
+
+    void AddLineRoi(LineMeasureRoi line);
+
+    void RemoveLineRoi(LineMeasureRoi line);
 }
 
 /// <summary><see cref="ImageViewer"/> 的 <see cref="IRoiViewport"/> 适配器。</summary>
@@ -29,9 +35,19 @@ public sealed class ImageViewerRoiViewport(ViewerControl viewer) : IRoiViewport
         remove => _viewer.ViewerState.RectRois.CollectionChanged -= value;
     }
 
+    public event NotifyCollectionChangedEventHandler? LineRoisChanged
+    {
+        add => _viewer.ViewerState.LineMeasureRois.CollectionChanged += value;
+        remove => _viewer.ViewerState.LineMeasureRois.CollectionChanged -= value;
+    }
+
     public void StartRoiMode() => _viewer.StartRoiMode();
 
     public void AddRoi(RotatedRect rect) => _viewer.ViewerState.AddRoi(rect);
 
     public void RemoveRoi(RotatedRect rect) => _viewer.ViewerState.RemoveRoi(rect);
+
+    public void AddLineRoi(LineMeasureRoi line) => _viewer.ViewerState.AddRoi(line);
+
+    public void RemoveLineRoi(LineMeasureRoi line) => _viewer.ViewerState.RemoveRoi(line);
 }

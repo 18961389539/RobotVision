@@ -164,6 +164,32 @@ public enum SegmentRefineMethod
 }
 
 /// <summary>
+/// LineFit 示教基准线：有向线段（起点 P1 = 尾、终点 P2 = 头），比例坐标 ∈ [0,1]（推理图像帧）。
+/// <see cref="HeadMinusTailGray"/> 是示教时从两端邻域采到的「头 − 尾」平均灰度（0~255），作为运行时
+/// 消 180° 的头尾签名：运行时在长轴两端各放一个探针窗，谁的明暗次序与该符号一致，谁就是头。
+/// 端点仅用于画面回显/复编辑，不参与运行时几何映射（探针由当前实例壳体几何摆放）。
+/// </summary>
+public sealed record RefineLine(
+    double X1,
+    double Y1,
+    double X2,
+    double Y2,
+    double HeadMinusTailGray)
+{
+    /// <summary>头尾签名/实测的最低明暗差（灰度）：任一侧小于该值判为无稳定不对称，180° 不可定，保持无向。</summary>
+    public const double MinFlipContrastGray = 4.0;
+
+    /// <summary>示教端邻域探针窗边长（px，用于示教时采 HeadMinusTailGray）。</summary>
+    public const int TeachProbePx = 12;
+
+    /// <summary>头尾符号（供运行时比较）：&gt;0 头端更亮，&lt;0 头端更暗，0 视为不可用。</summary>
+    public double HeadSign => Math.Sign(HeadMinusTailGray);
+
+    /// <summary>签名是否足够可靠（明暗差过门）。</summary>
+    public bool HasReliableSignature => Math.Abs(HeadMinusTailGray) >= MinFlipContrastGray;
+}
+
+/// <summary>
 /// 分割+精修策略（MaskTemplate 模式）专属参数。
 /// 模板图（转正后的目标 PNG，base64 内嵌配方文件）由配方页「示教模板」自动生成：
 /// 取图 → 分割 → 转正裁剪（可选特征 ROI 只裁局部纹理）。拷贝配方文件即携带模板，无路径依赖。
@@ -184,6 +210,10 @@ public sealed class TemplateOptions
     public static bool UsesFeatureTeachRoi(SegmentRefineMethod method) =>
         method is SegmentRefineMethod.Template or SegmentRefineMethod.ShapeMatch;
 
+    /// <summary>可选示教基准线（消 180°）：仅直线拟合使用。画了才输出有向角，没画保持无向旧行为。</summary>
+    public static bool UsesTaughtRefineLine(SegmentRefineMethod method) =>
+        method is SegmentRefineMethod.LineFit;
+
     /// <summary>宽高比达到该值（或倒数）视为过扁：模板/形状匹配十字会落在特征中心，齿列件可能跳齿。</summary>
     public const double FlatFeatureRoiAspect = 3;
 
@@ -202,6 +232,14 @@ public sealed class TemplateOptions
     /// 用于检测窗口很大、但头尾/齿脚等只在局部纹理上可判的场景。
     /// </summary>
     public Roi? Roi { get; set; }
+
+    /// <summary>
+    /// LineFit 可选「示教基准线」：用户在 ImageViewer 上画的有向线段（起点 P1 = 尾，终点 P2 = 头），
+    /// 比例坐标 ∈ [0,1]（推理图像帧）。仅 <see cref="SegmentRefineMethod.LineFit"/> 使用：
+    /// 给出后 LineFit 在原本无向精修角基础上，用「长轴两端明暗探针 vs 示教头尾签名」消 180° 歧义，
+    /// 输出有向角 [0,360)。<b>null = 与旧版完全一致（无向 [0,180)）</b>，存量配方行为不变。
+    /// </summary>
+    public RefineLine? RefineLine { get; set; }
 
     /// <summary>模板匹配置信阈值 [0,1]：低于该值放弃精修，回退粗角度（[0,180) 无方向）。</summary>
     public double MatchThreshold { get; set; } = 0.6;
@@ -307,6 +345,7 @@ public sealed class TemplateOptions
         target.RefineMethod = RefineMethod;
         target.TemplateImageBase64 = includeTemplateImage ? TemplateImageBase64 : "";
         target.Roi = Roi;
+        target.RefineLine = RefineLine;
         target.MatchThreshold = MatchThreshold;
         target.RefineRangeDeg = RefineRangeDeg;
         target.UseUprightCrop = UseUprightCrop;

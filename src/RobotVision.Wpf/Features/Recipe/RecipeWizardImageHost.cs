@@ -1,4 +1,5 @@
 using ImageViewer.Controls;
+using RobotVision.Core.Recipe;
 using RobotVision.WpfHost.Shared;
 using ViewerControl = ImageViewer.Controls.ImageViewer;
 
@@ -37,7 +38,9 @@ internal sealed class RecipeWizardImageHost : IDisposable
             () => roi.HasRoiRefFrame ? host.Editor.Roi : null,
             () => usesFeatureTeachRoi() ? host.Editor.Template?.Roi : null,
             usesFeatureTeachRoi,
-            () => usesFeatureTeachRoi() && roi.UseTemplateRoi);
+            () => usesFeatureTeachRoi() && roi.UseTemplateRoi,
+            () => host.Editor.Template?.RefineLine,
+            () => TemplateOptions.UsesTaughtRefineLine(host.Editor.Template?.RefineMethod ?? SegmentRefineMethod.Template));
     }
 
     public void Wire() => _sync.Wire();

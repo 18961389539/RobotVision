@@ -22,6 +22,7 @@ internal static class RecipeEditorUiRefresh
         nameof(RecipeViewModel.IsDualBlobMode),
         nameof(RecipeViewModel.IsTemplateMethod),
         nameof(RecipeViewModel.UsesFeatureTeachRoi),
+        nameof(RecipeViewModel.UsesRefineLine),
         nameof(RecipeViewModel.NeedsTaughtTemplate),
         nameof(RecipeViewModel.ShowRefineRange),
         nameof(RecipeViewModel.HasTemplate),

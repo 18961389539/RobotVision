@@ -12,10 +12,18 @@ internal sealed class FakeRoiViewport : IRoiViewport
 {
     public ObservableCollection<RotatedRect> Rects { get; } = [];
 
+    public ObservableCollection<LineMeasureRoi> Lines { get; } = [];
+
     public event NotifyCollectionChangedEventHandler? RectRoisChanged
     {
         add => Rects.CollectionChanged += value;
         remove => Rects.CollectionChanged -= value;
+    }
+
+    public event NotifyCollectionChangedEventHandler? LineRoisChanged
+    {
+        add => Lines.CollectionChanged += value;
+        remove => Lines.CollectionChanged -= value;
     }
 
     public bool RoiModeStarted { get; private set; }
@@ -25,6 +33,10 @@ internal sealed class FakeRoiViewport : IRoiViewport
     public void AddRoi(RotatedRect rect) => Rects.Add(rect);
 
     public void RemoveRoi(RotatedRect rect) => Rects.Remove(rect);
+
+    public void AddLineRoi(LineMeasureRoi line) => Lines.Add(line);
+
+    public void RemoveLineRoi(LineMeasureRoi line) => Lines.Remove(line);
 }
 
 internal sealed class FakePickViewport : IImagePickViewport

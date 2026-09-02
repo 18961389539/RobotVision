@@ -205,6 +205,16 @@ public sealed class RecipeLoader(string folder)
             if (recipe.Template.AspectRatioLo >= recipe.Template.AspectRatioHi ||
                 recipe.Template.AspectRatioLo <= 0 || recipe.Template.AspectRatioHi > 5)
                 throw new InvalidRecipeException(name, "template.aspectRatioLo/Hi 必须满足 0 < lo < hi ≤ 5");
+            if (recipe.Template.RefineLine is { } line)
+            {
+                if (!double.IsFinite(line.X1) || !double.IsFinite(line.Y1) ||
+                    !double.IsFinite(line.X2) || !double.IsFinite(line.Y2) ||
+                    line.X1 is < 0 or > 1 || line.Y1 is < 0 or > 1 ||
+                    line.X2 is < 0 or > 1 || line.Y2 is < 0 or > 1)
+                    throw new InvalidRecipeException(name, "template.refineLine 端点坐标必须在 [0,1]");
+                if (!double.IsFinite(line.HeadMinusTailGray) || Math.Abs(line.HeadMinusTailGray) > 255)
+                    throw new InvalidRecipeException(name, "template.refineLine.headMinusTailGray 必须在 [-255,255]");
+            }
         }
 
         if (recipe.AngleMode == AngleMode.DualCenterLine && recipe.Models.Count < 2)
@@ -295,11 +305,15 @@ public sealed class RecipeLoader(string folder)
             throw new InvalidRecipeException(recipe.Name, "outputOffset 示教输出必须为有限数字");
     }
 
-    /// <summary>无向角：最小外接矩形，或分割+精修直线拟合。与偏心工具同时用会差 180°。</summary>
+    /// <summary>
+    /// 无向角：最小外接矩形，或「无示教基准线的分割+精修直线拟合」。与偏心工具同时用会差 180°。
+    /// LineFit 一旦配了可靠签名（明暗差过门）的示教基准线，即可消 180°、输出有向角，不再算无向。
+    /// </summary>
     public static bool HasUndirectedAngle(RecipeConfig recipe) =>
         recipe.AngleMode == AngleMode.MaskMinAreaRect ||
         (recipe.AngleMode == AngleMode.MaskTemplate &&
-         recipe.Template.RefineMethod == SegmentRefineMethod.LineFit);
+         recipe.Template.RefineMethod == SegmentRefineMethod.LineFit &&
+         !(recipe.Template.RefineLine is { } line && line.HasReliableSignature));
 
     private static void ValidateAssetPins(RecipeConfig recipe)
     {

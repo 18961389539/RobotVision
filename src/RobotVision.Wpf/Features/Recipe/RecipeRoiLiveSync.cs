@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using ImageViewer.Models;
 using RobotVision.Core.Models;
+using RobotVision.Core.Recipe;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Recipe;
@@ -26,6 +27,9 @@ internal sealed class RecipeRoiLiveSync : IDisposable
 
     private RotatedRect? _detectionRect;
     private RotatedRect? _templateRect;
+    private LineMeasureRoi? _refineLineRoi;
+    private readonly Func<RefineLine?> _refineLine;
+    private readonly Func<bool> _usesRefineLine;
     private LiveRoiKind _drawTarget = LiveRoiKind.Detection;
     private bool _syncingRect;
     private bool _startDrawAfterGrab;
@@ -39,7 +43,9 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         Func<Roi?> detectionRoi,
         Func<Roi?> templateRoi,
         Func<bool> usesFeatureTeachRoi,
-        Func<bool> showTemplateRoi)
+        Func<bool> showTemplateRoi,
+        Func<RefineLine?> refineLine,
+        Func<bool> usesRefineLine)
     {
         _roi = roi;
         _activeViewport = activeViewport;
@@ -48,6 +54,8 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         _templateRoi = templateRoi;
         _usesFeatureTeachRoi = usesFeatureTeachRoi;
         _showTemplateRoi = showTemplateRoi;
+        _refineLine = refineLine;
+        _usesRefineLine = usesRefineLine;
     }
 
     public bool IsTemplateDrawTarget
@@ -75,7 +83,10 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         _wired = true;
         _roi.PropertyChanged += OnRoiPropertyChanged;
         foreach (var viewport in _viewports)
+        {
             viewport.RectRoisChanged += OnRoiCollectionChanged;
+            viewport.LineRoisChanged += OnLineRoiCollectionChanged;
+        }
     }
 
     public void Unwire()
@@ -85,8 +96,12 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         _wired = false;
         _roi.PropertyChanged -= OnRoiPropertyChanged;
         foreach (var viewport in _viewports)
+        {
             viewport.RectRoisChanged -= OnRoiCollectionChanged;
+            viewport.LineRoisChanged -= OnLineRoiCollectionChanged;
+        }
         ClearAllLiveRects();
+        ClearLiveLine();
     }
 
     public void Dispose() => Unwire();
@@ -159,6 +174,10 @@ internal sealed class RecipeRoiLiveSync : IDisposable
                     else
                         ClearLiveRect(ref _templateRect);
                 }
+                break;
+            case nameof(RecipeRoiEditor.HasRefineLine):
+                if (!_syncingRect && _roi.HasRoiRefFrame)
+                    SyncLiveLineFromRecipe();
                 break;
             case nameof(RecipeRoiEditor.RoiX):
             case nameof(RecipeRoiEditor.RoiY):
@@ -309,6 +328,123 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         {
             _syncingRect = false;
         }
+
+        SyncLiveLineFromRecipe();
+    }
+
+    private void SyncLiveLineFromRecipe()
+    {
+        ClearLiveLine();
+        if (!_roi.HasRoiRefFrame || !_usesRefineLine() || _refineLine() is not { } line)
+            return;
+
+        _syncingRect = true;
+        try
+        {
+            var roi = new LineMeasureRoi
+            {
+                P1 = new Point(line.X1 * _roi.RoiRefWidth, line.Y1 * _roi.RoiRefHeight),
+                P2 = new Point(line.X2 * _roi.RoiRefWidth, line.Y2 * _roi.RoiRefHeight),
+            };
+            StyleLiveLine(roi);
+            roi.PropertyChanged += OnLiveLinePropertyChanged;
+            _refineLineRoi = roi;
+            _activeViewport().AddLineRoi(roi);
+        }
+        finally
+        {
+            _syncingRect = false;
+        }
+    }
+
+    private void OnLineRoiCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_syncingRect || !_usesRefineLine())
+            return;
+        if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems?[0] is LineMeasureRoi added)
+        {
+            if (ReferenceEquals(added, _refineLineRoi))
+                return;
+            AdoptDrawnLine(added);
+        }
+        else if (e.Action == NotifyCollectionChangedAction.Remove)
+        {
+            if (ReferenceEquals(e.OldItems?[0], _refineLineRoi))
+                DetachLine();
+        }
+        else if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            DetachLine();
+        }
+    }
+
+    private void AdoptDrawnLine(LineMeasureRoi added)
+    {
+        var previous = _refineLineRoi;
+        DetachLine();
+        _refineLineRoi = added;
+        StyleLiveLine(added);
+        added.PropertyChanged += OnLiveLinePropertyChanged;
+        ApplyLineToRecipe(added);
+        if (previous is not null)
+            ScheduleRemoveStaleLine(previous);
+    }
+
+    private void OnLiveLinePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is not LineMeasureRoi line)
+            return;
+        if (!_syncingRect && ReferenceEquals(line, _refineLineRoi) &&
+            e.PropertyName is nameof(LineMeasureRoi.P1) or nameof(LineMeasureRoi.P2))
+            ApplyLineToRecipe(line);
+    }
+
+    private void ApplyLineToRecipe(LineMeasureRoi line)
+    {
+        _syncingRect = true;
+        try
+        {
+            _roi.ApplyRefineLineFromPx(line.P1.X, line.P1.Y, line.P2.X, line.P2.Y);
+        }
+        finally
+        {
+            _syncingRect = false;
+        }
+    }
+
+    private void ScheduleRemoveStaleLine(LineMeasureRoi previous)
+    {
+        if (!_wired || ReferenceEquals(previous, _refineLineRoi))
+            return;
+        var dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+        dispatcher.BeginInvoke(DispatcherPriority.DataBind, new Action(() => RemoveLineFromAll(previous)));
+    }
+
+    private static void StyleLiveLine(LineMeasureRoi roi)
+    {
+        roi.Label = "基准线";
+        roi.StrokeColor = Colors.Red;
+    }
+
+    private void ClearLiveLine()
+    {
+        var old = _refineLineRoi;
+        DetachLine();
+        if (old is not null)
+            RemoveLineFromAll(old);
+    }
+
+    private void DetachLine()
+    {
+        if (_refineLineRoi is { } line)
+            line.PropertyChanged -= OnLiveLinePropertyChanged;
+        _refineLineRoi = null;
+    }
+
+    private void RemoveLineFromAll(LineMeasureRoi line)
+    {
+        foreach (var viewport in _viewports)
+            viewport.RemoveLineRoi(line);
     }
 
     private RotatedRect AddLiveRect(Roi r, bool isTemplate)
