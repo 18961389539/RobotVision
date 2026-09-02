@@ -425,14 +425,18 @@ public static class MaskShapeMatch
         if (b is null)
             return false;
         if (a is null)
-            return true;
+            return true; // 主窗未过门而翻转窗命中：翻转是唯一生存假设
         if (Math.Abs(polarTeach) < 12)
-            return b.MeanDistPx + 0.2 < a.MeanDistPx;
-        if (polar180 > polar0 + 1e-6)
-            return true;
-        if (polar0 > polar180 + 1e-6)
+            // 示教极性弱（近对称件）：180° 相位本就难以观测，信任首达主窗，
+            // 仅当翻转窗几何显著更优时才翻转（加大几何优势门槛防抖动）。
+            return b.MeanDistPx + 0.5 < a.MeanDistPx;
+        // 极性证据门：主/翻两支极性须分离到示教幅度的显著比例才可判 180° 相位。
+        // 中小角度旋转使灰度探针落在插值模糊区，polar0≈polar180≈0（同号小值），
+        // 旧逻辑 1e-6 级噪声差即误走翻转支 → 输出差 180°（实测 8.7°/20° 事故）。
+        // 证据不足时信任主窗（首达且几何已过门）比赌翻转更安全。
+        if (Math.Abs(polar0 - polar180) < 0.5 * Math.Abs(polarTeach))
             return false;
-        return b.MeanDistPx + 0.2 < a.MeanDistPx;
+        return polar180 > polar0;
     }
 
     private static double PolarAgree(Mat upright, ShapeModel model, MatchHit hit)

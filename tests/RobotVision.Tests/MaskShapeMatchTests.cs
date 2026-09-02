@@ -52,6 +52,34 @@ public sealed class MaskShapeMatchTests
         AssertNearPart(r.Center, contour);
     }
 
+    [Theory]
+    [InlineData(8.7)]
+    [InlineData(20.0)]
+    public void DefaultNoFlip_DoesNotMisfireTo180(double deg)
+    {
+        // 极性证据门回归:中小角度旋转使 polar0≈polar180 同号(探针落插值模糊区),
+        // 旧逻辑 1e-6 噪声差误走翻转支 → 输出差 ~174°(曾实测 8.7°/20° 事故)。
+        // 门控后应信任主窗,不得翻转到 deg+180 附近。
+        // 注:-20° 同类事故源于 MinAreaRect warp 180° 补角表示歧义(主窗内容物理
+        // 翻转),非极性门可解,roadmap #9 极值角相位已登记。
+        using var teachImg = Paint(0);
+        var model = Teach(teachImg, Contour(0));
+        Assert.NotNull(model);
+        Assert.True(Math.Abs(model.PolarDelta) >= 12, $"示教极性 {model.PolarDelta:0.0} 应显著");
+
+        using var img = Paint(deg);
+        var contour = Contour(deg);
+        var attempt = MaskShapeMatch.TryRefine(img, contour, model, refineRangeDeg: 3);
+        Assert.True(attempt.Pose is not null,
+            $"转 {deg}° 未过门 命中 {MaskShapeMatch.LastDebug.HitRate:0.00} 均距 {MaskShapeMatch.LastDebug.MeanDist:0.00}");
+        var r = attempt.Pose!;
+        var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - deg));
+        Assert.True(err < 45.0,
+            $"转 {deg}° 误翻转到 180° 支:得 {r.AngleDeg:0.00},误差 {err:0.00}°(应 <45) " +
+            $"极性 {MaskShapeMatch.LastDebug.PolarTeach:0.0}/{MaskShapeMatch.LastDebug.Polar0:0.0}/{MaskShapeMatch.LastDebug.Polar180:0.0}");
+        AssertNearPart(r.Center, contour);
+    }
+
     [Fact]
     public void IgnoresDistractorOutsideSegmentBox()
     {
