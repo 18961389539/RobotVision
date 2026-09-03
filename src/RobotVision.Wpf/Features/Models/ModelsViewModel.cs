@@ -316,13 +316,16 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
         _imageFiles = imageFiles;
         _dialogs = dialogs;
         _log = log;
-        LoadPrefs();
+        // 定时器必须先于 LoadPrefs 初始化：LoadPrefs 设置 SelectedTask 等属性会经
+        // OnSelectedTaskChanged 触发 ScheduleSavePrefs，若定时器还是 null 会 NRE，
+        // 构造函数失败导致整页 DI 解析失败（切换到模型管理即报错）。
         _prefsSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _prefsSaveTimer.Tick += (_, _) =>
         {
             _prefsSaveTimer.Stop();
             SavePrefs();
         };
+        LoadPrefs();
     }
 
     private string? _lastModel;

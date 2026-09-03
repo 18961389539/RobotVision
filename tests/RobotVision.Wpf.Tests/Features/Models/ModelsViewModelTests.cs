@@ -69,6 +69,36 @@ public sealed class ModelsViewModelTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// 回归：切换到「模型管理」页报错的根因是构造函数在 _prefsSaveTimer 初始化前调用
+    /// LoadPrefs；当 model-test.prefs.json 存在时，LoadPrefs 设置 SelectedTask 会经
+    /// ScheduleSavePrefs 触碰到 null 定时器抛 NRE，导致整页 DI 解析失败。
+    /// </summary>
+    [Fact]
+    public void Ctor_WithExistingPrefsFile_DoesNotThrow_AndRestoresTask()
+    {
+        var prefsPath = Path.Combine(AppContext.BaseDirectory, "model-test.prefs.json");
+        var backup = File.Exists(prefsPath) ? File.ReadAllText(prefsPath) : null;
+        try
+        {
+            File.WriteAllText(
+                prefsPath,
+                "{\"Model\":null,\"TestImageFolder\":\"data/replay\",\"Task\":1," +
+                "\"Confidence\":0.5,\"PixelConfidence\":0.65,\"Iou\":0.7}");
+
+            var vm = CreateVm();
+
+            vm.SelectedTask.Should().Be(InferenceTask.Segmentation);
+        }
+        finally
+        {
+            if (backup is null)
+                File.Delete(prefsPath);
+            else
+                File.WriteAllText(prefsPath, backup);
+        }
+    }
+
     [Fact]
     public void TaskOptions_ContainDetectionSegmentationPose()
     {
