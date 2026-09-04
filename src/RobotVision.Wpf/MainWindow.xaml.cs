@@ -1,5 +1,6 @@
 using System.Windows;
 using RobotVision.WpfHost.Features.Monitor;
+using RobotVision.WpfHost.Shared;
 using Wpf.Ui;
 
 namespace RobotVision.WpfHost;
@@ -11,6 +12,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
         DataContext = shellViewModel;
         Nav.SetPageService(pageService);
+        NavigationShortcuts.Register(this, pageType => Nav.Navigate(pageType));
         Loaded += (_, _) => Nav.Navigate(typeof(MonitorPage));
     }
 
