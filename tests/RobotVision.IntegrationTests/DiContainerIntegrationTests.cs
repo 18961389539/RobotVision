@@ -182,4 +182,23 @@ public class DiContainerIntegrationTests
         error!.Value.Message.Should().Contain("比例标定");
         error.Value.Code.Should().Be(VisionErrorCode.NotCalibrated);
     }
+
+    [Theory]
+    [InlineData(AngleMode.DualBlobCenterLine)]
+    [InlineData(AngleMode.DualTemplateCenterLine)]
+    public async Task RecipeReferenceValidator_ModelFree_IgnoresMissingOnnx(AngleMode mode)
+    {
+        await using var server = await TestServer.StartAsync();
+        var loader = server.Provider.GetRequiredService<RecipeLoader>();
+
+        var error = loader.ReferenceValidator!(new RecipeConfig
+        {
+            Name = "House",
+            CameraId = "cam_virtual",
+            AngleMode = mode,
+            Models = ["gone.onnx", ""],
+        });
+
+        error.Should().BeNull();
+    }
 }

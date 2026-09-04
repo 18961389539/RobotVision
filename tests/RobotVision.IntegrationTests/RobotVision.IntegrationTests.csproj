@@ -16,6 +16,8 @@
     <PackageReference Include="FlaUI.Core" />
     <PackageReference Include="FlaUI.UIA3" />
     <PackageReference Include="Xunit.SkippableFact" />
+    <!-- 覆盖 FlaUI.Core 传递的 5.0.2（NU1904 / GHSA-rxg9-xrhp-64gj） -->
+    <PackageReference Include="System.Drawing.Common" />
   </ItemGroup>
 
   <ItemGroup>

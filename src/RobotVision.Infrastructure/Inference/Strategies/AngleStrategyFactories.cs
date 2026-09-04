@@ -58,3 +58,14 @@ public sealed class DualBlobCenterLineStrategyFactory : IAngleStrategyFactory
     public IAngleStrategy Create(ModelManager models, ILogger? logger = null) =>
         new DualBlobCenterLineStrategy();
 }
+
+/// <summary>DualTemplateCenterLine 策略工厂：双模板匹配中心连线（纯图像处理，无需模型）。</summary>
+public sealed class DualTemplateCenterLineStrategyFactory : IAngleStrategyFactory
+{
+    public AngleMode Mode => AngleMode.DualTemplateCenterLine;
+
+    public string Label => "双模板连线（模板1 在 ROI1 定位 + 模板2 在 ROI2 定向，无需模型）";
+
+    public IAngleStrategy Create(ModelManager models, ILogger? logger = null) =>
+        new DualTemplateCenterLineStrategy();
+}

@@ -60,6 +60,7 @@ public sealed class ScenePlaybookTests
     {
         var advice = ScenePlaybook.Recommend(new TaskConstraints(UseBlobsWithoutModel: true));
         Assert.Equal(AngleMode.DualBlobCenterLine, advice.Primary.AngleMode);
+        Assert.Contains(advice.Alternatives, a => a.AngleMode == AngleMode.DualTemplateCenterLine);
     }
 
     [Fact]

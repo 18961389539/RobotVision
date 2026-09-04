@@ -162,16 +162,15 @@ public sealed class RecipeLoader(string folder)
             throw new InvalidRecipeException(name,
                 "无头尾，偏心会差 180°；改用分割+精修有向方法（模板/SIFT/形状匹配/卡尺/孔槽）或关闭偏心补偿");
 
-        // 双BLOB模式纯图像处理、不使用模型：跳过一切模型数量校验（多配的模型静默忽略）
-        var isBlobMode = recipe.AngleMode == AngleMode.DualBlobCenterLine;
+        // 双BLOB / 双模板纯图像处理、不使用模型：跳过一切模型数量校验（多配的模型静默忽略）
+        var requiresOnnx = AngleModes.RequiresOnnx(recipe.AngleMode);
 
-        if (recipe.Models.Count == 0 && !isBlobMode)
+        if (requiresOnnx && recipe.Models.Count == 0)
             throw new InvalidRecipeException(name, "models 列表为空");
 
-        // 单模型模式（MaskMinAreaRect/KeyPointLine/MaskTemplate）只使用 Models[0]，多配会静默忽略多余模型，
+        // 单模型模式只使用 Models[0]，多配会静默忽略多余模型，
         // 收紧为恰好 1 个：多余模型既浪费内存又掩盖配方错误
-        if ((recipe.AngleMode is AngleMode.MaskMinAreaRect or AngleMode.KeyPointLine or AngleMode.MaskTemplate) &&
-            recipe.Models.Count != 1)
+        if (AngleModes.UsesSingleModelSlot(recipe.AngleMode) && recipe.Models.Count != 1)
             throw new InvalidRecipeException(name,
                 $"单模型模式（{recipe.AngleMode}）需要恰好 1 个模型（当前 {recipe.Models.Count}）");
 
@@ -230,10 +229,10 @@ public sealed class RecipeLoader(string folder)
             }
         }
 
-        if (recipe.AngleMode == AngleMode.DualCenterLine && recipe.Models.Count < 2)
+        if (AngleModes.UsesDualModelSlots(recipe.AngleMode) && recipe.Models.Count < 2)
             throw new InvalidRecipeException(name, "双模型模式（DualCenterLine）需要 2 个模型");
 
-        if (recipe.AngleMode == AngleMode.DualCenterLine && recipe.Models.Count > 2)
+        if (AngleModes.UsesDualModelSlots(recipe.AngleMode) && recipe.Models.Count > 2)
             throw new InvalidRecipeException(name, "双模型模式（DualCenterLine）最多 2 个模型");
 
         if (recipe.AngleMode == AngleMode.DualCenterLine &&
@@ -241,10 +240,10 @@ public sealed class RecipeLoader(string folder)
             recipe.DualModel.CropExpandRatio is <= 0 or > 5)
             throw new InvalidRecipeException(name, "dualModel.cropExpandRatio 必须在 (0,5]");
 
-        if (recipe.Models.Count > 2 && !isBlobMode)
+        if (requiresOnnx && recipe.Models.Count > 2)
             throw new InvalidRecipeException(name, "models 最多 2 个");
 
-        if (isBlobMode)
+        if (recipe.AngleMode == AngleMode.DualBlobCenterLine)
         {
             var blob = recipe.Blob;
             if (blob.Threshold is < 0 or > 255)
@@ -267,6 +266,24 @@ public sealed class RecipeLoader(string folder)
                 throw new InvalidRecipeException(name, "blob.openKernelSize 必须在 [0,31]");
         }
 
+        if (recipe.AngleMode == AngleMode.DualTemplateCenterLine)
+        {
+            recipe.DualTemplate ??= new();
+            var dt = recipe.DualTemplate;
+            if (string.IsNullOrEmpty(dt.TemplateABase64) || string.IsNullOrEmpty(dt.TemplateBBase64))
+                throw new InvalidRecipeException(name, "双模板连线未示教模板1/模板2（配方页框选后点「示教模板1」「示教模板2」）");
+            if (dt.MatchThreshold is < 0 or > 1)
+                throw new InvalidRecipeException(name, "dualTemplate.matchThreshold 必须在 [0,1]");
+            if (dt.RefineRangeDeg is <= 0 or > 45)
+                throw new InvalidRecipeException(name, "dualTemplate.refineRangeDeg 必须在 (0,45]");
+            if (dt.CropExpandRatio is <= 0 or > 5)
+                throw new InvalidRecipeException(name, "dualTemplate.cropExpandRatio 必须在 (0,5]");
+            if (dt.MinPairDistancePx < 0)
+                throw new InvalidRecipeException(name, "dualTemplate.minPairDistancePx 不能为负");
+            if (dt.MaxPairDistancePx <= dt.MinPairDistancePx)
+                throw new InvalidRecipeException(name, "dualTemplate.maxPairDistancePx 必须大于 dualTemplate.minPairDistancePx");
+        }
+
         if (recipe.Confidence is < 0 or > 1)
             throw new InvalidRecipeException(name, "confidence 必须在 [0,1]");
 
@@ -274,6 +291,7 @@ public sealed class RecipeLoader(string folder)
             throw new InvalidRecipeException(name, "iou 必须在 [0,1]");
 
         recipe.OutputOffset ??= new();
+        recipe.DualTemplate ??= new();
         recipe.ModelSha256 ??= [];
         ValidateOutputOffset(recipe);
         ValidateAssetPins(recipe);
@@ -288,10 +306,28 @@ public sealed class RecipeLoader(string folder)
             ValidateNormalizedRoi(name, "roi", roi);
         if (recipe.Template?.Roi is { } templateRoi)
             ValidateNormalizedRoi(name, "template.roi", templateRoi);
-        if (isBlobMode && recipe.Blob.SecondaryRoi is not null && recipe.Roi is null)
-            throw new InvalidRecipeException(name, "双BLOB 启用次区时必须同时设置主检测区：BLOB1 只在 roi，BLOB2 只在 blob.secondaryRoi");
-        if (isBlobMode && recipe.Blob.SecondaryRoi is { } secondaryRoi)
-            ValidateNormalizedRoi(name, "blob.secondaryRoi", secondaryRoi);
+        if (AngleModes.UsesSecondarySearchRoi(recipe.AngleMode) &&
+            recipe.SecondarySearchRoi is not null && recipe.Roi is null)
+        {
+            var msg = recipe.AngleMode == AngleMode.DualTemplateCenterLine
+                ? "双模板 启用次区时必须同时设置主检测区：模板1 只在 roi，模板2 只在 dualTemplate.secondaryRoi"
+                : "双BLOB 启用次区时必须同时设置主检测区：BLOB1 只在 roi，BLOB2 只在 blob.secondaryRoi";
+            throw new InvalidRecipeException(name, msg);
+        }
+        if (AngleModes.UsesSecondarySearchRoi(recipe.AngleMode) &&
+            recipe.SecondarySearchRoi is { } secondaryRoi)
+        {
+            var field = recipe.AngleMode == AngleMode.DualTemplateCenterLine
+                ? "dualTemplate.secondaryRoi"
+                : "blob.secondaryRoi";
+            ValidateNormalizedRoi(name, field, secondaryRoi);
+        }
+        if (recipe.AngleMode == AngleMode.DualTemplateCenterLine &&
+            recipe.DualTemplate.TeachRoiA is { } teachA)
+            ValidateNormalizedRoi(name, "dualTemplate.teachRoiA", teachA);
+        if (recipe.AngleMode == AngleMode.DualTemplateCenterLine &&
+            recipe.DualTemplate.TeachRoiB is { } teachB)
+            ValidateNormalizedRoi(name, "dualTemplate.teachRoiB", teachB);
 
         ValidateLighting(recipe);
     }

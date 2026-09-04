@@ -97,6 +97,12 @@ internal static class RecipeListMetadataReader
                     continue;
                 }
 
+                if (NameIs(ref reader, "dualTemplate"u8))
+                {
+                    ReadDualTemplate(ref reader, meta);
+                    continue;
+                }
+
                 if (NameIs(ref reader, "lightControllerId"u8))
                 {
                     reader.Read();
@@ -176,6 +182,42 @@ internal static class RecipeListMetadataReader
                 meta.HasFeatureRoi = reader.TokenType == JsonTokenType.StartObject;
                 if (meta.HasFeatureRoi)
                     SkipValue(ref reader);
+                continue;
+            }
+
+            reader.Read();
+            SkipValue(ref reader);
+        }
+    }
+
+    private static void ReadDualTemplate(ref Utf8JsonReader reader, Builder meta)
+    {
+        reader.Read();
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            SkipValue(ref reader);
+            return;
+        }
+
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndObject)
+                return;
+
+            if (reader.TokenType != JsonTokenType.PropertyName)
+                continue;
+
+            if (NameIs(ref reader, "templateABase64"u8))
+            {
+                reader.Read();
+                meta.HasDualTemplateA = reader.TokenType == JsonTokenType.String && reader.ValueSpan.Length > 0;
+                continue;
+            }
+
+            if (NameIs(ref reader, "templateBBase64"u8))
+            {
+                reader.Read();
+                meta.HasDualTemplateB = reader.TokenType == JsonTokenType.String && reader.ValueSpan.Length > 0;
                 continue;
             }
 
@@ -335,6 +377,8 @@ internal static class RecipeListMetadataReader
         public bool HasDetectionRoi;
         public bool HasFeatureRoi;
         public bool HasTemplateImage;
+        public bool HasDualTemplateA;
+        public bool HasDualTemplateB;
         public bool HasLighting;
         public string? LightControllerId;
         public bool HasOutputOffset;
@@ -356,6 +400,8 @@ internal static class RecipeListMetadataReader
             HasDetectionRoi = HasDetectionRoi,
             HasFeatureRoi = HasFeatureRoi,
             HasTemplateImage = HasTemplateImage,
+            HasDualTemplateA = HasDualTemplateA,
+            HasDualTemplateB = HasDualTemplateB,
             HasLighting = HasLighting,
             LightControllerId = LightControllerId,
             HasOutputOffset = HasOutputOffset,

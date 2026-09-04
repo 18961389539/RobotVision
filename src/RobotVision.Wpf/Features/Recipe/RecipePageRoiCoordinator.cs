@@ -30,13 +30,17 @@ internal sealed class RecipePageRoiCoordinator : IDisposable
             () => _vm is { ShowTestImage: true, Test.ResultImage: not null } ? _testViewport : _roiViewport,
             [_testViewport, _roiViewport],
             () => _vm.Roi.UseRoi ? _vm.Editor.Roi : null,
-            () => _vm.UsesFeatureTeachRoi ? _vm.Editor.Template?.Roi : null,
+            () => _vm.IsDualTemplateMode
+                ? (_vm.Roi.TeachCropSlot == DualTemplateTeachSlot.B
+                    ? _vm.Editor.DualTemplate.TeachRoiB
+                    : _vm.Editor.DualTemplate.TeachRoiA)
+                : _vm.UsesFeatureTeachRoi ? _vm.Editor.Template?.Roi : null,
             () => _vm.UsesFeatureTeachRoi,
             ShowTeachFeatureRect,
             () => _vm.Editor.Template?.RefineLine,
             () => TemplateOptions.UsesTaughtRefineLine(_vm.Editor.Template?.RefineMethod ?? SegmentRefineMethod.Template),
-            () => _vm.IsDualBlobMode ? _vm.Editor.Blob.SecondaryRoi : null,
-            () => _vm.IsDualBlobMode);
+            () => _vm.Editor.SecondarySearchRoi,
+            () => _vm.UsesSecondarySearchRoi);
     }
 
     public void Wire()
@@ -72,7 +76,7 @@ internal sealed class RecipePageRoiCoordinator : IDisposable
     {
         if (kind == RecipeRoiDrawKind.Template && !_vm.UsesFeatureTeachRoi)
             return;
-        if (kind == RecipeRoiDrawKind.SecondaryBlob && !_vm.IsDualBlobMode)
+        if (kind == RecipeRoiDrawKind.SecondaryBlob && !_vm.UsesSecondarySearchRoi)
             return;
 
         _sync.SetDrawTarget(kind);
@@ -82,8 +86,10 @@ internal sealed class RecipePageRoiCoordinator : IDisposable
 
         var caption = kind switch
         {
-            RecipeRoiDrawKind.Template => "框选特征：沿用当前结果图",
-            RecipeRoiDrawKind.SecondaryBlob => "框选 ROI2（BLOB2）：沿用当前结果图",
+            RecipeRoiDrawKind.Template => _vm.IsDualTemplateMode
+                ? (_vm.Roi.TeachCropSlot == DualTemplateTeachSlot.B ? "框选模板2：沿用当前结果图" : "框选模板1：沿用当前结果图")
+                : "框选特征：沿用当前结果图",
+            RecipeRoiDrawKind.SecondaryBlob => "框选 ROI2：沿用当前结果图",
             _ => "框选检测区：沿用当前结果图",
         };
 
@@ -106,6 +112,8 @@ internal sealed class RecipePageRoiCoordinator : IDisposable
         {
             if (kind == RecipeRoiDrawKind.Template)
                 _vm.Roi.EnsureFeatureRoiDrawable();
+            if (kind == RecipeRoiDrawKind.Template && _vm.IsDualTemplateMode)
+                _vm.Roi.EnsureDualTemplateTeachDrawable();
             if (kind == RecipeRoiDrawKind.SecondaryBlob)
                 _vm.Roi.UseSecondaryRoi = true;
             _sync.StartRoiMode();
@@ -123,6 +131,8 @@ internal sealed class RecipePageRoiCoordinator : IDisposable
 
     private bool ShowTeachFeatureRect()
     {
+        if (_vm.IsDualTemplateMode)
+            return true;
         if (!_vm.UsesFeatureTeachRoi || !_vm.Roi.UseTemplateRoi)
             return false;
         if (_vm.ShowTestImage && _vm.Test.ResultImage is not null && !_sync.IsTemplateDrawTarget)
@@ -138,6 +148,8 @@ internal sealed class RecipePageRoiCoordinator : IDisposable
             or nameof(RecipeViewModel.UsesFeatureTeachRoi)
             or nameof(RecipeViewModel.UsesRefineLine)
             or nameof(RecipeViewModel.IsDualBlobMode)
+            or nameof(RecipeViewModel.IsDualTemplateMode)
+            or nameof(RecipeViewModel.UsesSecondarySearchRoi)
             or nameof(RecipeViewModel.Editor))
         {
             if (_vm.Roi.HasRoiRefFrame)

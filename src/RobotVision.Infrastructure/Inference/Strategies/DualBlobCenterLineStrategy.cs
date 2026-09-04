@@ -31,7 +31,7 @@ public sealed class DualBlobCenterLineStrategy : IAngleStrategy
         var opt = recipe.Blob;
 
         using var gray = ToGray(undistorted);
-        var useSecondaryRoi = opt.SecondaryRoi is not null;
+        var useSecondaryRoi = recipe.SecondarySearchRoi is not null;
         // 双 ROI：BLOB1 只在 ROI1。主区未设时不退回全图，避免把 ROI2 里的斑当成 BLOB1。
         if (useSecondaryRoi && recipe.Roi is null)
             return [];
@@ -41,7 +41,7 @@ public sealed class DualBlobCenterLineStrategy : IAngleStrategy
             .Where(b => b.Area >= opt.MinArea && b.Area <= opt.MaxArea)
             .ToList();
         var secondaries = useSecondaryRoi
-            ? LabelRegion(gray, opt.SecondaryRoi, opt, ct)
+            ? LabelRegion(gray, recipe.SecondarySearchRoi, opt, ct)
                 .Where(b => b.Area >= opt.SecondaryMinArea && b.Area <= opt.SecondaryMaxArea)
                 .ToList()
             : labeledPrimary

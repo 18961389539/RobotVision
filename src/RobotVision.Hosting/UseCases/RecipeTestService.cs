@@ -182,4 +182,35 @@ public sealed class RecipeTestService(
 
         throw new InvalidOperationException("分割未检出有效目标，无法示教（请确认模型/阈值/画面内有目标）");
     }
+
+    public async Task<RecipeTeachCropResult> TeachCropAsync(
+        RecipeTeachCropRequest request, CancellationToken ct = default)
+    {
+        using var lightingScope = lighting.Apply(request.LightControllerId, request.Lighting);
+        if (lightingScope.StabilizeDelayMs > 0)
+            await Task.Delay(lightingScope.StabilizeDelayMs, ct).ConfigureAwait(false);
+
+        try
+        {
+            return await Task.Run(() => GrabTeachCrop(request), ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            lightingScope.Dispose();
+        }
+    }
+
+    private RecipeTeachCropResult GrabTeachCrop(RecipeTeachCropRequest request)
+    {
+        using var grabbed = cameras.GrabForTeach(request.CameraId);
+        using var image = RecipeEditorImagePrep.PrepareInferenceImage(calibration, request.Recipe, grabbed.Image);
+        using var mat = VisionImageMat.AsMat(image);
+        using var cropView = RoiHelper.Crop(mat, request.Crop, out _, out _);
+        if (cropView.Width < 8 || cropView.Height < 8)
+            throw new InvalidOperationException("模板裁剪过小（请把模板框画大一点，至少 8×8 px）");
+
+        using var owned = cropView.Clone();
+        var b64 = MaskTemplateHostingOps.EncodeTemplatePng(owned);
+        return new RecipeTeachCropResult(b64, owned.Width, owned.Height);
+    }
 }

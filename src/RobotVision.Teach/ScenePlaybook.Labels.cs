@@ -23,6 +23,7 @@ public static partial class ScenePlaybook
         AngleMode.DualCenterLine => "双模型中心连线",
         AngleMode.KeyPointLine => "关键点连线",
         AngleMode.DualBlobCenterLine => "双 BLOB 连线",
+        AngleMode.DualTemplateCenterLine => "双模板连线",
         _ => "分割+精修",
     };
 

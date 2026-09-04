@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using RobotVision.Core.Models;
 
 namespace RobotVision.Core.Recipe;
@@ -22,6 +23,12 @@ public enum AngleMode
     /// BLOB2 只在 ROI2（或主包围盒外扩窗口）内搜索，主→次连线定向。
     /// </summary>
     DualBlobCenterLine,
+
+    /// <summary>
+    /// 双模板连线（无需模型）：模板1 只在 ROI1 内 NCC 匹配定位 XY，
+    /// 模板2 只在 ROI2（或模板1 匹配窗外扩窗口）内匹配，主→次连线定向。
+    /// </summary>
+    DualTemplateCenterLine,
 }
 
 /// <summary>旋转中心补偿模式。</summary>
@@ -601,6 +608,82 @@ public sealed class BlobOptions
         MaxPairDistancePx = MaxPairDistancePx,
         OpenKernelSize = OpenKernelSize,
     };
+
+    /// <summary>离开双 BLOB 时丢掉次区，避免跟到其它角度模式；阈值等参数可留着切回来。</summary>
+    public void ClearUnusedFields(AngleMode angleMode)
+    {
+        if (angleMode == AngleMode.DualBlobCenterLine)
+            return;
+        SecondaryRoi = null;
+    }
+}
+
+/// <summary>
+/// 双模板连线（DualTemplateCenterLine）专属参数：两张示教灰度/彩色模板做 NCC。
+/// 模板1 只在配方 Roi（ROI1）内匹配并定位 XY；设了 <see cref="SecondaryRoi"/> 时
+/// 模板2 只在 ROI2 内匹配；未设次区时在模板1 匹配窗外扩窗口内搜模板2。
+/// 角度 = 模板1 中心 → 模板2 中心连线。
+/// </summary>
+public sealed class DualTemplateOptions
+{
+    /// <summary>模板1 PNG base64（ROI1 内定位）；空 = 未示教。</summary>
+    public string TemplateABase64 { get; set; } = "";
+
+    /// <summary>模板2 PNG base64（ROI2 内定向）；空 = 未示教。</summary>
+    public string TemplateBBase64 { get; set; } = "";
+
+    /// <summary>
+    /// ROI2：模板2 只在此区内匹配（全图相对比例）。null = 仍用模板1 匹配盒按 <see cref="CropExpandRatio"/> 外扩窗口。
+    /// 与配方 <c>Roi</c>（ROI1，模板1 专用）互斥：两边各搜各的，不跨区。
+    /// </summary>
+    public Roi? SecondaryRoi { get; set; }
+
+    /// <summary>示教裁剪框（模板1）；运行时不参与搜索，只供再次示教。</summary>
+    public Roi? TeachRoiA { get; set; }
+
+    /// <summary>示教裁剪框（模板2）；运行时不参与搜索，只供再次示教。</summary>
+    public Roi? TeachRoiB { get; set; }
+
+    /// <summary>NCC 匹配阈值 [0,1]：低于该值该侧视为未命中。</summary>
+    public double MatchThreshold { get; set; } = 0.5;
+
+    /// <summary>模板旋转搜索半宽（°），实际搜 0±range 与 180±range；(0,45]。</summary>
+    public double RefineRangeDeg { get; set; } = 15;
+
+    /// <summary>主次匹配中心最小间距（px）。</summary>
+    public double MinPairDistancePx { get; set; } = 5;
+
+    /// <summary>主次匹配中心最大间距（px）。</summary>
+    public double MaxPairDistancePx { get; set; } = 800;
+
+    /// <summary>未设 <see cref="SecondaryRoi"/> 时，模板2 搜索窗外扩系数：(0,5]。</summary>
+    public double CropExpandRatio { get; set; } = 1.0;
+
+    public DualTemplateOptions Clone(bool includeTemplateImage = true) => new()
+    {
+        TemplateABase64 = includeTemplateImage ? TemplateABase64 : "",
+        TemplateBBase64 = includeTemplateImage ? TemplateBBase64 : "",
+        SecondaryRoi = SecondaryRoi,
+        TeachRoiA = TeachRoiA,
+        TeachRoiB = TeachRoiB,
+        MatchThreshold = MatchThreshold,
+        RefineRangeDeg = RefineRangeDeg,
+        MinPairDistancePx = MinPairDistancePx,
+        MaxPairDistancePx = MaxPairDistancePx,
+        CropExpandRatio = CropExpandRatio,
+    };
+
+    /// <summary>离开双模板模式时丢掉示教 PNG 与次区，避免跟到其它角度模式。</summary>
+    public void ClearUnusedFields(AngleMode angleMode)
+    {
+        if (angleMode == AngleMode.DualTemplateCenterLine)
+            return;
+        TemplateABase64 = "";
+        TemplateBBase64 = "";
+        SecondaryRoi = null;
+        TeachRoiA = null;
+        TeachRoiB = null;
+    }
 }
 
 /// <summary>配方：一次 TRIGGER 触发所需的全部参数。</summary>
@@ -653,9 +736,39 @@ public sealed class RecipeConfig
     /// <summary>双BLOB连线专属参数（DualBlobCenterLine 模式使用；该模式不需要模型）。</summary>
     public BlobOptions Blob { get; set; } = new();
 
+    /// <summary>双模板连线专属参数（DualTemplateCenterLine 模式使用；该模式不需要模型）。</summary>
+    public DualTemplateOptions DualTemplate { get; set; } = new();
+
     /// <summary>检测区域（相对比例 0~1，X/Y 左上角、W/H 宽高）；null = 全图推理。
     /// 大图上只检测局部区域可显著降低 CPU 推理耗时。</summary>
     public Roi? Roi { get; set; }
+
+    /// <summary>
+    /// ROI2（双 BLOB / 双模板）。JSON 仍写在 <c>blob.secondaryRoi</c> / <c>dualTemplate.secondaryRoi</c>，
+    /// 编辑器与叠加层只走这一处，不再按模式 if。
+    /// </summary>
+    [JsonIgnore]
+    public Roi? SecondarySearchRoi
+    {
+        get => AngleMode switch
+        {
+            AngleMode.DualBlobCenterLine => Blob.SecondaryRoi,
+            AngleMode.DualTemplateCenterLine => DualTemplate.SecondaryRoi,
+            _ => null,
+        };
+        set
+        {
+            switch (AngleMode)
+            {
+                case AngleMode.DualBlobCenterLine:
+                    Blob.SecondaryRoi = value;
+                    break;
+                case AngleMode.DualTemplateCenterLine:
+                    DualTemplate.SecondaryRoi = value;
+                    break;
+            }
+        }
+    }
 
     /// <summary>旋转中心补偿（默认关闭）。开启前需 CalibTool rotation 完成轴心标定。</summary>
     public RotationCompensationMode RotationCompensation { get; set; } = RotationCompensationMode.None;
@@ -717,6 +830,7 @@ public sealed class RecipeConfig
         Segmentation = Segmentation.Clone(),
         Template = Template.Clone(includeTemplateImage),
         Blob = Blob.Clone(),
+        DualTemplate = DualTemplate.Clone(includeTemplateImage),
         Roi = Roi,
         RotationCompensation = RotationCompensation,
         OutputOffset = (OutputOffset ?? new()).Clone(),

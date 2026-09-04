@@ -43,7 +43,7 @@ internal interface IRecipeListHost
 }
 
 /// <summary>配方列表：刷新、搜索过滤、新建/复制/保存/删除。</summary>
-public sealed partial class RecipeListCatalog : ObservableObject
+public sealed partial class RecipeListCatalog : ObservableObject, IDisposable
 {
     private readonly IRecipeListHost _host;
     private readonly RecipeLoader _loader;
@@ -547,5 +547,15 @@ public sealed partial class RecipeListCatalog : ObservableObject
             return Selected.Name;
 
         return _host.OriginalName;
+    }
+
+    public void Dispose()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
     }
 }

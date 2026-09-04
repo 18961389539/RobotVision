@@ -17,43 +17,74 @@ internal static class PylonRuntimeBootstrap
         if (runtime is null)
             return;
 
-        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        if (path.IndexOf(runtime, StringComparison.OrdinalIgnoreCase) < 0)
-            Environment.SetEnvironmentVariable("PATH", runtime + Path.PathSeparator + path);
-
+        PrependPath(runtime);
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GENICAM_GENTL64_PATH")))
             Environment.SetEnvironmentVariable("GENICAM_GENTL64_PATH", runtime);
     }
 
+    /// <summary>是否已定位到 pylon Runtime\x64（用于初始化失败时的提示）。</summary>
+    internal static bool IsRuntimeLocated => FindRuntimeDir() is not null;
+
+    private static void PrependPath(string runtime)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        if (path.IndexOf(runtime, StringComparison.OrdinalIgnoreCase) < 0)
+            Environment.SetEnvironmentVariable("PATH", runtime + Path.PathSeparator + path);
+    }
+
     private static string? FindRuntimeDir()
     {
-        foreach (var candidate in new[]
-        {
-            Environment.GetEnvironmentVariable("PYLON_ROOT"),
-            @"D:\Program Files\Basler\pylon\Runtime\x64",
-            @"C:\Program Files\Basler\pylon\Runtime\x64",
-            @"D:\Program Files\Basler\pylon",
-            @"C:\Program Files\Basler\pylon",
-        })
+        foreach (var candidate in EnumerateRootCandidates())
         {
             var resolved = ResolveRuntimeDir(candidate);
             if (resolved is not null)
                 return resolved;
         }
 
-        // 注册表仅 Windows 可用：非 Windows 直接跳过（CA1416 平台守卫）
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            foreach (var segment in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = segment.Trim();
+                if (IsRuntimeDir(trimmed))
+                    return trimmed;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string?> EnumerateRootCandidates()
+    {
+        yield return Environment.GetEnvironmentVariable("PYLON_ROOT");
+        yield return @"D:\Program Files\Basler\pylon\Runtime\x64";
+        yield return @"C:\Program Files\Basler\pylon\Runtime\x64";
+        yield return @"D:\Program Files\Basler\pylon";
+        yield return @"C:\Program Files\Basler\pylon";
+
+        foreach (var folder in TryReadPylonInstallFolder())
+            yield return folder;
+    }
+
+    private static IEnumerable<string?> TryReadPylonInstallFolder()
+    {
         if (!OperatingSystem.IsWindows())
-            return null;
+            yield break;
+
+        string? folder = null;
         try
         {
             using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Basler\pylon");
-            return ResolveRuntimeDir(key?.GetValue("InstallationFolder") as string);
+            folder = key?.GetValue("InstallationFolder") as string;
         }
         catch (Exception)
         {
             // 无 pylon 安装/无注册表权限：视为未定位到，交由上层空枚举
-            return null;
         }
+
+        if (!string.IsNullOrWhiteSpace(folder))
+            yield return folder;
     }
 
     private static string? ResolveRuntimeDir(string? candidate)

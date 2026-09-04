@@ -468,10 +468,16 @@ public static partial class ServiceCollectionExtensions
             !lighting.IsRegistered(recipe.LightControllerId))
             return new RecipeReferenceError($"光源控制器未注册: {recipe.LightControllerId}", VisionErrorCode.LightNotRegistered);
 
-        foreach (var model in recipe.Models)
+        // 双 BLOB / 双模板不加载 ONNX；切模式后 JSON 里常残留旧 models，不得再当引用错误。
+        if (AngleModes.RequiresOnnx(recipe.AngleMode))
         {
-            if (!models.ModelFileExists(model))
-                return new RecipeReferenceError($"模型文件不存在或为空: {model}", VisionErrorCode.ModelNotAvailable);
+            foreach (var model in recipe.Models)
+            {
+                if (string.IsNullOrWhiteSpace(model))
+                    continue;
+                if (!models.ModelFileExists(model))
+                    return new RecipeReferenceError($"模型文件不存在或为空: {model}", VisionErrorCode.ModelNotAvailable);
+            }
         }
 
         if (!string.IsNullOrEmpty(recipe.StationId) &&

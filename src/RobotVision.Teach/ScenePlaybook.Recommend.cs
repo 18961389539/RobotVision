@@ -20,7 +20,10 @@ public static partial class ScenePlaybook
         {
             var blob = new PlaybookCandidate(AngleMode.DualBlobCenterLine, null, false, "双 BLOB 连线",
                 "无需模型：主 BLOB 定位，主→次连线定向。请在配方里配好阈值与主次。", true);
-            return Finish(blob, [KeyPointAlt(), DualModelAlt()], scene, task,
+            var blobAlts = new List<PlaybookCandidate> { KeyPointAlt(), DualModelAlt() };
+            if (task.TeachAllowed)
+                blobAlts.Add(DualTemplateAlt());
+            return Finish(blob, blobAlts, scene, task,
                 "任务勾选了无模型双斑点，优先双 BLOB 连线。", prior, sceneVotes);
         }
 
@@ -29,6 +32,8 @@ public static partial class ScenePlaybook
             var dual = new PlaybookCandidate(AngleMode.DualCenterLine, null, false, "双模型中心连线",
                 "两个稳定特征（孔、PIN、Mark）时，连线比壳体精修更稳。请配置模型 A/B。", true);
             var alts = new List<PlaybookCandidate> { KeyPointAlt(), BlobAlt() };
+            if (task.TeachAllowed)
+                alts.Add(DualTemplateAlt());
             if (scene is not null)
                 alts.Add(HeuristicRefine(task, scene) with { IsPrimary = false });
             return Finish(dual, alts, scene, task, "任务声明有两个定位特征，推荐连线模式而不是在精修里硬选。",
@@ -317,6 +322,8 @@ public static partial class ScenePlaybook
         Add(DualModelAlt());
         Add(KeyPointAlt());
         Add(BlobAlt());
+        if (task.TeachAllowed)
+            Add(DualTemplateAlt());
         if (task.TeachAllowed && primary.Refine != SegmentRefineMethod.Template)
             Add(new PlaybookCandidate(AngleMode.MaskTemplate, SegmentRefineMethod.Template, true,
                 "分割+模板（边缘定角）", "丝印/齿列不对称时用；需示教。", false));
@@ -346,4 +353,8 @@ public static partial class ScenePlaybook
     private static PlaybookCandidate BlobAlt() =>
         new(AngleMode.DualBlobCenterLine, null, false, "双 BLOB 连线",
             "无需模型的主次斑点。", false);
+
+    private static PlaybookCandidate DualTemplateAlt() =>
+        new(AngleMode.DualTemplateCenterLine, null, false, "双模板连线",
+            "两个可示教 Mark：模板1 定位、模板2 定向。", false);
 }

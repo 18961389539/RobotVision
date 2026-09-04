@@ -37,6 +37,7 @@ internal sealed partial class RecipeSetupWizardViewModel
             return;
         var chosen = _chosen;
         var editor = _host.Editor;
+        var previous = editor.AngleMode;
         editor.AngleMode = chosen.AngleMode;
         if (chosen.AngleMode == AngleMode.MaskTemplate && chosen.Refine is { } refine)
         {
@@ -60,7 +61,7 @@ internal sealed partial class RecipeSetupWizardViewModel
         }
 
         editor.Template.ExpectedCount = Math.Clamp(Constraints.ExpectedCount, 0, 20);
-        RecipeEditorModeCleanup.Apply(editor);
+        RecipeEditorModeCleanup.Apply(editor, previous);
 
         _host.RefreshEditorBindings();
         OnPropertyChanged(nameof(ShowTeachActions));

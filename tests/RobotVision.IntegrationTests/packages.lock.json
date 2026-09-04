@@ -49,6 +49,15 @@
           "Microsoft.TestPlatform.TestHost": "17.11.1"
         }
       },
+      "System.Drawing.Common": {
+        "type": "Direct",
+        "requested": "[10.0.11, )",
+        "resolved": "10.0.11",
+        "contentHash": "Schxw0FzXMAwa+If/oVxqjrmmiyUbw9KUAeqJOPnjsdAzkmUZXSZWNRLHZye2boFYlbMRkeBY6dba5hs8Mu4OQ==",
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "10.0.11"
+        }
+      },
       "xunit": {
         "type": "Direct",
         "requested": "[2.9.2, )",
@@ -242,11 +251,8 @@
       },
       "Microsoft.Win32.SystemEvents": {
         "type": "Transitive",
-        "resolved": "5.0.0",
-        "contentHash": "Bh6blKG8VAKvXiLe2L+sEsn62nc1Ij34MrNxepD2OCrS5cpCwQa9MeLyhVQPQ/R4Wlzwuy6wMK8hLb11QPDRsQ==",
-        "dependencies": {
-          "Microsoft.NETCore.Platforms": "5.0.0"
-        }
+        "resolved": "10.0.11",
+        "contentHash": "WXGazuzGf3eX24z1qgiGwP2df3t2T28QeZvMjlRqdjNuewQyLfbOb6rEXmk6Xs++gOQClmw90pkjPd9j/hNWDw=="
       },
       "Newtonsoft.Json": {
         "type": "Transitive",
@@ -359,14 +365,6 @@
           "System.Configuration.ConfigurationManager": "5.0.0"
         }
       },
-      "System.Drawing.Common": {
-        "type": "Transitive",
-        "resolved": "5.0.2",
-        "contentHash": "rvr/M1WPf24ljpvvrVd74+NdjRUJu1bBkspkZcnzSZnmAUQWSvanlQ0k/hVHk+cHufZbZfu7vOh/vYc0q5Uu/A==",
-        "dependencies": {
-          "Microsoft.Win32.SystemEvents": "5.0.0"
-        }
-      },
       "System.Management": {
         "type": "Transitive",
         "resolved": "5.0.0",
@@ -473,7 +471,6 @@
       "robotvision.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Basler.Pylon.NET.x64": "[10.3.2.636, )",
           "GigEVision.Net": "[1.0.0, )",
           "Intel.ML.OnnxRuntime.OpenVino": "[1.22.0, )",
           "LDVisionCamera.Net": "[1.0.0-rc.37, )",
@@ -482,6 +479,7 @@
           "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )",
           "RobotVision.JlVision": "[1.0.0, )",
+          "RobotVision.Vision": "[1.0.0, )",
           "System.IO.Ports": "[8.0.0, )",
           "YoloDotNet": "[4.2.0, )",
           "YoloDotNet.ExecutionProvider.OpenVino": "[1.1.0, )"
@@ -511,12 +509,6 @@
           "OpenCvSharp4": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )"
         }
-      },
-      "Basler.Pylon.NET.x64": {
-        "type": "CentralTransitive",
-        "requested": "[10.3.2.636, )",
-        "resolved": "10.3.2.636",
-        "contentHash": "J8WJjGF85KdoPceERP+DFblPbK2PGAqIxzHRtuC31TGC8QgZSiiMJsNv7sWMnrkysuirtTC0IPJ1jPPTus5/jw=="
       },
       "GigEVision.Net": {
         "type": "CentralTransitive",

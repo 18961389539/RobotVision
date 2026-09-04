@@ -17,6 +17,7 @@ public partial class RecipePage : Page
             _vm.RequestTemplateRoiDraw = null;
             _vm.RequestDetectionRoiDraw = null;
             _vm.RequestSecondaryRoiDraw = null;
+            _vm.RequestTeachRoiBDraw = null;
             _roiCoordinator?.Unwire();
             _vm.StopDirtyWatch();
         });
@@ -32,6 +33,7 @@ public partial class RecipePage : Page
             _vm.RequestTemplateRoiDraw = () => _roiCoordinator?.BeginRoiDraw(RecipeRoiDrawKind.Template);
             _vm.RequestDetectionRoiDraw = () => _roiCoordinator?.BeginRoiDraw(RecipeRoiDrawKind.Detection);
             _vm.RequestSecondaryRoiDraw = () => _roiCoordinator?.BeginRoiDraw(RecipeRoiDrawKind.SecondaryBlob);
+            _vm.RequestTeachRoiBDraw = () => _roiCoordinator?.BeginRoiDraw(RecipeRoiDrawKind.Template);
             _roiCoordinator ??= new RecipePageRoiCoordinator(
                 _vm,
                 ImageViewport.TestViewerControl,

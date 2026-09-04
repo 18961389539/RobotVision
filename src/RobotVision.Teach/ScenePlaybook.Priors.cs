@@ -16,9 +16,10 @@ public static partial class ScenePlaybook
         var refine = recipe.Template.RefineMethod;
         var directed = recipe.RotationCompensation == RotationCompensationMode.EccentricTool
                        || recipe.AngleMode is AngleMode.DualCenterLine or AngleMode.KeyPointLine
-                           or AngleMode.DualBlobCenterLine
+                           or AngleMode.DualBlobCenterLine or AngleMode.DualTemplateCenterLine
                        || (mask && refine != SegmentRefineMethod.LineFit);
         var teach = !string.IsNullOrEmpty(recipe.Template.TemplateImageBase64)
+                    || !string.IsNullOrEmpty(recipe.DualTemplate.TemplateABase64)
                     || (mask && TemplateOptions.NeedsTaughtImage(refine));
         return new TaskConstraints(
             directed,

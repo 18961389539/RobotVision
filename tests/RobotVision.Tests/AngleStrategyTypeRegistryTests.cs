@@ -11,7 +11,7 @@ using Xunit;
 namespace RobotVision.Tests;
 
 /// <summary>
-/// 角度策略工厂注册表测试：默认预置五种模式、注册/覆盖、未注册查询、
+/// 角度策略工厂注册表测试：默认预置六种模式、注册/覆盖、未注册查询、
 /// 模式列表排序、按模式创建。与光源/相机注册表同构。
 /// </summary>
 public class AngleStrategyTypeRegistryTests
@@ -48,7 +48,8 @@ public class AngleStrategyTypeRegistryTests
         Assert.True(registry.IsKnown(AngleMode.KeyPointLine));
         Assert.True(registry.IsKnown(AngleMode.MaskTemplate));
         Assert.True(registry.IsKnown(AngleMode.DualBlobCenterLine));
-        Assert.Equal(5, registry.Modes.Count);
+        Assert.True(registry.IsKnown(AngleMode.DualTemplateCenterLine));
+        Assert.Equal(6, registry.Modes.Count);
     }
 
     [Fact]
@@ -72,6 +73,7 @@ public class AngleStrategyTypeRegistryTests
         Assert.IsType<KeyPointLineStrategy>(registry.Create(AngleMode.KeyPointLine, models));
         Assert.IsType<MaskTemplateStrategy>(registry.Create(AngleMode.MaskTemplate, models));
         Assert.IsType<DualBlobCenterLineStrategy>(registry.Create(AngleMode.DualBlobCenterLine, models));
+        Assert.IsType<DualTemplateCenterLineStrategy>(registry.Create(AngleMode.DualTemplateCenterLine, models));
     }
 
     [Fact]

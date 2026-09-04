@@ -14,6 +14,7 @@ public readonly record struct GrabTrace(CameraFrame Frame, double GateWaitMs, do
 /// 相机管理类：负责相机注册、按 Id 查找与取图。
 /// 真实相机（海康/Basler 等）实现 ICamera 后调用 Register 接入。
 /// 取图按相机 Id 串行：SDK 非线程安全，产线 TRIGGER 与 UI 预览必须走同一把锁。
+/// 出图 2×2 仅针对真实相机：硬件 binning 成功则直通，未降采样则软件减半。File / Virtual 保持原图。
 /// </summary>
 public sealed class CameraManager : IDisposable
 {
@@ -106,24 +107,27 @@ public sealed class CameraManager : IDisposable
             : throw new VisionException(VisionErrorCode.CameraNotRegistered, $"相机未注册: {id}");
 
     /// <summary>按 Id 串行取图（已注册实例）。</summary>
-    public CameraFrame Grab(string id, CancellationToken ct = default) =>
-        GrabCore(id, () => Get(id).Grab(ct), ct);
+    public CameraFrame Grab(string id, CancellationToken ct = default)
+    {
+        var camera = Get(id);
+        return GrabCore(id, camera, () => camera.Grab(ct), ct);
+    }
 
     /// <summary>
     /// 示教/框选：文件夹相机再读上次文件、不推进回放下标；其它相机与 <see cref="Grab(string, CancellationToken)"/> 相同。
     /// </summary>
-    public CameraFrame GrabForTeach(string id, CancellationToken ct = default) =>
-        GrabCore(id, () =>
-        {
-            var cam = Get(id);
-            return cam is FileCamera file ? file.RepeatLast(ct) : cam.Grab(ct);
-        }, ct);
+    public CameraFrame GrabForTeach(string id, CancellationToken ct = default)
+    {
+        var camera = Get(id);
+        return GrabCore(id, camera, () =>
+            camera is FileCamera file ? file.RepeatLast(ct) : camera.Grab(ct), ct);
+    }
 
     /// <summary>按相机 Id 串行取图（临时实例与已注册同 Id 互斥，供「先试后存」）。</summary>
     public CameraFrame Grab(ICamera camera, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(camera);
-        return GrabCore(camera.Id, () => camera.Grab(ct), ct);
+        return GrabCore(camera.Id, camera, () => camera.Grab(ct), ct);
     }
 
     /// <summary>异步获锁后取图，避免在 UI/管线线程上同步 Wait。</summary>
@@ -142,14 +146,17 @@ public sealed class CameraManager : IDisposable
     }
 
     /// <summary>与 <see cref="GrabAsync(string, CancellationToken)"/> 相同，额外返回等锁 / 采集耗时。</summary>
-    public Task<GrabTrace> GrabTracedAsync(string id, CancellationToken ct = default) =>
-        GrabCoreTracedAsync(id, () => Get(id).Grab(ct), ct);
+    public Task<GrabTrace> GrabTracedAsync(string id, CancellationToken ct = default)
+    {
+        var camera = Get(id);
+        return GrabCoreTracedAsync(id, camera, () => camera.Grab(ct), ct);
+    }
 
     /// <summary>与 <see cref="GrabAsync(ICamera, CancellationToken)"/> 相同，额外返回等锁 / 采集耗时。</summary>
     public Task<GrabTrace> GrabTracedAsync(ICamera camera, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(camera);
-        return GrabCoreTracedAsync(camera.Id, () => camera.Grab(ct), ct);
+        return GrabCoreTracedAsync(camera.Id, camera, () => camera.Grab(ct), ct);
     }
 
     /// <summary>退出前排空在途取图：拒绝新 Grab，并在限时内等待各相机门闩。</summary>
@@ -159,7 +166,7 @@ public sealed class CameraManager : IDisposable
     // 与相机适配器内部的 _grabLock 是两层不同作用域的串行化：本门闩按 Id 串行整个"取图操作"
     // （TRIGGER/预览/示教互斥），适配器锁保护 SDK 句柄内部调用（GrabOne/Open/Close 非线程安全）。
     // 二者不可互相替代，任一层被当作"冗余"删掉都会引入并发访问 SDK 竞态。
-    private CameraFrame GrabCore(string id, Func<CameraFrame> grab, CancellationToken ct)
+    private CameraFrame GrabCore(string id, ICamera grabbing, Func<CameraFrame> grab, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_shuttingDown)
@@ -168,7 +175,7 @@ public sealed class CameraManager : IDisposable
         gate.Wait(ct);
         try
         {
-            return grab();
+            return CameraOutput2x2.Ensure(grabbing, grab());
         }
         finally
         {
@@ -176,7 +183,7 @@ public sealed class CameraManager : IDisposable
         }
     }
 
-    private async Task<GrabTrace> GrabCoreTracedAsync(string id, Func<CameraFrame> grab, CancellationToken ct)
+    private async Task<GrabTrace> GrabCoreTracedAsync(string id, ICamera grabbing, Func<CameraFrame> grab, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_shuttingDown)
@@ -189,7 +196,7 @@ public sealed class CameraManager : IDisposable
         {
             // WaitAsync 若同步完成会停在调用线程；从 UI 进来时必须把 pylon Grab 丢到线程池。
             sw.Restart();
-            var frame = await Task.Run(() => grab(), ct).ConfigureAwait(false);
+            var frame = await Task.Run(() => CameraOutput2x2.Ensure(grabbing, grab()), ct).ConfigureAwait(false);
             return new GrabTrace(frame, waitMs, sw.Elapsed.TotalMilliseconds);
         }
         finally

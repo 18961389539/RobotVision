@@ -22,8 +22,9 @@ namespace RobotVision.Infrastructure.Cameras;
 /// 开源 GigE Vision 相机（GigEVision.Net：GVCP 控制 + GVSP 收流）。
 /// 不依赖 pylon；本机防火墙需放行 UDP 3956（控制）与流端口。
 /// DeviceId 可填序列号、IP 或 MAC；留空仅当发现恰好一台时绑定，多台必须填写。
+/// 连接后、开流前下发 2×2 全图降采样（binning，否则 decimation）。
 /// </summary>
-public sealed class GigEVisionCamera : ICamera, IExposureControl
+public sealed class GigEVisionCamera : ICamera, IExposureControl, IHardware2x2Output
 {
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
 
@@ -40,12 +41,21 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     private TaskCompletionSource<GvspFrame>? _pendingFrame;
     private volatile bool _disposed;
     private volatile bool _connected;
+    private bool _hardware2x2;
+    private int _outputWidth;
+    private int _outputHeight;
     private string _serialNumber = "";
     private string _friendlyName = "";
 
     public string Id { get; }
 
     public CameraKind Kind => CameraKind.Real;
+
+    bool IHardware2x2Output.HasHardware2x2 => _hardware2x2;
+
+    int IHardware2x2Output.ExpectedWidth => _outputWidth;
+
+    int IHardware2x2Output.ExpectedHeight => _outputHeight;
 
     public string SerialNumber => _serialNumber;
 
@@ -255,6 +265,7 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
             // Grab 表现为超时）。须在 StartAcquisition 前设置。
             TrySetEnumeration("TriggerSelector", "FrameStart");
             TrySetEnumeration("TriggerMode", "Off");
+            TryEnable2x2FullFrameDownsample();
 
             _stream = new GvspStreamSession();
             _stream.FrameReceived += OnFrameReceived;
@@ -450,6 +461,78 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
         return bgr;
     }
 
+    private void TryEnable2x2FullFrameDownsample()
+    {
+        if (TryApply2x2FullFrameDownsample(out var width, out var height, out var mode))
+        {
+            _hardware2x2 = true;
+            _outputWidth = width;
+            _outputHeight = height;
+            if (_log is { } log)
+                GigEVisionCameraLog.Downsample2x2Applied(log, Id, width, height, mode);
+            return;
+        }
+
+        if (_log is { } failedLog)
+            GigEVisionCameraLog.Downsample2x2Failed(failedLog, Id);
+    }
+
+    private bool TryApply2x2FullFrameDownsample(out int width, out int height, out string mode)
+    {
+        width = 0;
+        height = 0;
+        mode = "";
+        TrySetInteger("OffsetX", 0);
+        TrySetInteger("OffsetY", 0);
+        if (TrySetPairToTwo("BinningHorizontal", "BinningVertical"))
+            mode = "binning";
+        else if (TrySetPairToTwo("DecimationHorizontal", "DecimationVertical"))
+            mode = "decimation";
+        else
+            return false;
+
+        TrySetIntegerToMaximum("Width");
+        TrySetIntegerToMaximum("Height");
+        width = (int)(TryGetInteger("Width") ?? 0);
+        height = (int)(TryGetInteger("Height") ?? 0);
+        return width > 0 && height > 0;
+    }
+
+    private bool TrySetPairToTwo(string horizontal, string vertical)
+    {
+        if (TrySetInteger(horizontal, 2) && TrySetInteger(vertical, 2)
+            && IntegerAtLeast(horizontal, 2) && IntegerAtLeast(vertical, 2))
+            return true;
+        TrySetInteger(horizontal, 1);
+        TrySetInteger(vertical, 1);
+        return false;
+    }
+
+    private bool IntegerAtLeast(string name, long min) =>
+        TryGetInteger(name) is { } value && value >= min;
+
+    private bool TrySetIntegerToMaximum(string name)
+    {
+        try
+        {
+            if (_session?.NodeMap.GetNode(name) is not IInteger node)
+                return false;
+            if (!IsWritable(node.AccessMode))
+                return true;
+            var max = node.Max;
+            if (node.Increment > 1)
+                max = node.Min + (max - node.Min) / node.Increment * node.Increment;
+            node.Value = max;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (_log is { } log)
+                GigEVisionCameraLog.WriteFailed(log, ex, Id, name);
+            return false;
+        }
+    }
+
     private bool TrySetExposureCore(double valueUs) =>
         TrySetFloat("ExposureTime", valueUs)
         || TrySetFloat("ExposureTimeAbs", valueUs)
@@ -592,6 +675,9 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
     {
         Interlocked.Exchange(ref _pendingFrame, null)?.TrySetCanceled();
         _connected = false;
+        _hardware2x2 = false;
+        _outputWidth = 0;
+        _outputHeight = 0;
 
         // 断连阶段任何一步失败都不得阻断后续清理，但每条失败都要留痕，
         // 否则现场"相机断连后资源没释放干净"这类问题无从追查。

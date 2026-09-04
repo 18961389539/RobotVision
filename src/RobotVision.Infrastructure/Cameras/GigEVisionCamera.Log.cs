@@ -10,6 +10,12 @@ internal static partial class GigEVisionCameraLog
     [LoggerMessage(Level = LogLevel.Warning, Message = "GigE Vision 相机 {Id} 采集异常，尝试自动重连")]
     public static partial void GrabExceptionRetry(ILogger logger, Exception ex, string id);
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "GigE Vision 相机 {Id} 已启用 2×2 全图降采样 {W}x{H}（{Mode}）")]
+    public static partial void Downsample2x2Applied(ILogger logger, string id, int w, int h, string mode);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "GigE Vision 相机 {Id} 无法启用 2×2 全图降采样（无 binning/decimation 或下发失败），将按全幅采集")]
+    public static partial void Downsample2x2Failed(ILogger logger, string id);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "GigE Vision 相机 {Id} 已连接: SN={Sn} IP={Ip} Name={Name}")]
     public static partial void Connected(ILogger logger, string id, string sn, string ip, string name);
 

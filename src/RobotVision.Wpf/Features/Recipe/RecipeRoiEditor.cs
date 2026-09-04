@@ -170,30 +170,38 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         });
     }
 
+    public DualTemplateTeachSlot TeachCropSlot { get; set; } = DualTemplateTeachSlot.A;
+
+    private Roi? SecondarySearchRoi
+    {
+        get => Editor.SecondarySearchRoi;
+        set => Editor.SecondarySearchRoi = value;
+    }
+
     public bool UseSecondaryRoi
     {
-        get => Editor.Blob.SecondaryRoi is not null;
+        get => SecondarySearchRoi is not null;
         set
         {
             if (value)
             {
-                var addedPrimary = EnsurePrimaryRoiForDualBlob();
-                Editor.Blob.SecondaryRoi ??= new Roi(0.55, 0.15, 0.4, 0.7);
+                var addedPrimary = EnsurePrimaryRoiForDualSearch();
+                SecondarySearchRoi ??= new Roi(0.55, 0.15, 0.4, 0.7);
                 if (addedPrimary)
                     NotifyRoiChanged();
             }
             else
-                Editor.Blob.SecondaryRoi = null;
+                SecondarySearchRoi = null;
             NotifySecondaryRoiChanged();
         }
     }
 
     public double SecondaryRoiPxX
     {
-        get => Editor.Blob.SecondaryRoi is { } r && RoiRefWidth > 0 ? Math.Round(r.X * RoiRefWidth) : 0;
+        get => SecondarySearchRoi is { } r && RoiRefWidth > 0 ? Math.Round(r.X * RoiRefWidth) : 0;
         set
         {
-            if (RoiRefWidth <= 0 || Editor.Blob.SecondaryRoi is not { } r)
+            if (RoiRefWidth <= 0 || SecondarySearchRoi is not { } r)
                 return;
             var w = Math.Max(1, (int)Math.Round(r.Width * RoiRefWidth));
             var px = Math.Clamp((int)Math.Round(value), 0, Math.Max(0, RoiRefWidth - w));
@@ -203,10 +211,10 @@ public sealed partial class RecipeRoiEditor : ObservableObject
 
     public double SecondaryRoiPxY
     {
-        get => Editor.Blob.SecondaryRoi is { } r && RoiRefHeight > 0 ? Math.Round(r.Y * RoiRefHeight) : 0;
+        get => SecondarySearchRoi is { } r && RoiRefHeight > 0 ? Math.Round(r.Y * RoiRefHeight) : 0;
         set
         {
-            if (RoiRefHeight <= 0 || Editor.Blob.SecondaryRoi is not { } r)
+            if (RoiRefHeight <= 0 || SecondarySearchRoi is not { } r)
                 return;
             var h = Math.Max(1, (int)Math.Round(r.Height * RoiRefHeight));
             var px = Math.Clamp((int)Math.Round(value), 0, Math.Max(0, RoiRefHeight - h));
@@ -216,10 +224,10 @@ public sealed partial class RecipeRoiEditor : ObservableObject
 
     public double SecondaryRoiPxWidth
     {
-        get => Editor.Blob.SecondaryRoi is { } r && RoiRefWidth > 0 ? Math.Round(r.Width * RoiRefWidth) : 0;
+        get => SecondarySearchRoi is { } r && RoiRefWidth > 0 ? Math.Round(r.Width * RoiRefWidth) : 0;
         set
         {
-            if (RoiRefWidth <= 0 || Editor.Blob.SecondaryRoi is not { } r)
+            if (RoiRefWidth <= 0 || SecondarySearchRoi is not { } r)
                 return;
             var x = (int)Math.Round(r.X * RoiRefWidth);
             var px = Math.Clamp((int)Math.Round(value), 1, Math.Max(1, RoiRefWidth - x));
@@ -229,10 +237,10 @@ public sealed partial class RecipeRoiEditor : ObservableObject
 
     public double SecondaryRoiPxHeight
     {
-        get => Editor.Blob.SecondaryRoi is { } r && RoiRefHeight > 0 ? Math.Round(r.Height * RoiRefHeight) : 0;
+        get => SecondarySearchRoi is { } r && RoiRefHeight > 0 ? Math.Round(r.Height * RoiRefHeight) : 0;
         set
         {
-            if (RoiRefHeight <= 0 || Editor.Blob.SecondaryRoi is not { } r)
+            if (RoiRefHeight <= 0 || SecondarySearchRoi is not { } r)
                 return;
             var y = (int)Math.Round(r.Y * RoiRefHeight);
             var px = Math.Clamp((int)Math.Round(value), 1, Math.Max(1, RoiRefHeight - y));
@@ -409,8 +417,19 @@ public sealed partial class RecipeRoiEditor : ObservableObject
     {
         if (RoiRefWidth <= 0 || RoiRefHeight <= 0)
             return;
+        var roi = RoiFromCenterPx(centerXPx, centerYPx, widthPx, heightPx, RoiRefWidth, RoiRefHeight);
+        if (Editor.AngleMode == AngleMode.DualTemplateCenterLine)
+        {
+            if (TeachCropSlot == DualTemplateTeachSlot.B)
+                Editor.DualTemplate.TeachRoiB = roi;
+            else
+                Editor.DualTemplate.TeachRoiA = roi;
+            NotifyTemplateRoiChanged();
+            return;
+        }
+
         Editor.Template ??= new();
-        Editor.Template.Roi = RoiFromCenterPx(centerXPx, centerYPx, widthPx, heightPx, RoiRefWidth, RoiRefHeight);
+        Editor.Template.Roi = roi;
         NotifyTemplateRoiChanged();
     }
 
@@ -418,15 +437,15 @@ public sealed partial class RecipeRoiEditor : ObservableObject
     {
         if (RoiRefWidth <= 0 || RoiRefHeight <= 0)
             return;
-        var addedPrimary = EnsurePrimaryRoiForDualBlob();
-        Editor.Blob.SecondaryRoi = RoiFromCenterPx(centerXPx, centerYPx, widthPx, heightPx, RoiRefWidth, RoiRefHeight);
+        var addedPrimary = EnsurePrimaryRoiForDualSearch();
+        SecondarySearchRoi = RoiFromCenterPx(centerXPx, centerYPx, widthPx, heightPx, RoiRefWidth, RoiRefHeight);
         if (addedPrimary)
             NotifyRoiChanged();
         NotifySecondaryRoiChanged();
     }
 
-    /// <summary>双 ROI 时 BLOB1 必须有 ROI1；未设则给左侧默认框，避免退回全图误检 ROI2 里的斑。</summary>
-    private bool EnsurePrimaryRoiForDualBlob()
+    /// <summary>双 ROI 时主区必须有 ROI1；未设则给左侧默认框，避免退回全图误检 ROI2。</summary>
+    private bool EnsurePrimaryRoiForDualSearch()
     {
         if (Editor.Roi is not null)
             return false;
@@ -464,6 +483,16 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         if (w >= 8 && h >= 8)
             return;
         Editor.Template.Roi = new Roi(0.35, 0.35, 0.3, 0.3);
+        NotifyTemplateRoiChanged();
+    }
+
+    public void EnsureDualTemplateTeachDrawable()
+    {
+        var placeholder = new Roi(0.35, 0.35, 0.3, 0.3);
+        if (TeachCropSlot == DualTemplateTeachSlot.B)
+            Editor.DualTemplate.TeachRoiB ??= placeholder;
+        else
+            Editor.DualTemplate.TeachRoiA ??= placeholder;
         NotifyTemplateRoiChanged();
     }
 
@@ -632,9 +661,9 @@ public sealed partial class RecipeRoiEditor : ObservableObject
 
     private void SetSecondaryRoi(string propertyName, Func<Roi, Roi> update)
     {
-        if (Editor.Blob.SecondaryRoi is { } roi)
+        if (SecondarySearchRoi is { } roi)
         {
-            Editor.Blob.SecondaryRoi = update(roi);
+            SecondarySearchRoi = update(roi);
             NotifySecondaryRoiChanged(propertyName);
         }
     }

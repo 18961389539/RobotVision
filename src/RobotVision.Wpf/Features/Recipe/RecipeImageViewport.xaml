@@ -100,16 +100,16 @@
                                 Style="{StaticResource ViewTabButton}" />
                         <Button Content="框选检测区" Margin="6,0,0,0"
                                 Command="{Binding DrawDetectionRoiCommand}"
-                                ToolTip="在图像上拖拽画出检测区域（双BLOB 的 ROI1：BLOB1 只在此框内）"
+                                ToolTip="在图像上拖拽画出检测区域（双BLOB/双模板的 ROI1）"
                                 Style="{StaticResource ViewTabButton}" />
                         <Button Content="框选 ROI2" Margin="6,0,0,0"
                                 Command="{Binding DrawSecondaryRoiCommand}"
-                                ToolTip="双BLOB：BLOB2 只在此框内检测">
+                                ToolTip="BLOB2 / 模板2 只在此框内检测">
                             <Button.Style>
                                 <Style TargetType="Button" BasedOn="{StaticResource ViewTabButton}">
                                     <Setter Property="Visibility" Value="Collapsed" />
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsDualBlobMode}" Value="True">
+                                        <DataTrigger Binding="{Binding UsesSecondarySearchRoi}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
                                         </DataTrigger>
                                     </Style.Triggers>
@@ -124,6 +124,65 @@
                                     <Setter Property="Visibility" Value="Collapsed" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding UsesFeatureTeachRoi}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsDualTemplateMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Content="框选模板1" Margin="6,0,0,0"
+                                Command="{Binding DrawFeatureRoiCommand}"
+                                ToolTip="框选模板1 的示教裁剪（要比 ROI1 小）">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ViewTabButton}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsDualTemplateMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Content="示教模板1" Margin="6,0,0,0"
+                                Command="{Binding Test.TeachDualTemplateACommand}"
+                                ToolTip="把当前画面的模板1 框裁进配方。保存后才上产线">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ViewTabButton}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsDualTemplateMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Content="框选模板2" Margin="6,0,0,0"
+                                Command="{Binding DrawTeachRoiBCommand}"
+                                ToolTip="框选模板2 的示教裁剪（要比 ROI2 小）">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ViewTabButton}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsDualTemplateMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Content="示教模板2" Margin="6,0,0,0"
+                                Command="{Binding Test.TeachDualTemplateBCommand}"
+                                ToolTip="把当前画面的模板2 框裁进配方。保存后才上产线">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ViewTabButton}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsDualTemplateMode}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
                                         </DataTrigger>
                                     </Style.Triggers>

@@ -37,6 +37,40 @@ public sealed class RecipeEditorValidatorTests
     }
 
     [Fact]
+    public void TryValidateForTrigger_DualTemplate_WithoutTeach_ReturnsError()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "A",
+            CameraId = "cam",
+            AngleMode = AngleMode.DualTemplateCenterLine,
+            Models = [],
+        };
+
+        RecipeEditorValidator.TryValidateForTrigger(recipe).Should().Contain("示教");
+    }
+
+    [Fact]
+    public void TryValidateForTrigger_DualTemplate_SecondaryRoiWithoutPrimary_ReturnsError()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "A",
+            CameraId = "cam",
+            AngleMode = AngleMode.DualTemplateCenterLine,
+            Models = [],
+            DualTemplate =
+            {
+                TemplateABase64 = ".",
+                TemplateBBase64 = ".",
+                SecondaryRoi = new Roi(0.55, 0.2, 0.4, 0.6),
+            },
+        };
+
+        RecipeEditorValidator.TryValidateForTrigger(recipe).Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
     public void TryValidateForTrigger_DualBlob_SecondaryRoiWithoutPrimary_ReturnsError()
     {
         var recipe = new RecipeConfig

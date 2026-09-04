@@ -62,6 +62,8 @@ public sealed partial class RecipeTestSession : ObservableObject, IDisposable
     {
         TestTriggerCommand.NotifyCanExecuteChanged();
         TeachTemplateCommand.NotifyCanExecuteChanged();
+        TeachDualTemplateACommand.NotifyCanExecuteChanged();
+        TeachDualTemplateBCommand.NotifyCanExecuteChanged();
     }
 
     public void ClearAdvice()
@@ -101,7 +103,8 @@ public sealed partial class RecipeTestSession : ObservableObject, IDisposable
             _host.Message = "示教模板：请先选择相机";
             return;
         }
-        if (Editor.Models.Count == 0 || string.IsNullOrWhiteSpace(Editor.Models[0]))
+        if (AngleModes.RequiresOnnx(Editor.AngleMode) &&
+            (Editor.Models.Count == 0 || string.IsNullOrWhiteSpace(Editor.Models[0])))
         {
             _host.Message = "示教模板：请先选择分割模型";
             return;
@@ -136,6 +139,76 @@ public sealed partial class RecipeTestSession : ObservableObject, IDisposable
         catch (Exception ex)
         {
             _host.Message = $"示教模板失败: {ex.Message}";
+        }
+        finally
+        {
+            _host.IsBusy = false;
+        }
+    }
+
+    private bool CanTeachDualTemplate =>
+        !_host.IsBusy &&
+        !_host.IsPipelineOccupied &&
+        Editor.AngleMode == AngleMode.DualTemplateCenterLine;
+
+    [RelayCommand(CanExecute = nameof(CanTeachDualTemplate))]
+    private Task TeachDualTemplateAAsync() => TeachDualTemplateSlotAsync(DualTemplateTeachSlot.A);
+
+    [RelayCommand(CanExecute = nameof(CanTeachDualTemplate))]
+    private Task TeachDualTemplateBAsync() => TeachDualTemplateSlotAsync(DualTemplateTeachSlot.B);
+
+    private async Task TeachDualTemplateSlotAsync(DualTemplateTeachSlot slot)
+    {
+        if (!CanTeachDualTemplate)
+            return;
+        _host.CommitEdits();
+        var cameraId = Editor.CameraId;
+        if (string.IsNullOrWhiteSpace(cameraId))
+        {
+            _host.Message = "示教模板：请先选择相机";
+            return;
+        }
+
+        var crop = slot == DualTemplateTeachSlot.B
+            ? Editor.DualTemplate.TeachRoiB ?? Editor.SecondarySearchRoi
+            : Editor.DualTemplate.TeachRoiA ?? Editor.Roi;
+        var which = slot == DualTemplateTeachSlot.B ? "模板2" : "模板1";
+        if (crop is null)
+        {
+            _host.Message = slot == DualTemplateTeachSlot.B
+                ? "示教模板2：请先框选模板2，或启用 ROI2 后用该区裁剪"
+                : "示教模板1：请先框选模板1，或启用 ROI1 后用该区裁剪";
+            return;
+        }
+
+        _host.IsBusy = true;
+        try
+        {
+            _host.Message = $"示教{which}取图中 · {cameraId} …";
+            var shot = await _recipeTest.TeachCropAsync(new RecipeTeachCropRequest(
+                Editor.Clone(),
+                cameraId,
+                crop,
+                Editor.LightControllerId ?? "",
+                Editor.Lighting)).ConfigureAwait(true);
+
+            if (slot == DualTemplateTeachSlot.B)
+            {
+                Editor.DualTemplate.TemplateBBase64 = shot.TemplateImageBase64;
+                Editor.DualTemplate.TeachRoiB ??= crop;
+            }
+            else
+            {
+                Editor.DualTemplate.TemplateABase64 = shot.TemplateImageBase64;
+                Editor.DualTemplate.TeachRoiA ??= crop;
+            }
+
+            _host.NotifyEditorMutated();
+            _host.Message = $"{which}已示教（{shot.TemplateWidth}×{shot.TemplateHeight}px），保存后上产线";
+        }
+        catch (Exception ex)
+        {
+            _host.Message = $"示教{which}失败: {ex.Message}";
         }
         finally
         {

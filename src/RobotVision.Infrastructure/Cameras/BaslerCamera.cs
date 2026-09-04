@@ -30,13 +30,12 @@ namespace RobotVision.Infrastructure.Cameras;
 ///   残留硬触发导致 GrabOne 一直等到超时；
 /// - 曝光/增益兼容 SFNC 1.x（ExposureTimeAbs / GainAbs / GainRaw）与 2.x+（ExposureTime / Gain）；
 ///   ace GigE 的 Gain 节点常不可写，须走 GainAbs（dB）或 GainRaw；写前切 GainSelector 并关 GainAuto；
+/// - 连接后始终下发 2×2 全图降采样（binning，否则 decimation），减轻 GigE 全幅 underrun；
 /// - 调光能力经 <see cref="IExposureControl"/> 暴露。
 /// 所有帧统一转为 BGR8 三通道 Mat，与 FileCamera（ImreadModes.Color）行为一致。
 /// </summary>
-public sealed class BaslerCamera : ICamera, IExposureControl
+public sealed class BaslerCamera : ICamera, IExposureControl, IHardware2x2Output
 {
-    private const int GigEFallbackWidth = 1280;
-    private const int GigEFallbackHeight = 960;
     private const long GigEDefaultPacketSize = 1500;
     private const int GigEUnderrunErrorCode = -520093676;
 
@@ -57,8 +56,10 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     private volatile bool _connected;
     /// <summary>最近一次连接/采集失败原因（写入最终 1003 异常，便于现场排查）。</summary>
     private string _lastFailureReason = "";
-    /// <summary>本实例已因 GigE underrun 降为 1280×960（会话内保持，重启程序可再试全幅）。</summary>
+    /// <summary>本实例已启用 2×2 全图降采样（连接时下发；失败时仍可在 GigE underrun 回退再试）。</summary>
     private bool _reducedResolution;
+    private int _outputWidth;
+    private int _outputHeight;
     private string _serialNumber = "";
     private string _friendlyName = "";
 
@@ -73,6 +74,12 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     public string Id { get; }
 
     public CameraKind Kind => CameraKind.Real;
+
+    bool IHardware2x2Output.HasHardware2x2 => _reducedResolution;
+
+    int IHardware2x2Output.ExpectedWidth => _outputWidth;
+
+    int IHardware2x2Output.ExpectedHeight => _outputHeight;
 
     /// <summary>相机序列号；未连接（未完成首次 Open）时为空串。</summary>
     public string SerialNumber => _serialNumber;
@@ -96,8 +103,11 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
         catch (Exception ex)
         {
+            var versionHint = PylonRuntimeBootstrap.IsRuntimeLocated
+                ? "Basler.Pylon 托管库与 pylon 运行库大版本不一致时也会失败，请重新编译（本机 pylon 安装优先于 NuGet 10.x）。"
+                : "未定位到 pylon Runtime（检查安装、PATH 或 PYLON_ROOT）。 ";
             throw new VisionException(VisionErrorCode.CameraInitFailed,
-                $"Basler 相机 {id} 初始化失败（检查 pylon 运行库与相机连接）: {ex.Message}");
+                $"Basler 相机 {id} 初始化失败（检查 pylon 运行库与相机连接）: {versionHint}{ex.Message}", ex);
         }
     }
 
@@ -201,8 +211,18 @@ public sealed class BaslerCamera : ICamera, IExposureControl
 
             ApplySoftwareGrabDefaults();
             ApplyGigEStreamDefaults();
-            if (_reducedResolution)
-                ApplyReducedResolution();
+            if (TryEnable2x2FullFrameDownsample(out var width, out var height, out var mode))
+            {
+                _reducedResolution = true;
+                _outputWidth = width;
+                _outputHeight = height;
+                if (_log is { } downsampleLog)
+                    BaslerCameraLog.Downsample2x2Applied(downsampleLog, Id, width, height, mode);
+            }
+            else if (_log is { } failedLog)
+            {
+                BaslerCameraLog.Downsample2x2Failed(failedLog, Id);
+            }
 
             // 参数下发失败不阻断连接，但记日志（现场排查"图像太暗/太亮"的线索）
             if (_exposureTimeUs is > 0)
@@ -408,8 +428,8 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     }
 
     /// <summary>
-    /// GigE 收流默认：尽量用大包、适当包间延迟，减轻 5MP+ 全幅在普通网卡上的 buffer underrun。
-    /// 仍失败时请运行 pylon GigE Configurator 优化网卡/防火墙。
+    /// GigE 收流默认：尽量用大包、适当包间延迟；连接阶段另下发 2×2 全图降采样。
+    /// 请运行 pylon GigE Configurator 优化网卡/防火墙。
     /// </summary>
     private void ApplyGigEStreamDefaults()
     {
@@ -502,18 +522,83 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         if (_reducedResolution || !IsGigECamera())
             return false;
         SafeStopGrabbing();
-        ApplyReducedResolution();
+        var beforePixels = CurrentPixelCount();
+        if (!TryEnable2x2FullFrameDownsample(out var width, out var height, out var mode))
+            return false;
+        if (beforePixels > 0 && (long)width * height >= beforePixels)
+            return false;
         _reducedResolution = true;
-        if (_log is { } log) BaslerCameraLog.GigEUnderrunReducedResolution(log, Id, GigEFallbackWidth, GigEFallbackHeight);
+        _outputWidth = width;
+        _outputHeight = height;
+        if (_log is { } log) BaslerCameraLog.GigEUnderrunReducedResolution(log, Id, width, height, mode);
         return true;
     }
 
-    private void ApplyReducedResolution()
+    /// <summary>
+    /// 相机端 2×2 全图降采样：优先 binning，不支持则 decimation。
+    /// 随后把 Width/Height 拉到新上限，保持整幅视野。
+    /// </summary>
+    private bool TryEnable2x2FullFrameDownsample(out int width, out int height, out string mode)
     {
+        width = 0;
+        height = 0;
+        mode = "";
         TrySetInteger(PLCamera.OffsetX, 0);
         TrySetInteger(PLCamera.OffsetY, 0);
-        TrySetInteger(PLCamera.Width, GigEFallbackWidth);
-        TrySetInteger(PLCamera.Height, GigEFallbackHeight);
+
+        if (TrySetPairToTwo(PLCamera.BinningHorizontal, PLCamera.BinningVertical))
+            mode = "binning";
+        else if (TrySetPairToTwo(PLCamera.DecimationHorizontal, PLCamera.DecimationVertical))
+            mode = "decimation";
+        else
+            return false;
+
+        TrySetIntegerToMaximum(PLCamera.Width);
+        TrySetIntegerToMaximum(PLCamera.Height);
+        width = (int)(TryGetInteger(PLCamera.Width) ?? 0);
+        height = (int)(TryGetInteger(PLCamera.Height) ?? 0);
+        return width > 0 && height > 0;
+    }
+
+    private bool TrySetPairToTwo(IntegerName horizontal, IntegerName vertical)
+    {
+        if (TrySetInteger(horizontal, 2) && TrySetInteger(vertical, 2)
+            && IntegerAtLeast(horizontal, 2) && IntegerAtLeast(vertical, 2))
+            return true;
+        TrySetInteger(horizontal, 1);
+        TrySetInteger(vertical, 1);
+        return false;
+    }
+
+    private bool IntegerAtLeast(IntegerName name, long min) =>
+        TryGetInteger(name) is { } value && value >= min;
+
+    private long CurrentPixelCount()
+    {
+        var width = TryGetInteger(PLCamera.Width);
+        var height = TryGetInteger(PLCamera.Height);
+        if (width is null or <= 0 || height is null or <= 0)
+            return 0;
+        return (long)width.Value * (long)height.Value;
+    }
+
+    private bool TrySetIntegerToMaximum(IntegerName name)
+    {
+        try
+        {
+            var p = _camera!.Parameters[name];
+            if (p.IsEmpty)
+                return false;
+            if (!p.IsWritable)
+                return true;
+            p.SetValue(p.GetMaximum());
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (_log is { } log) BaslerCameraLog.ParameterSetException(log, ex, Id, name.Name);
+            return false;
+        }
     }
 
     private bool IsGigECamera()

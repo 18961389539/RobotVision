@@ -35,6 +35,7 @@ internal static class RecipeListItemDescriber
                     _ => "分割+精修",
                 },
                 AngleMode.DualBlobCenterLine => "双BLOB",
+                AngleMode.DualTemplateCenterLine => "双模板",
                 _ => r.AngleMode.ToString(),
             };
             var tags = new List<string> { mode, r.CameraId, r.Models.FirstOrDefault("") };
@@ -43,6 +44,13 @@ internal static class RecipeListItemDescriber
                 tags.Add($"工位:{r.StationId}");
             if (r.Roi is not null)
                 tags.Add("ROI");
+            if (r.AngleMode == AngleMode.DualTemplateCenterLine)
+            {
+                if (meta.HasDualTemplateA && meta.HasDualTemplateB)
+                    tags.Add("双模板已示教");
+                else
+                    tags.Add("双模板未示教");
+            }
             if (meta.HasFeatureRoi &&
                 TemplateOptions.UsesFeatureTeachRoi(r.Template.RefineMethod))
                 tags.Add("特征框");

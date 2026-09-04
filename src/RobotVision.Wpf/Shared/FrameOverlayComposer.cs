@@ -12,10 +12,10 @@ public static class FrameOverlayComposer
     {
         OverlayDrawer.DrawPoses(image, poses, drawDebug: hints.ShowRefineDebug);
         using var drawn = VisionImageMat.AsMat(image);
-        var dualBlobRois = hints.SecondaryBlobRoi is not null;
+        var dualSearchRois = hints.SecondarySearchRoi is not null;
         if (hints.DrawDetectionRoi && hints.DetectionRoi is { } roi)
-            OverlayDrawer.DrawNormalizedRoi(drawn, roi, dualBlobRois ? "ROI1" : "检测", Scalar.Lime);
-        if (hints.SecondaryBlobRoi is { } secondary)
+            OverlayDrawer.DrawNormalizedRoi(drawn, roi, dualSearchRois ? "ROI1" : "检测", Scalar.Lime);
+        if (hints.SecondarySearchRoi is { } secondary)
             OverlayDrawer.DrawNormalizedRoi(drawn, secondary, "ROI2", Scalar.DeepSkyBlue);
     }
 }

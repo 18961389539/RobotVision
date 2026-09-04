@@ -1,0 +1,15 @@
+<Project>
+  <!-- 本机 pylon 发现：与 Runtime 大版本一致的管理库 + 原生 DLL 拷贝，避免 NuGet 10.x 兑 pylon 7 运行库 SEH。 -->
+  <PropertyGroup>
+    <PylonRoot Condition="'$(PYLON_ROOT)' != ''">$(PYLON_ROOT)</PylonRoot>
+    <PylonRoot Condition="'$(PylonRoot)' == '' and Exists('D:\Program Files\Basler\pylon')">D:\Program Files\Basler\pylon</PylonRoot>
+    <PylonRoot Condition="'$(PylonRoot)' == '' and Exists('C:\Program Files\Basler\pylon')">C:\Program Files\Basler\pylon</PylonRoot>
+    <PylonRuntimeDir Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Runtime\x64</PylonRuntimeDir>
+    <_PylonManagedNet10 Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Development\Assemblies\Basler.Pylon\net10.0\x64\Basler.Pylon.dll</_PylonManagedNet10>
+    <_PylonManagedNet8 Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Development\Assemblies\Basler.Pylon\net8.0\x64\Basler.Pylon.dll</_PylonManagedNet8>
+    <_PylonManagedX64 Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Development\Assemblies\Basler.Pylon\x64\Basler.Pylon.dll</_PylonManagedX64>
+    <PylonManagedDll Condition="'$(PylonManagedDll)' == '' and Exists('$(_PylonManagedNet10)')">$(_PylonManagedNet10)</PylonManagedDll>
+    <PylonManagedDll Condition="'$(PylonManagedDll)' == '' and Exists('$(_PylonManagedNet8)')">$(_PylonManagedNet8)</PylonManagedDll>
+    <PylonManagedDll Condition="'$(PylonManagedDll)' == '' and Exists('$(_PylonManagedX64)')">$(_PylonManagedX64)</PylonManagedDll>
+  </PropertyGroup>
+</Project>

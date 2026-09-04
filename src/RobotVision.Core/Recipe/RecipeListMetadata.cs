@@ -19,6 +19,8 @@ public sealed class RecipeListMetadata
     public bool HasDetectionRoi { get; init; }
     public bool HasFeatureRoi { get; init; }
     public bool HasTemplateImage { get; init; }
+    public bool HasDualTemplateA { get; init; }
+    public bool HasDualTemplateB { get; init; }
     public bool HasLighting { get; init; }
     public string? LightControllerId { get; init; }
     public bool HasOutputOffset { get; init; }
@@ -55,6 +57,11 @@ public sealed class RecipeListMetadata
             Models = string.IsNullOrWhiteSpace(PrimaryModel) ? [] : [PrimaryModel],
             Roi = HasDetectionRoi ? new Roi(0.1, 0.1, 0.8, 0.8) : null,
             Template = template,
+            DualTemplate =
+            {
+                TemplateABase64 = HasDualTemplateA ? "." : "",
+                TemplateBBase64 = HasDualTemplateB ? "." : "",
+            },
             LightControllerId = LightControllerId ?? "",
             Lighting = HasLighting ? new LightingConfig() : null,
             OutputOffset = HasOutputOffset ? new OutputOffsetOptions { X = 1 } : new(),

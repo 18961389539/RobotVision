@@ -59,6 +59,7 @@ internal static class RecipeEditorHints
         AngleMode.DualCenterLine => "默认全局就近配对，多目标间距接近时可能配错；开「窗口配对」后 B 只在 A 外扩窗口内检测，多目标不配错",
         AngleMode.MaskTemplate => "分割给粗框，精修过门才输出有向角。失败默认 1019。方法推荐与赛马见配方向导；示教仅写极性/阈值。保存后才上产线。",
         AngleMode.DualBlobCenterLine => "BLOB1 只在 ROI1 内定位，BLOB2 只在 ROI2 内定向（有方向）。不设 ROI2 则用主包围盒外扩窗口。次BLOB缺失该目标不输出；无需模型",
+        AngleMode.DualTemplateCenterLine => "模板1 只在 ROI1 内 NCC 定位，模板2 只在 ROI2 内定向（有方向）。不设 ROI2 则用模板1 匹配窗外扩窗口。框选模板后点「示教模板1/2」；模板框要比搜索区小。无需模型",
         _ => "",
     };
 

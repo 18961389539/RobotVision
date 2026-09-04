@@ -7,7 +7,7 @@ public sealed record RecipeDisplayHints(
     bool DrawDetectionRoi,
     Roi? DetectionRoi,
     bool ShowRefineDebug,
-    Roi? SecondaryBlobRoi = null)
+    Roi? SecondarySearchRoi = null)
 {
     /// <summary>产线简洁模式：只画位姿本体，不画检测 ROI / 精修调试点。</summary>
     public static RecipeDisplayHints Production { get; } = new(false, null, false);
@@ -27,8 +27,6 @@ public sealed record RecipeDisplayHints(
             DetectionRoi: recipe.Roi,
             ShowRefineDebug: recipe.AngleMode == AngleMode.MaskTemplate
                 && RefineMethodShowsDebugOverlay(recipe.Template.RefineMethod),
-            SecondaryBlobRoi: recipe.AngleMode == AngleMode.DualBlobCenterLine
-                ? recipe.Blob.SecondaryRoi
-                : null);
+            SecondarySearchRoi: recipe.SecondarySearchRoi);
     }
 }

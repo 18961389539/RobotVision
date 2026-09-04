@@ -45,8 +45,7 @@ public sealed class AssetIntegrityChecker(
             }
         }
 
-        var isBlob = recipe.AngleMode == AngleMode.DualBlobCenterLine;
-        if (!isBlob)
+        if (AngleModes.RequiresOnnx(recipe.AngleMode))
         {
             for (var i = 0; i < recipe.Models.Count; i++)
             {
@@ -104,7 +103,7 @@ public sealed class AssetIntegrityChecker(
     public (List<string> ModelHashes, string? StationHash) Snapshot(RecipeConfig recipe)
     {
         var hashes = new List<string>();
-        if (recipe.AngleMode != AngleMode.DualBlobCenterLine)
+        if (AngleModes.RequiresOnnx(recipe.AngleMode))
         {
             foreach (var file in recipe.Models)
             {

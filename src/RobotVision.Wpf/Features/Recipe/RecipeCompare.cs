@@ -20,6 +20,8 @@ internal static class RecipeCompare
 
     public static bool Same(RecipeConfig a, RecipeConfig b) =>
         string.Equals(a.Template.TemplateImageBase64, b.Template.TemplateImageBase64, StringComparison.Ordinal)
+        && string.Equals(a.DualTemplate.TemplateABase64, b.DualTemplate.TemplateABase64, StringComparison.Ordinal)
+        && string.Equals(a.DualTemplate.TemplateBBase64, b.DualTemplate.TemplateBBase64, StringComparison.Ordinal)
         && BodyFingerprint(a) == BodyFingerprint(b);
 
     /// <summary>精修方法 / 转正窗 / 特征框变化会改抓取原点（模板峰 vs 卡尺中线等）。</summary>

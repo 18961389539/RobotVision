@@ -41,8 +41,8 @@ internal sealed class RecipeWizardImageHost : IDisposable
             () => usesFeatureTeachRoi() && roi.UseTemplateRoi,
             () => host.Editor.Template?.RefineLine,
             () => TemplateOptions.UsesTaughtRefineLine(host.Editor.Template?.RefineMethod ?? SegmentRefineMethod.Template),
-            () => host.Editor.AngleMode == AngleMode.DualBlobCenterLine ? host.Editor.Blob.SecondaryRoi : null,
-            () => host.Editor.AngleMode == AngleMode.DualBlobCenterLine);
+            () => host.Editor.SecondarySearchRoi,
+            () => AngleModes.UsesSecondarySearchRoi(host.Editor.AngleMode));
     }
 
     public void Wire() => _sync.Wire();

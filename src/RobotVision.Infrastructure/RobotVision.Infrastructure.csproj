@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\..\build\BaslerPylon.props" />
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -24,12 +26,6 @@
   </ItemGroup>
 
   <!-- 优先引用本机 pylon 安装目录（与 Runtime 大版本一致）；否则回退 NuGet 10.x。 -->
-  <PropertyGroup>
-    <PylonRoot Condition="'$(PYLON_ROOT)' != ''">$(PYLON_ROOT)</PylonRoot>
-    <PylonRoot Condition="'$(PylonRoot)' == '' and Exists('C:\Program Files\Basler\pylon')">C:\Program Files\Basler\pylon</PylonRoot>
-    <PylonManagedDll Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Development\Assemblies\Basler.Pylon\net10.0\x64\Basler.Pylon.dll</PylonManagedDll>
-    <PylonRuntimeDir Condition="'$(PylonRoot)' != ''">$(PylonRoot)\Runtime\x64</PylonRuntimeDir>
-  </PropertyGroup>
   <ItemGroup Condition="Exists('$(PylonManagedDll)')">
     <Reference Include="Basler.Pylon">
       <HintPath>$(PylonManagedDll)</HintPath>
@@ -48,6 +44,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RobotVision.Core\RobotVision.Core.csproj" />
+    <ProjectReference Include="..\RobotVision.Vision\RobotVision.Vision.csproj" />
     <ProjectReference Include="..\RobotVision.JlVision\RobotVision.JlVision.csproj" />
   </ItemGroup>
 

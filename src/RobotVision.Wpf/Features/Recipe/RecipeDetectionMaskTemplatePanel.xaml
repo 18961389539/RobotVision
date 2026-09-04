@@ -1,0 +1,81 @@
+﻿<UserControl x:Class="RobotVision.WpfHost.Features.Recipe.RecipeDetectionMaskTemplatePanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/RobotVision.Wpf;component/Shared/PagePanelResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <StackPanel Margin="0,0,0,8">
+        <DockPanel Margin="0,0,0,6">
+            <ui:Button DockPanel.Dock="Right" Content="详情…" Padding="10,3" FontSize="11"
+                       Command="{Binding OpenRefineDetailsCommand}" />
+            <ui:TextBlock FontTypography="BodyStrong" Text="精修设置" VerticalAlignment="Center" />
+        </DockPanel>
+        <TextBlock Text="精修方法" Margin="0,0,0,4" FontSize="12" />
+        <ComboBox ItemsSource="{Binding RefineMethodOptions}"
+                  DisplayMemberPath="Label" SelectedValuePath="Value"
+                  SelectedValue="{Binding EditorRefineMethod}" />
+        <WrapPanel Margin="0,8,0,0">
+            <StackPanel Width="140" Margin="0,0,12,8"
+                        Visibility="{Binding ShowMatchThreshold,
+                            Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="匹配阈值" FontSize="11" Margin="0,0,0,4"
+                           ToolTip="分数低于该值判定精修失败。详情里还有第二峰门等。" />
+                <ui:NumberBox Value="{Binding Editor.Template.MatchThreshold}"
+                              Minimum="0" Maximum="1" SmallChange="0.05"
+                              SpinButtonPlacementMode="Compact" />
+            </StackPanel>
+            <StackPanel Width="140" Margin="0,0,12,8"
+                        Visibility="{Binding ShowRefineRange,
+                            Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="角度下限 (°)" FontSize="11" Margin="0,0,0,4"
+                           ToolTip="相对分割粗角的搜索起点。例如 -5 表示向负方向搜 5°。" />
+                <ui:NumberBox Value="{Binding Editor.Template.RefineAngleLoDeg}"
+                              Minimum="-45" Maximum="45" SmallChange="1"
+                              SpinButtonPlacementMode="Compact"
+                              ToolTip="相对粗角。可与上限非对称。" />
+            </StackPanel>
+            <StackPanel Width="140" Margin="0,0,12,8"
+                        Visibility="{Binding ShowRefineRange,
+                            Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="角度上限 (°)" FontSize="11" Margin="0,0,0,4"
+                           ToolTip="相对分割粗角的搜索终点。须大于下限。" />
+                <ui:NumberBox Value="{Binding Editor.Template.RefineAngleHiDeg}"
+                              Minimum="-45" Maximum="45" SmallChange="1"
+                              SpinButtonPlacementMode="Compact"
+                              ToolTip="相对粗角。须大于下限。" />
+            </StackPanel>
+        </WrapPanel>
+        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"
+                   Text="{Binding TeachPeakHint}"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                   Visibility="{Binding TeachPeakHint,
+                       Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                   Text="{Binding TestNextStepHint}"
+                   Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                   Visibility="{Binding TestNextStepHint,
+                       Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+        <TextBlock FontSize="11" Margin="0,0,0,0" TextWrapping="Wrap"
+                   Text="{Binding RefineDetailsSummary}"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        <TextBlock FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                   Text="{Binding PolarityLockHint}"
+                   Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                   Visibility="{Binding PolarityLockHint,
+                       Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+        <StackPanel Margin="0,8,0,0"
+                    Visibility="{Binding Test.ShowRefineAdviceReminder,
+                        Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"
+                       Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                       Text="{Binding Test.RefineAdviceText}" />
+            <ui:Button Content="打开配置工作台" Padding="10,3" FontSize="11" HorizontalAlignment="Left"
+                       Command="{Binding OpenSetupWizardCommand}" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>

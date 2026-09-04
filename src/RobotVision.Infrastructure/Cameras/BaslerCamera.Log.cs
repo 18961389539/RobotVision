@@ -101,10 +101,22 @@ internal static partial class BaslerCameraLog
     public static partial void TlTypeReadSkipped(ILogger logger, Exception ex, string id);
 
     [LoggerMessage(
+        EventId = 25,
+        Level = LogLevel.Information,
+        Message = "Basler 相机 {Id} 已启用 2×2 全图降采样 {W}x{H}（{Mode}）")]
+    public static partial void Downsample2x2Applied(ILogger logger, string id, int w, int h, string mode);
+
+    [LoggerMessage(
+        EventId = 26,
+        Level = LogLevel.Warning,
+        Message = "Basler 相机 {Id} 无法启用 2×2 全图降采样（无 binning/decimation 或下发失败），将按全幅采集")]
+    public static partial void Downsample2x2Failed(ILogger logger, string id);
+
+    [LoggerMessage(
         EventId = 17,
         Level = LogLevel.Warning,
-        Message = "Basler 相机 {Id} GigE 全幅 buffer underrun，已降为 {W}x{H} 继续采集（优化网卡后可重启程序再试全幅）")]
-    public static partial void GigEUnderrunReducedResolution(ILogger logger, string id, int w, int h);
+        Message = "Basler 相机 {Id} GigE 全幅 buffer underrun，已开 2×2 全图降采样 {W}x{H}（{Mode}；优化网卡后可重启再试全幅）")]
+    public static partial void GigEUnderrunReducedResolution(ILogger logger, string id, int w, int h, string mode);
 
     [LoggerMessage(
         EventId = 18,

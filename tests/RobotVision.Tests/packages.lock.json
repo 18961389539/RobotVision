@@ -424,7 +424,6 @@
       "robotvision.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Basler.Pylon.NET.x64": "[10.3.2.636, )",
           "GigEVision.Net": "[1.0.0, )",
           "Intel.ML.OnnxRuntime.OpenVino": "[1.22.0, )",
           "LDVisionCamera.Net": "[1.0.0-rc.37, )",
@@ -433,6 +432,7 @@
           "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )",
           "RobotVision.JlVision": "[1.0.0, )",
+          "RobotVision.Vision": "[1.0.0, )",
           "System.IO.Ports": "[8.0.0, )",
           "YoloDotNet": "[4.2.0, )",
           "YoloDotNet.ExecutionProvider.OpenVino": "[1.1.0, )"
@@ -462,12 +462,6 @@
           "OpenCvSharp4": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )"
         }
-      },
-      "Basler.Pylon.NET.x64": {
-        "type": "CentralTransitive",
-        "requested": "[10.3.2.636, )",
-        "resolved": "10.3.2.636",
-        "contentHash": "J8WJjGF85KdoPceERP+DFblPbK2PGAqIxzHRtuC31TGC8QgZSiiMJsNv7sWMnrkysuirtTC0IPJ1jPPTus5/jw=="
       },
       "GigEVision.Net": {
         "type": "CentralTransitive",

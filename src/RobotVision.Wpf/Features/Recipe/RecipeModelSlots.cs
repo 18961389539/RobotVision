@@ -7,30 +7,33 @@ internal static class RecipeModelSlots
 {
     public static string? TryCommitUiModels(RecipeConfig editor, string primary, string secondary)
     {
+        // 免模型路径不写 UI 模型槽，避免把残留 ONNX 名单改掉或当成保存必填。
+        if (AngleModes.IsModelFree(editor.AngleMode))
+            return null;
+
         WriteSlot(editor.Models, 0, primary);
-        if (editor.AngleMode == AngleMode.DualCenterLine)
+        if (AngleModes.UsesDualModelSlots(editor.AngleMode))
             WriteSlot(editor.Models, 1, secondary);
 
         TrimTrailingEmpty(editor.Models);
 
         return editor.AngleMode switch
         {
-            AngleMode.DualCenterLine => GuardExtraModels(editor, maxSlots: 2, modeLabel: "双模型"),
-            AngleMode.DualBlobCenterLine => null,
+            _ when AngleModes.UsesDualModelSlots(editor.AngleMode) =>
+                GuardExtraModels(editor, maxSlots: 2, modeLabel: "双模型"),
             _ => NormalizeSingleModelSlot(editor, primary),
         };
     }
 
     /// <summary>单模型角度模式只使用 Models[0]（与 <see cref="RecipeLoader.Validate"/> 口径一致）。</summary>
-    public static bool UsesSingleModelSlot(AngleMode mode) =>
-        mode is AngleMode.MaskMinAreaRect or AngleMode.KeyPointLine or AngleMode.MaskTemplate;
+    public static bool UsesSingleModelSlot(AngleMode mode) => AngleModes.UsesSingleModelSlot(mode);
 
     /// <summary>
     /// 离开双模型后把名单裁成主模型。返回是否丢掉了有名字的次模型（用于提示）。
     /// </summary>
     public static bool TrimToSingleModelSlot(RecipeConfig editor)
     {
-        if (!UsesSingleModelSlot(editor.AngleMode) || editor.Models.Count <= 1)
+        if (!AngleModes.UsesSingleModelSlot(editor.AngleMode) || editor.Models.Count <= 1)
             return false;
 
         var hadNamedExtras = editor.Models.Skip(1).Any(m => !string.IsNullOrWhiteSpace(m));

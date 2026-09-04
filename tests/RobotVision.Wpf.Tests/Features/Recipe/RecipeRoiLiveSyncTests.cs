@@ -228,11 +228,30 @@ public sealed class RecipeRoiLiveSyncTests : IDisposable
         var vm = CreateVm();
         try
         {
+            vm.Editor.AngleMode = AngleMode.DualBlobCenterLine;
             vm.Roi.UseRoi.Should().BeFalse();
             vm.Roi.UseSecondaryRoi = true;
             vm.Roi.UseRoi.Should().BeTrue();
             vm.Editor.Roi.Should().NotBeNull();
+            vm.Editor.SecondarySearchRoi.Should().NotBeNull();
             vm.Editor.Blob.SecondaryRoi.Should().NotBeNull();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void UseSecondaryRoi_DualTemplate_WritesDualTemplateRoi()
+    {
+        var vm = CreateVm();
+        try
+        {
+            vm.Editor.AngleMode = AngleMode.DualTemplateCenterLine;
+            vm.Roi.UseSecondaryRoi = true;
+            vm.Roi.UseRoi.Should().BeTrue();
+            vm.Editor.Roi.Should().NotBeNull();
+            vm.Editor.DualTemplate.SecondaryRoi.Should().NotBeNull();
+            vm.Editor.SecondarySearchRoi.Should().Be(vm.Editor.DualTemplate.SecondaryRoi);
+            vm.Editor.Blob.SecondaryRoi.Should().BeNull();
         }
         finally { vm.Dispose(); }
     }

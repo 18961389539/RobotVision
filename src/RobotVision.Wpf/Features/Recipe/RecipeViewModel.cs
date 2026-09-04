@@ -232,6 +232,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     public Action? RequestSecondaryRoiDraw { get; set; }
 
+    public Action? RequestTeachRoiBDraw { get; set; }
+
     [RelayCommand]
     private void DrawDetectionRoi() => RequestDetectionRoiDraw?.Invoke();
 
@@ -239,7 +241,18 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private void DrawSecondaryRoi() => RequestSecondaryRoiDraw?.Invoke();
 
     [RelayCommand]
-    private void DrawFeatureRoi() => RequestTemplateRoiDraw?.Invoke();
+    private void DrawFeatureRoi()
+    {
+        Roi.TeachCropSlot = DualTemplateTeachSlot.A;
+        RequestTemplateRoiDraw?.Invoke();
+    }
+
+    [RelayCommand]
+    private void DrawTeachRoiB()
+    {
+        Roi.TeachCropSlot = DualTemplateTeachSlot.B;
+        RequestTeachRoiBDraw?.Invoke();
+    }
 
     private bool CanOpenSetupWizard => !IsBusy;
 
@@ -328,6 +341,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(FeatureGrabOriginHint));
         OnPropertyChanged(nameof(RefineDetailsSummary));
         OnPropertyChanged(nameof(ShowBlobExpandWindow));
+        OnPropertyChanged(nameof(ShowDualTemplateExpand));
+        OnPropertyChanged(nameof(DualTemplateStatusText));
         RefreshTestTriggerGate();
     }
 
@@ -558,8 +573,29 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     public bool IsSegmentationMode => Editor.AngleMode == AngleMode.MaskMinAreaRect;
     public bool IsMaskTemplateMode => TemplateUi.IsMaskTemplateMode;
     public bool IsDualBlobMode => Editor.AngleMode == AngleMode.DualBlobCenterLine;
+    public bool IsDualTemplateMode => Editor.AngleMode == AngleMode.DualTemplateCenterLine;
+    public bool IsModelFreeMode => AngleModes.IsModelFree(Editor.AngleMode);
+    public bool UsesSecondarySearchRoi => AngleModes.UsesSecondarySearchRoi(Editor.AngleMode);
     public bool ShowBlobFixedThreshold => IsDualBlobMode && !Editor.Blob.UseOtsu;
-    public bool ShowBlobExpandWindow => IsDualBlobMode && Editor.Blob.SecondaryRoi is null;
+    public bool ShowBlobExpandWindow => IsDualBlobMode && Editor.SecondarySearchRoi is null;
+    public bool ShowDualTemplateExpand => IsDualTemplateMode && Editor.SecondarySearchRoi is null;
+    public bool HasDualTemplateA => !string.IsNullOrEmpty(Editor.DualTemplate.TemplateABase64);
+    public bool HasDualTemplateB => !string.IsNullOrEmpty(Editor.DualTemplate.TemplateBBase64);
+    public string DualTemplateStatusText =>
+        IsDualTemplateMode
+            ? $"模板1 {(HasDualTemplateA ? "已示教" : "未示教")} · 模板2 {(HasDualTemplateB ? "已示教" : "未示教")}"
+            : "";
+    public string DetectionRoiCheckText => UsesSecondarySearchRoi
+        ? (IsDualTemplateMode
+            ? "启用检测区域（ROI1：模板1 只在此区内；缺省全图）"
+            : "启用检测区域（ROI1：BLOB1 只在此区内；缺省全图）")
+        : "启用检测区域（缺省全图）";
+    public string SecondaryRoiCheckText => IsDualTemplateMode
+        ? "启用 ROI2（模板2 只在此区内；不启用则用模板1 匹配窗外扩）"
+        : "启用 ROI2（BLOB2 只在此区内；不启用则用主包围盒外扩）";
+    public string SecondaryRoiHintText => IsDualTemplateMode
+        ? "模板1 只在 ROI1 匹配，模板2 只在 ROI2 匹配。两边都要框选，不要把 ROI1 拉成全图。模板框要比搜索区小。"
+        : "BLOB1 只在 ROI1 检测，BLOB2 只在 ROI2 检测。两边都要框选，不要把 ROI1 拉成全图。";
     public bool HasTemplate => TemplateUi.HasTemplate;
 
     public IReadOnlyList<EnumItem<SegmentRefineMethod>> RefineMethodOptions { get; } =
@@ -573,7 +609,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     ];
 
     public bool IsTemplateMethod => TemplateUi.IsTemplateMethod;
-    public bool UsesFeatureTeachRoi => TemplateUi.UsesFeatureTeachRoi;
+    public bool UsesFeatureTeachRoi => IsDualTemplateMode || TemplateUi.UsesFeatureTeachRoi;
     public bool UsesRefineLine =>
         Editor.Template is { } tmpl && TemplateOptions.UsesTaughtRefineLine(tmpl.RefineMethod);
     public bool NeedsTaughtTemplate => TemplateUi.NeedsTaughtTemplate;
@@ -607,8 +643,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         {
             if (Editor.AngleMode == value)
                 return;
+            var previous = Editor.AngleMode;
             Editor.AngleMode = value;
-            ApplyModeCleanup();
+            ApplyModeCleanup(previous);
         }
     }
 
@@ -624,9 +661,9 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         }
     }
 
-    private void ApplyModeCleanup()
+    private void ApplyModeCleanup(AngleMode? previousAngleMode = null)
     {
-        var note = RecipeEditorModeCleanup.Apply(Editor);
+        var note = RecipeEditorModeCleanup.Apply(Editor, previousAngleMode);
         Test.ClearAdvice();
         NotifyEditorMutated();
         if (note is not null)
@@ -840,6 +877,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         Test.PropertyChanged -= OnRoiOrTestChanged;
         TemplateUi.PropertyChanged -= OnTemplateUiChanged;
         StopDirtyWatch();
+        List.PropertyChanged -= OnListChanged;
+        List.Dispose();
         Test.Dispose();
         Roi.PreviewImage = null;
     }
@@ -1003,7 +1042,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     private void RefreshRecipeHealth()
     {
-        if (_sqlite is null)
+        var sqlite = _sqlite;
+        if (sqlite is null)
         {
             RecipeHealthHint = "";
             _playbookPrior = ScenePlaybook.FromTemplate(Editor.Template);
@@ -1027,15 +1067,15 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             try
             {
                 var q = new ResultDbQuery { Recipe = name };
-                var total = _sqlite.Count(q);
+                var total = sqlite.Count(q);
                 if (total == 0)
-                    return (Hints: (IReadOnlyList<RecipeHealthHint>)Array.Empty<RecipeHealthHint>(), Prior: ScenePlaybook.FromTemplate(template));
+                    return ((IReadOnlyList<RecipeHealthHint>)Array.Empty<RecipeHealthHint>(), ScenePlaybook.FromTemplate(template));
 
                 var hints = RecipeHealthAdvisor.Analyze(
                     total,
-                    _sqlite.CountByCode(q),
-                    _sqlite.QueryAngles(q with { OkOnly = true }),
-                    _sqlite.QuerySpread(q with { OkOnly = true }),
+                    sqlite.CountByCode(q),
+                    sqlite.QueryAngles(q with { OkOnly = true }),
+                    sqlite.QuerySpread(q with { OkOnly = true }),
                     teachPeak);
                 var current = angleMode == AngleMode.MaskTemplate ? refineMethod : (SegmentRefineMethod?)null;
                 var prior = ScenePlaybook.Merge(
@@ -1046,7 +1086,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             catch (Exception ex)
             {
                 WpfUiLog.RecipeHealthHintFailed(_log, ex, name);
-                return (Hints: (IReadOnlyList<RecipeHealthHint>)Array.Empty<RecipeHealthHint>(), Prior: ScenePlaybook.FromTemplate(template));
+                return ((IReadOnlyList<RecipeHealthHint>)Array.Empty<RecipeHealthHint>(), ScenePlaybook.FromTemplate(template));
             }
         }, token).ContinueWith(t =>
         {

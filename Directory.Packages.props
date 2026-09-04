@@ -47,6 +47,8 @@
 
     <!-- 硬件：串口 -->
     <PackageVersion Include="System.IO.Ports" Version="8.0.0" />
+    <!-- FlaUI 等传递依赖会拉到 5.0.2（GHSA-rxg9-xrhp-64gj）；测试项目显式引用以覆盖。 -->
+    <PackageVersion Include="System.Drawing.Common" Version="10.0.11" />
 
     <!-- 本机结果库（分析/追溯；不引入 EF） -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.11" />

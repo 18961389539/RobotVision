@@ -32,10 +32,25 @@ public sealed record RecipeTeachTemplateResult(
     int TemplateWidth,
     int TemplateHeight);
 
+public sealed record RecipeTeachCropRequest(
+    RecipeConfig Recipe,
+    string CameraId,
+    Roi Crop,
+    string LightControllerId,
+    LightingConfig? Lighting);
+
+public sealed record RecipeTeachCropResult(
+    string TemplateImageBase64,
+    int TemplateWidth,
+    int TemplateHeight);
+
 public interface IRecipeTestService
 {
     Task<RecipePreviewRunResult> RunPreviewAsync(RecipePreviewRequest request, CancellationToken ct = default);
 
     Task<RecipeTeachTemplateResult> TeachTemplateAsync(
         RecipeTeachTemplateRequest request, CancellationToken ct = default);
+
+    Task<RecipeTeachCropResult> TeachCropAsync(
+        RecipeTeachCropRequest request, CancellationToken ct = default);
 }

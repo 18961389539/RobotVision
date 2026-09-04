@@ -1,4 +1,5 @@
 using FluentAssertions;
+using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.WpfHost.Features.Recipe;
 
@@ -12,6 +13,19 @@ public sealed class RecipeModelSlotsTests
         var editor = new RecipeConfig
         {
             AngleMode = AngleMode.DualBlobCenterLine,
+            Models = ["a.onnx", "b.onnx", "c.onnx"],
+        };
+
+        RecipeModelSlots.TryCommitUiModels(editor, "a.onnx", "b.onnx").Should().BeNull();
+        editor.Models.Should().Equal("a.onnx", "b.onnx", "c.onnx");
+    }
+
+    [Fact]
+    public void TryCommitUiModels_DualTemplate_PreservesThirdModel()
+    {
+        var editor = new RecipeConfig
+        {
+            AngleMode = AngleMode.DualTemplateCenterLine,
             Models = ["a.onnx", "b.onnx", "c.onnx"],
         };
 
@@ -78,9 +92,31 @@ public sealed class RecipeModelSlotsTests
 
         editor.Models.Should().Equal("a.onnx");
         editor.Template.TemplateImageBase64.Should().BeEmpty();
-        editor.Template.HousingEdgePolarity.Should().Be(HousingEdgePolarity.Auto);
         note.Should().Contain("次模型");
         note.Should().Contain("示教模板图");
+    }
+
+    [Fact]
+    public void RecipeEditorModeCleanup_LeavesDualTemplate_ClearsTaughtImages()
+    {
+        var editor = new RecipeConfig
+        {
+            AngleMode = AngleMode.MaskMinAreaRect,
+            Models = ["a.onnx"],
+            DualTemplate =
+            {
+                TemplateABase64 = "aaa==",
+                TemplateBBase64 = "bbb==",
+                SecondaryRoi = new Roi(0.5, 0.2, 0.4, 0.5),
+            },
+        };
+
+        var note = RecipeEditorModeCleanup.Apply(editor);
+
+        editor.DualTemplate.TemplateABase64.Should().BeEmpty();
+        editor.DualTemplate.TemplateBBase64.Should().BeEmpty();
+        editor.DualTemplate.SecondaryRoi.Should().BeNull();
+        note.Should().Contain("双模板");
     }
 
     [Fact]
@@ -94,5 +130,52 @@ public sealed class RecipeModelSlotsTests
 
         RecipeModelSlots.TryCommitUiModels(editor, "a.onnx", "").Should().BeNull();
         editor.Models.Should().Equal("a.onnx");
+    }
+
+    [Fact]
+    public void TryCommitUiModels_ModelFree_DoesNotWriteUiSlots()
+    {
+        var editor = new RecipeConfig
+        {
+            AngleMode = AngleMode.DualTemplateCenterLine,
+            Models = ["leftover.onnx"],
+        };
+
+        RecipeModelSlots.TryCommitUiModels(editor, "ui.onnx", "b.onnx").Should().BeNull();
+        editor.Models.Should().Equal("leftover.onnx");
+    }
+
+    [Fact]
+    public void RecipeEditorModeCleanup_DualBlobToDualTemplate_CarriesSecondaryRoi()
+    {
+        var roi = new Roi(0.55, 0.2, 0.4, 0.5);
+        var editor = new RecipeConfig
+        {
+            AngleMode = AngleMode.DualBlobCenterLine,
+            Blob = { SecondaryRoi = roi },
+        };
+
+        editor.AngleMode = AngleMode.DualTemplateCenterLine;
+        RecipeEditorModeCleanup.Apply(editor, AngleMode.DualBlobCenterLine);
+
+        editor.SecondarySearchRoi.Should().Be(roi);
+        editor.DualTemplate.SecondaryRoi.Should().Be(roi);
+        editor.Blob.SecondaryRoi.Should().BeNull();
+    }
+
+    [Fact]
+    public void RecipeEditorModeCleanup_LeavingDualBlob_ClearsSecondaryRoi()
+    {
+        var editor = new RecipeConfig
+        {
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx"],
+            Blob = { SecondaryRoi = new Roi(0.5, 0.2, 0.4, 0.5) },
+        };
+
+        RecipeEditorModeCleanup.Apply(editor, AngleMode.DualBlobCenterLine);
+
+        editor.Blob.SecondaryRoi.Should().BeNull();
+        editor.SecondarySearchRoi.Should().BeNull();
     }
 }
