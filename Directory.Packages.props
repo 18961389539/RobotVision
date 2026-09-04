@@ -62,7 +62,7 @@
     <PackageVersion Include="coverlet.collector" Version="6.0.2" />
 
     <!-- 基准测试 -->
-    <PackageVersion Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
 
     <!-- UI 自动化 -->
     <PackageVersion Include="FlaUI.Core" Version="4.0.0" />
