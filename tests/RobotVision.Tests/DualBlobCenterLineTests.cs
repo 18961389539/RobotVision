@@ -3,7 +3,7 @@ using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -251,6 +251,68 @@ public class DualBlobCenterLineTests
     {
         var recipe = Recipe();
         recipe.AngleMode = AngleMode.MaskMinAreaRect;
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+    }
+
+    [Fact]
+    public void SecondaryRoi_PairsAcrossDistantRegions()
+    {
+        using var mat = BrightBlobs((100, 150, 20), (250, 150, 8));
+        var poses = Compute(mat, Recipe(
+            o => o.SecondaryRoi = new Roi(0.55, 0.3, 0.3, 0.4),
+            roi: new Roi(0.15, 0.3, 0.3, 0.4)));
+
+        var pose = Assert.Single(poses);
+        Assert.InRange(pose.Cx, 98, 102);
+        Assert.InRange(pose.AngleDeg, -1.5, 1.5);
+    }
+
+    [Fact]
+    public void SecondaryRoi_IgnoresBlobOutsideSecondary()
+    {
+        using var mat = BrightBlobs((100, 150, 20), (150, 150, 8));
+        var poses = Compute(mat, Recipe(
+            o => o.SecondaryRoi = new Roi(0.7, 0.3, 0.25, 0.4),
+            roi: new Roi(0.1, 0.3, 0.3, 0.4)));
+        Assert.Empty(poses);
+    }
+
+    [Fact]
+    public void SecondaryRoi_WithoutPrimaryRoi_ReturnsEmpty()
+    {
+        using var mat = BrightBlobs((100, 150, 20), (250, 150, 8));
+        var poses = Compute(mat, Recipe(o => o.SecondaryRoi = new Roi(0.55, 0.3, 0.3, 0.4)));
+        Assert.Empty(poses);
+    }
+
+    [Fact]
+    public void SecondaryRoi_DoesNotDetectBlob2AsPrimary()
+    {
+        // 两个同等大斑：若 BLOB1 扫全图会出两个位姿。互斥 ROI 后只应留下 ROI1 里的那一个。
+        using var mat = BrightBlobs((100, 150, 20), (250, 150, 20));
+        var poses = Compute(mat, Recipe(
+            o => o.SecondaryRoi = new Roi(0.5, 0.2, 0.45, 0.6),
+            roi: new Roi(0.05, 0.2, 0.4, 0.6)));
+
+        var pose = Assert.Single(poses);
+        Assert.InRange(pose.Cx, 98, 102);
+        Assert.InRange(pose.Cy, 148, 152);
+        Assert.InRange(pose.AngleDeg, -1.5, 1.5);
+    }
+
+    [Fact]
+    public void Validate_BlobMode_RejectsBadSecondaryRoi()
+    {
+        var recipe = Recipe(
+            o => o.SecondaryRoi = new Roi(0.9, 0.9, 0.5, 0.5),
+            roi: new Roi(0.1, 0.1, 0.3, 0.3));
+        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+    }
+
+    [Fact]
+    public void Validate_BlobMode_SecondaryRoiRequiresPrimaryRoi()
+    {
+        var recipe = Recipe(o => o.SecondaryRoi = new Roi(0.55, 0.3, 0.3, 0.4));
         Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
     }
 

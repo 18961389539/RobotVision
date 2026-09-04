@@ -15,6 +15,8 @@ public sealed class ChatSystemPromptTests
         Assert.Contains("query_results", prompt, StringComparison.Ordinal);
         Assert.Contains("1018", prompt, StringComparison.Ordinal);
         Assert.Contains("禁止编造", prompt, StringComparison.Ordinal);
+        Assert.Contains("confirm:true", prompt, StringComparison.Ordinal);
+        Assert.Contains("run_recipe", prompt, StringComparison.Ordinal);
         Assert.Contains("web_search", prompt, StringComparison.Ordinal);
         Assert.Contains("web_fetch", prompt, StringComparison.Ordinal);
     }

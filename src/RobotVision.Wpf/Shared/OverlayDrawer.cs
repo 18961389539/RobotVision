@@ -130,7 +130,15 @@ public static class OverlayDrawer
             if (overlay.MatchWindow is { Count: >= 4 } window)
                 Cv2.Polylines(image, [ToPoints(window)], true, MatchWindowColor, 2, LineTypes.AntiAlias);
 
-            if (overlay.Boxes is not null)
+            if (overlay.Contour is { Count: >= 3 } obbContour)
+            {
+                var obb = ContourObbCorners(obbContour);
+                Cv2.Polylines(image, [ToPoints(obb)], true, BoxColor, 2, LineTypes.AntiAlias);
+                if (pose.SegmentScore is { } segScore)
+                    DrawLabel(image, BoxLabelOrigin(obb, image.Width, image.Height),
+                        $"分割 {segScore:F2}", 1.0, Scalar.Lime);
+            }
+            else if (overlay.Boxes is not null)
             {
                 foreach (var box in overlay.Boxes)
                     Cv2.Rectangle(image, ToRect(box), BoxColor, 2, LineTypes.AntiAlias);
@@ -197,6 +205,19 @@ public static class OverlayDrawer
                     y = window[i].Y;
             }
         }
+        else if (pose.SegmentScore is not null && pose.Overlay?.Contour is { Count: >= 3 } segContour)
+        {
+            var obb = ContourObbCorners(segContour);
+            x = obb[0].X;
+            y = obb[0].Y;
+            for (var i = 1; i < obb.Length; i++)
+            {
+                if (obb[i].X < x)
+                    x = obb[i].X;
+                if (obb[i].Y < y)
+                    y = obb[i].Y;
+            }
+        }
         else if (pose.SegmentScore is not null && pose.Overlay?.Boxes is { Count: > 0 })
         {
             // 分割分已经写在外接矩形上，精修分避开同一角
@@ -228,6 +249,38 @@ public static class OverlayDrawer
         ox = Math.Clamp(ox, 2, Math.Max(2, imageWidth - 8));
         oy = Math.Clamp(oy, 14, Math.Max(14, imageHeight - 4));
         return new Point(ox, oy);
+    }
+
+    private static Point BoxLabelOrigin(PixelPoint[] obb, int imageWidth, int imageHeight)
+    {
+        var x = obb[0].X;
+        var y = obb[0].Y;
+        for (var i = 1; i < obb.Length; i++)
+        {
+            if (obb[i].X < x)
+                x = obb[i].X;
+            if (obb[i].Y < y)
+                y = obb[i].Y;
+        }
+
+        var ox = (int)Math.Round(x) + 2;
+        var oy = (int)Math.Round(y) - 14;
+        ox = Math.Clamp(ox, 2, Math.Max(2, imageWidth - 8));
+        oy = Math.Clamp(oy, 14, Math.Max(14, imageHeight - 4));
+        return new Point(ox, oy);
+    }
+
+    private static PixelPoint[] ContourObbCorners(IReadOnlyList<PixelPoint> contour)
+    {
+        var pts = new Point2f[contour.Count];
+        for (var i = 0; i < contour.Count; i++)
+            pts[i] = new Point2f((float)contour[i].X, (float)contour[i].Y);
+        var rect = Cv2.MinAreaRect(pts);
+        var corners = rect.Points();
+        var result = new PixelPoint[corners.Length];
+        for (var i = 0; i < corners.Length; i++)
+            result[i] = new PixelPoint(corners[i].X, corners[i].Y);
+        return result;
     }
 
     /// <summary>深色底 + 白字黑描边；中文走 WPF 字体（Hershey 会变成问号）。</summary>

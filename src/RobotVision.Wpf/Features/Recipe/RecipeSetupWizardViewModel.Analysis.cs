@@ -38,6 +38,7 @@ internal sealed partial class RecipeSetupWizardViewModel
         try
         {
             _host.CommitEdits();
+            this.Commit();
             using var lightingScope = _lighting.Apply(_host.Editor.LightControllerId, _host.Editor.Lighting);
             if (lightingScope.StabilizeDelayMs > 0)
                 await Task.Delay(lightingScope.StabilizeDelayMs, ct);

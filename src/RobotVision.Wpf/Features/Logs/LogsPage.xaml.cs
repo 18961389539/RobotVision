@@ -22,6 +22,8 @@ public partial class LogsPage : Page
         Loaded += (_, _) =>
         {
             _rowsChanged ??= OnRowsChanged;
+            // 先解绑再绑定，避免页面在常驻 VM 生命周期下反复 Loaded 时累积重复处理器。
+            _vm.Rows.CollectionChanged -= _rowsChanged;
             _vm.Rows.CollectionChanged += _rowsChanged;
             _vm.StartTimer();
         };

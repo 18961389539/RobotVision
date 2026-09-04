@@ -195,8 +195,7 @@ PLC 可顺序读坐标，或用尾部 N 校验；也为将来"0 目标返回空 
 ## 相机模块
 
 统一接口 `ICamera`（File 回放 / Basler pylon / Virtual 虚拟三种实现），返回
-`CameraFrame`（图像 + 采集时刻 UTC），`Grab(CancellationToken)` 支持取消——
-取图前的阶段（光源稳定延时/取图阻塞）响应超时取消，进入推理后不可中断。
+`CameraFrame`（图像 + 采集时刻 UTC），支持取消——取图等待出帧期间响应超时取消（Basler 短轮询 RetrieveResult，GigE 取消待收帧），进入推理后不可中断。
 
 - **懒连接**：Basler 相机构造只校验 pylon 运行库，`Open/Start` 推迟到首次取图。
   启动时相机未上电/网络未就绪**不阻断服务**，首次触发自动连接，无需重启；

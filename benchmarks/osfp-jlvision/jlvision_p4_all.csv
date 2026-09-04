@@ -1,0 +1,38 @@
+﻿file,split,usable,cx,cy,angle_deg,score,ms,refine_ms,note,flip
+20260828_153936771_Product_OK.png,teach,yes,2712.955,2142.511,0,0.994,861.7,78.5,"JLVision shape score=0.994;br=0",no
+20260828_153937914_Product_OK.png,teach,yes,2730.183,2260.753,-0.37,0.644,226.9,64.6,"JLVision shape score=0.644;br=0",no
+20260828_153939015_Product_OK.png,holdout,yes,2851.009,2255.583,-0.425,0.645,221.0,59.5,"JLVision shape score=0.645;br=0",no
+20260828_153940139_Product_OK.png,teach,yes,2831.241,2156.068,0.516,0.985,211.3,50.3,"JLVision shape score=0.985;br=0",no
+20260828_153941260_Product_OK.png,teach,yes,2844.166,2022.503,0.509,0.831,228.0,52.9,"JLVision shape score=0.831;br=0",no
+20260828_153942369_Product_OK.png,teach,yes,2721.705,2018.124,-0.002,0.882,215.3,55.2,"JLVision shape score=0.882;br=0",no
+20260828_153943477_Product_OK.png,holdout,yes,2606.652,2025.349,0.06,0.866,213.2,53.2,"JLVision shape score=0.866;br=0",no
+20260828_153944575_Product_OK.png,dev,yes,2616.986,2139.13,0.109,0.974,224.4,63.8,"JLVision shape score=0.974;br=0",no
+20260828_153945693_Product_OK.png,dev,yes,2611.779,2263.612,-0.09,0.655,218.8,54.7,"JLVision shape score=0.655;br=0",no
+20260828_153947060_Product_OK.png,dev,yes,2749.016,2130.835,-4.864,0.958,218.1,58.2,"JLVision geo fallback-measure;par=0.17°",no
+20260828_153948870_Product_OK.png,dev,yes,2708.103,2143.711,5.14,0.989,211.2,50.1,"JLVision geo fallback-measure;par=0.04°",no
+20260828_154736360_Product_OK.png,teach,yes,2718.564,2149.689,0.624,0.994,216.8,59.1,"JLVision shape score=0.994;br=0",no
+20260828_154912214_Product_OK.png,dev,yes,2717.35,2151.179,0.376,0.996,218.4,60.9,"JLVision shape score=0.996;br=0",no
+20260828_155009621_Product_OK.png,teach,yes,2693.847,2156.182,-0.01,0.976,218.5,58.9,"JLVision shape score=0.976;br=0",no
+20260828_155032453_Product_OK.png,dev,yes,2715.568,2155.523,0.072,0.982,225.2,63.5,"JLVision shape score=0.982;br=0",no
+20260828_155055353_Product_OK.png,dev,no,2402.5,1856,-90,0.2,164.6,7.9,"refine_fail JLVision 卡尺边不足 0",no
+20260828_155104575_Product_OK.png,dev,yes,2675.18,2190.627,-0.054,0.914,223.9,59.8,"JLVision shape score=0.914;br=0",no
+20260828_155120831_Product_OK.png,teach,yes,2820.743,2162.108,1.692,0.962,220.8,61.2,"JLVision shape score=0.962;br=0",no
+20260828_155134721_Product_OK.png,dev,yes,2729.003,2163.301,-0.093,0.92,224.0,63.7,"JLVision shape score=0.920;br=0",no
+20260828_155951276_Product_OK.png,teach,yes,2634.326,2346.162,0.958,0.96,205.4,46.8,"JLVision geo fallback-measure;par=0.16°",no
+20260828_160028323_Product_OK.png,dev,yes,2650.978,2336.152,0.624,0.954,207.1,44.8,"JLVision geo fallback-measure;par=0.19°",no
+20260828_160130962_Product_OK.png,dev,yes,2650.521,2345.151,0.603,0.951,245.0,82.0,"JLVision geo fallback-measure;par=0.20°",no
+20260828_160256120_Product_OK.png,dev,yes,2715.673,2297.125,0.014,0.971,309.3,95.1,"JLVision geo fallback-measure;par=0.12°",no
+20260828_160315766_Product_OK.png,dev,yes,2652.807,2041.932,3.472,0.846,296.4,90.4,"JLVision geo fallback-measure;par=0.62°",no
+20260828_160411525_Product_OK.png,dev,yes,2763.501,2152.813,0.226,0.428,310.9,102.3,"JLVision shape score=0.428;br=0",no
+20260828_160926635_Product_OK.png,holdout,no,2658.381,1935.057,3.263,0.2,271.5,61.7,"refine_fail JLVision 平行差 4.35°",no
+20260828_160952833_Product_OK.png,holdout,yes,2702.112,2166.204,-0.038,0.743,309.9,106.1,"JLVision shape score=0.743;br=0",no
+20260828_161003712_Product_OK.png,holdout,yes,2702.149,2165.521,-0.143,0.771,306.6,106.8,"JLVision shape score=0.771;br=0",no
+20260828_161116390_Product_OK.png,holdout,yes,2700.811,2163.937,-0.094,0.726,313.3,107.8,"JLVision shape score=0.726;br=0",no
+20260828_161122478_Product_OK.png,holdout,yes,3064.859,1797.198,0.562,0.475,312.6,107.0,"JLVision shape score=0.475;br=0",no
+20260828_161129468_Product_OK.png,holdout,yes,2341.186,2574.624,0.007,0.462,317.9,112.3,"JLVision shape score=0.462;br=180;upright180",no
+20260828_161417536_Product_OK.png,holdout,yes,2707.851,2162.961,-0.063,0.754,315.8,109.2,"JLVision shape score=0.754;br=0",no
+20260828_161422128_Product_OK.png,holdout,yes,3065.247,1798.361,0.406,0.48,314.4,104.2,"JLVision shape score=0.480;br=0",no
+20260828_161429081_Product_OK.png,holdout,yes,2341.09,2574.127,0.057,0.452,317.8,102.2,"JLVision shape score=0.452;br=180;upright180",no
+20260828_161700040_Product_OK.png,holdout,yes,2716.271,2192.679,-0.087,0.813,304.5,105.9,"JLVision shape score=0.813;br=0",no
+20260828_161725766_Product_OK.png,holdout,yes,3104.426,1785.477,0.248,0.469,319.4,100.8,"JLVision shape score=0.469;br=0",no
+20260828_161746958_Product_OK.png,holdout,yes,2335.047,2568.14,0.334,0.977,312.8,85.6,"JLVision geo fallback-measure;par=0.09°",no

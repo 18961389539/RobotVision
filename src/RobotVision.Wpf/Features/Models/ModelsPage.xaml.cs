@@ -1,4 +1,5 @@
-﻿using System.Windows.Controls;
+﻿using System.Windows;
+using System.Windows.Controls;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Models;
@@ -19,5 +20,14 @@ public partial class ModelsPage : Page
         InitializeComponent();
         NumberBoxCommit.Bind(this, viewModel);
         Loaded += (_, _) => viewModel.ScheduleRefresh();
+    }
+
+    private void OnMoreClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.ContextMenu is { } menu)
+        {
+            menu.PlacementTarget = btn;
+            menu.IsOpen = true;
+        }
     }
 }

@@ -1,0 +1,4 @@
+true_deg,engine,ok,angle_deg,angle_err_deg,score,center_x,center_y
+-37,halcon,1,-36.87,0.13,0.92,142.5,88.2
+0,halcon,1,0.05,0.05,0.98,150.0,90.0
+180,halcon,1,179.72,0.28,0.97,151.2,89.5

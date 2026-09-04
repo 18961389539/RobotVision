@@ -21,8 +21,10 @@
                                             xmlns:local="clr-namespace:RobotVision.WpfHost.Shared" />
             <local:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter"
                                                     xmlns:local="clr-namespace:RobotVision.WpfHost.Shared" />
+            <local:StringToVisibilityConverter x:Key="StringToVisibilityConverter"
+                                               xmlns:local="clr-namespace:RobotVision.WpfHost.Shared" />
 
-            <!-- WPF-UI NavigationView 会在 Page 外包一层 DynamicScrollViewer；                 全屏图像页（相机/配方/监控等）须同时禁用外层滚动，否则参数栏内容过高时整页（含 ImageViewer）会一起滚"                 CanContentScroll=False 关闭动态滚动；VerticalScrollBarVisibility=Disabled 禁止外层滚动条与滚轮链式传递；                 设置/关于等表单页不要用 Disabled，保留整页滚动"-->
+            <!-- WPF-UI NavigationView 会在 Page 外包一层 DynamicScrollViewer；                 全屏图像页（相机/配方/监控等）须同时禁用外层滚动，否则参数栏内容过高时整页（含 ImageViewer）会一起滚"                 CanContentScroll=False 关闭动态滚动；VerticalScrollBarVisibility=Disabled 禁止外层滚动条与滚轮链式传递；                 设置/关于等表单页不要用 Disabled，保留整页滚动） -->
             <Style TargetType="Page" BasedOn="{StaticResource DefaultPageStyle}">
                 <Setter Property="ScrollViewer.CanContentScroll" Value="False" />
             </Style>
@@ -42,7 +44,7 @@
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
             </Style>
 
-            <!-- CardExpander string Header：用 DataType 模板着色；object Header 仍由 ContentPresenter 原样呈现"-->
+            <!-- CardExpander string Header：用 DataType 模板着色；object Header 仍由 ContentPresenter 原样呈现） -->
             <DataTemplate DataType="{x:Type sys:String}">
                 <TextBlock Text="{Binding}"
                            FontSize="14"
@@ -81,7 +83,7 @@
                 <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
                 <Setter Property="RowBackground" Value="Transparent" />
-                <!-- 斑马纹：用主题的次级控件填充色，深浅主题下均与背景协"-->
+                <!-- 斑马纹：用主题的次级控件填充色，深浅主题下均与背景协） -->
                 <Setter Property="AlternatingRowBackground"
                         Value="{DynamicResource ControlFillColorDefaultBrush}" />
                 <Setter Property="GridLinesVisibility" Value="None" />
@@ -104,7 +106,7 @@
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="Padding" Value="8,0" />
                 <Setter Property="BorderThickness" Value="0" />
-                <!-- 焦点格不画虚线框（选中行高亮已足够指示，虚线在暗色下很突兀"-->
+                <!-- 焦点格不画虚线框（选中行高亮已足够指示，虚线在暗色下很突兀） -->
                 <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             </Style>
             <Style TargetType="{x:Type DataGridCell}" BasedOn="{StaticResource AppDataGridCellStyle}" />

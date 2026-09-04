@@ -105,6 +105,33 @@ public static class ChatDangerousActionGuard
                 };
                 targets = Collect(ChatToolArguments.GetString(args, "camera_id"));
                 return true;
+            case "run_recipe":
+                summary = "run_recipe";
+                targets = Collect(ChatToolArguments.GetString(args, "name"));
+                if (targets.Count == 0)
+                    targets = ["配方", "检测", "触发"];
+                return true;
+            case "capture_frame":
+                summary = "capture_frame";
+                targets = Collect(
+                    ChatToolArguments.GetString(args, "camera_id"),
+                    "拍照", "拍摄", "拍一张", "取图");
+                return true;
+            case "set_light":
+                summary = action switch
+                {
+                    "on" => "set_light.on",
+                    "off" => "set_light.off",
+                    "raw" => "set_light.raw",
+                    "" => "set_light",
+                    _ => $"set_light.{action}",
+                };
+                targets = Collect(
+                    ChatToolArguments.GetString(args, "id"),
+                    ChatToolArguments.GetString(args, "command"));
+                if (targets.Count == 0)
+                    targets = ["光源", "开灯", "关灯"];
+                return true;
             case "update_settings":
                 if (ChatToolArguments.PropertyCount(args) == 0
                     || (ChatToolArguments.PropertyCount(args) == 1 && ChatToolArguments.HasProperty(args, "confirm")))
@@ -131,12 +158,6 @@ public static class ChatDangerousActionGuard
                 return true;
             case "light_send_raw":
                 summary = "light_send_raw";
-                targets = Collect(
-                    ChatToolArguments.GetString(args, "id"),
-                    ChatToolArguments.GetString(args, "command"));
-                return true;
-            case "set_light" when action == "raw":
-                summary = "set_light.raw";
                 targets = Collect(
                     ChatToolArguments.GetString(args, "id"),
                     ChatToolArguments.GetString(args, "command"));

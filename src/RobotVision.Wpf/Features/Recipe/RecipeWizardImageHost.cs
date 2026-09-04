@@ -40,7 +40,9 @@ internal sealed class RecipeWizardImageHost : IDisposable
             usesFeatureTeachRoi,
             () => usesFeatureTeachRoi() && roi.UseTemplateRoi,
             () => host.Editor.Template?.RefineLine,
-            () => TemplateOptions.UsesTaughtRefineLine(host.Editor.Template?.RefineMethod ?? SegmentRefineMethod.Template));
+            () => TemplateOptions.UsesTaughtRefineLine(host.Editor.Template?.RefineMethod ?? SegmentRefineMethod.Template),
+            () => host.Editor.AngleMode == AngleMode.DualBlobCenterLine ? host.Editor.Blob.SecondaryRoi : null,
+            () => host.Editor.AngleMode == AngleMode.DualBlobCenterLine);
     }
 
     public void Wire() => _sync.Wire();

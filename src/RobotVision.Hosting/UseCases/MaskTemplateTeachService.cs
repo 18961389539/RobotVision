@@ -1,7 +1,6 @@
 using OpenCvSharp;
 using RobotVision.Core.Recipe;
-using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.JlVision;
 
 namespace RobotVision.Hosting;
 
@@ -31,10 +30,9 @@ internal sealed class MaskTemplateTeachService : IMaskTemplateTeachService
             using var mat = MaskTemplateHostingOps.DecodeTemplatePng(templatePngBase64);
             return method switch
             {
-                SegmentRefineMethod.ShapeMatch => MaskShapeMatch.BuildTeach(mat) is { } shape
-                    ? $"形状示教边缘点 {shape.PointCount} 个"
-                    : "形状示教边缘点不足（需 ≥24 个 Canny 采样点）",
-                SegmentRefineMethod.Sift => BuildSiftDiagnostics(mat),
+                SegmentRefineMethod.ShapeMatch or SegmentRefineMethod.Sift =>
+                    TeachShape(mat),
+                SegmentRefineMethod.Template => TeachNcc(mat),
                 _ => "",
             };
         }
@@ -44,12 +42,31 @@ internal sealed class MaskTemplateTeachService : IMaskTemplateTeachService
         }
     }
 
-    private static string BuildSiftDiagnostics(Mat mat)
+    private static string TeachShape(Mat mat)
     {
-        var model = MaskSiftRefine.BuildTeach(mat);
-        if (model is null)
-            return "SIFT 示教特征不足（需 ≥16 个关键点）";
-        using (model)
-            return $"SIFT 示教关键点 {model.KeypointCount} 个";
+        try
+        {
+            using var gray = JlImageConvert.ToGray(mat);
+            using var model = JlShapeRefine.CreateModel(gray);
+            return "JLVision 形状模型已建立";
+        }
+        catch (Exception ex)
+        {
+            return "JLVision 形状示教失败：" + ex.Message;
+        }
+    }
+
+    private static string TeachNcc(Mat mat)
+    {
+        try
+        {
+            using var gray = JlImageConvert.ToGray(mat);
+            using var model = JlNccRefine.CreateModel(gray);
+            return "JLVision NCC 模型已建立";
+        }
+        catch (Exception ex)
+        {
+            return "JLVision NCC 示教失败：" + ex.Message;
+        }
     }
 }

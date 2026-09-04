@@ -60,7 +60,7 @@
                       HorizontalAlignment="Stretch">
             <StackPanel MaxWidth="920">
 
-            <!-- 运行状态：迷你指标"-->
+            <!-- 运行状态：迷你指标） -->
             <Border Style="{StaticResource SectionPanel}">
                 <StackPanel>
                     <ui:TextBlock Style="{StaticResource SectionTitle}" Text="运行状态" />

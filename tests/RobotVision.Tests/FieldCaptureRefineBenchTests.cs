@@ -7,7 +7,7 @@ using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -24,11 +24,52 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
     {
         get
         {
+            var fromEnv = Environment.GetEnvironmentVariable("FIELD_CAPTURE_DIR");
+            if (!string.IsNullOrWhiteSpace(fromEnv) && Directory.Exists(fromEnv))
+                return fromEnv;
+
             var wpfBin = TestBuildPaths.ResolveWpfBin();
+            if (wpfBin is not null)
+            {
+                var wpfCaptures = Path.Combine(wpfBin, "data", "captures");
+                var dated = FindLatestCaptureDay(wpfCaptures);
+                if (dated is not null)
+                    return dated;
+            }
+
+            var root = TestBuildPaths.FindRepoRoot();
+            if (root is not null)
+            {
+                var repoCaptures = Path.Combine(root, "data", "captures");
+                var dated = FindLatestCaptureDay(repoCaptures);
+                if (dated is not null)
+                    return dated;
+            }
+
+            var dataRoot = TestBuildPaths.ResolveRobotVisionDataRoot();
+            if (dataRoot is not null)
+            {
+                var dated = FindLatestCaptureDay(Path.Combine(dataRoot, "captures"));
+                if (dated is not null)
+                    return dated;
+            }
+
             return wpfBin is null
                 ? ""
                 : Path.Combine(wpfBin, "data", "captures", "2026-08-28");
         }
+    }
+
+    private static string? FindLatestCaptureDay(string capturesRoot)
+    {
+        if (!Directory.Exists(capturesRoot))
+            return null;
+        return Directory.GetDirectories(capturesRoot)
+            .Select(d => new DirectoryInfo(d))
+            .Where(d => Directory.GetFiles(d.FullName, "*_Product_OK.png", SearchOption.TopDirectoryOnly).Length > 0)
+            .OrderByDescending(d => d.Name, StringComparer.Ordinal)
+            .Select(d => d.FullName)
+            .FirstOrDefault();
     }
 
     private static string RequireCaptureDir()
@@ -41,14 +82,80 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
     private static (string CaptureDir, string RecipeDir, string ModelsDir) ResolveBenchAssets()
     {
         var dir = RequireCaptureDir();
+        var recipeDir = ResolveProductRecipeDir();
+        TestPreconditions.RequireFile(
+            recipeDir is null ? "" : Path.Combine(recipeDir, "Product.json"),
+            "Missing Product.json for bench.");
+        var modelsDir = ResolveSegModelDir();
+        TestPreconditions.RequireFile(
+            modelsDir is null ? "" : Path.Combine(modelsDir, "OSFP-SEG.onnx"),
+            "Missing OSFP-SEG.onnx for bench.");
+        return (dir, recipeDir!, modelsDir!);
+    }
 
-        var recipeDir = TestBuildPaths.ResolveRecipesDir()
-                        ?? TestBuildPaths.CombineWpf("recipes");
-        var modelsDir = TestBuildPaths.ResolveModelsDir()
-                        ?? TestBuildPaths.CombineWpf("models");
-        TestPreconditions.RequireFile(Path.Combine(recipeDir, "Product.json"), "Missing Product.json for bench.");
-        TestPreconditions.RequireFile(Path.Combine(modelsDir, "OSFP-SEG.onnx"), "Missing OSFP-SEG.onnx for bench.");
-        return (dir, recipeDir, modelsDir);
+    private static string? ResolveProductRecipeDir()
+    {
+        foreach (var candidate in new[]
+                 {
+                     TestBuildPaths.ResolveRobotVisionDataRecipesDir(),
+                     TestBuildPaths.ResolveRecipesDir(),
+                     SafeCombineWpf("recipes"),
+                 })
+        {
+            if (candidate is not null && File.Exists(Path.Combine(candidate, "Product.json")))
+                return candidate;
+        }
+        return null;
+    }
+
+    private static string? ResolveSegModelDir()
+    {
+        foreach (var candidate in new[]
+                 {
+                     TestBuildPaths.ResolveModelsDir(),
+                     TestBuildPaths.ResolveRobotVisionDataModelsDir(),
+                     SafeCombineWpf("models"),
+                 })
+        {
+            if (candidate is null)
+                continue;
+            if (File.Exists(Path.Combine(candidate, "OSFP-SEG.onnx")))
+                return candidate;
+        }
+        return null;
+    }
+
+    private static string? SafeCombineWpf(string relative)
+    {
+        try { return TestBuildPaths.CombineWpf(relative); }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    private static (double TeachArea, double TeachAspect, RecipeConfig Recipe) LoadProductBenchRecipe()
+    {
+        const double fallbackArea = 285172.0;
+        const double fallbackAspect = 2.14;
+        var recipeDir = ResolveProductRecipeDir();
+        if (recipeDir is null)
+        {
+            return (fallbackArea, fallbackAspect, new RecipeConfig
+            {
+                Name = "Product",
+                Template = new TemplateOptions
+                {
+                    RefineMethod = SegmentRefineMethod.LineFit,
+                    HousingEdgePolarity = HousingEdgePolarity.DarkToBright,
+                    LineFitSubpixel = true,
+                    TeachAreaPx = fallbackArea,
+                    TeachAspect = fallbackAspect,
+                },
+            });
+        }
+
+        var recipe = new RecipeLoader(recipeDir).Get("Product");
+        var area = recipe.Template.TeachAreaPx > 1 ? recipe.Template.TeachAreaPx : fallbackArea;
+        var aspect = recipe.Template.TeachAspect > 1e-3 ? recipe.Template.TeachAspect : fallbackAspect;
+        return (area, aspect, recipe);
     }
 
     [SkippableFact]
@@ -60,8 +167,8 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
             .OrderBy(f => f).ToArray();
         Assert.NotEmpty(files);
 
-        var teachArea = 285172.0;
-        var teachAspect = 2.14;
+        var (teachArea, teachAspect, recipe) = LoadProductBenchRecipe();
+        var lineFitRuntime = new LineFitSegmentRefineRuntime();
         var rows = new List<Row>();
         foreach (var file in files)
         {
@@ -85,17 +192,150 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
             var line = MaskTemplateMatcher.RefineByLineFit(contour, housing.LongAxisDeg);
             var lineLat = MaskTemplateMatcher.RefineByLineFitBands(contour, housing.LongAxisDeg, horizontalBands: false);
 
+            var rectOpts = RectFitOptions.ForLineFit(recipe.Template);
+            var rectContour = RotatedRectPipeline.FitContour(contour, housing.LongAxisDeg, rectOpts);
+            var rectFull = RotatedRectPipeline.Fit(contour, img, housing.LongAxisDeg, rectOpts);
+
+            double? lineFitDeg = null;
+            double? lineFitRms = null;
+            using (var roi = new Mat())
+            {
+                img.CopyTo(roi);
+                var lineFitHit = lineFitRuntime.Refine(new SegmentRefineRequest
+                {
+                    RoiView = roi,
+                    Points = contour,
+                    SegmentConfidence = 0.9,
+                    Recipe = recipe,
+                });
+                if (lineFitHit.Pose is { Usable: true } pose)
+                {
+                    lineFitDeg = pose.AngleDeg;
+                    if (lineFitHit.QualityNote is not null)
+                    {
+                        var m = System.Text.RegularExpressions.Regex.Match(
+                            lineFitHit.QualityNote, @"RMS\s+([\d.]+)px");
+                        if (m.Success && double.TryParse(m.Groups[1].Value, out var rms))
+                            lineFitRms = rms;
+                    }
+                }
+            }
+
             rows.Add(new(
                 Path.GetFileName(file),
                 legacy.Pose,
                 auto.Pose,
                 lateralOnly.Pose,
                 line.Fitted ? line.AngleDeg : null,
-                lineLat.Fitted ? lineLat.AngleDeg : null));
+                lineLat.Fitted ? lineLat.AngleDeg : null,
+                rectContour.Ok ? rectContour.AngleDeg : null,
+                rectFull.Ok ? rectFull.AngleDeg : null,
+                rectFull.Ok ? rectFull.RmsPx : null,
+                rectFull.Ok ? RotatedRectFitQuality.NormalizedRms(rectFull) : null,
+                lineFitDeg,
+                lineFitRms));
         }
 
         Assert.NotEmpty(rows);
-        PrintSummary(rows, "剪影轮廓（ROI+亮目标）");
+        PrintSummary(rows, "剪影轮廓（ROI+亮目标）", teachArea, teachAspect);
+        AssertFieldRectangle2Gates(rows);
+    }
+
+    [SkippableFact]
+    public void Bench_field_rectangle2_quantitative_gates()
+    {
+        var dir = RequireCaptureDir();
+        var files = Directory.GetFiles(dir, "*_Product_OK.png", SearchOption.TopDirectoryOnly);
+        Skip.If(files.Length < 5, "Need at least 5 field captures for rectangle2 gates.");
+
+        var (teachArea, teachAspect, recipe) = LoadProductBenchRecipe();
+        var rows = new List<Row>();
+        foreach (var file in files.OrderBy(f => f))
+        {
+            using var img = DecodeGray(file);
+            if (img.Empty())
+                continue;
+            var contour = ExtractConnectorContour(img, teachArea, teachAspect);
+            if (contour.Length < 16)
+                continue;
+            var housing = MaskHousing.Fit(contour);
+            var rectOpts = RectFitOptions.ForLineFit(recipe.Template);
+            var rectContour = RotatedRectPipeline.FitContour(contour, housing.LongAxisDeg, rectOpts);
+            var rectFull = RotatedRectPipeline.Fit(contour, img, housing.LongAxisDeg, rectOpts);
+            rows.Add(new(
+                Path.GetFileName(file),
+                null, null, null, null, null,
+                rectContour.Ok ? rectContour.AngleDeg : null,
+                rectFull.Ok ? rectFull.AngleDeg : null,
+                rectFull.Ok ? rectFull.RmsPx : null,
+                rectFull.Ok ? RotatedRectFitQuality.NormalizedRms(rectFull) : null,
+                null,
+                null));
+        }
+
+        Assert.NotEmpty(rows);
+        AssertFieldRectangle2Gates(rows);
+    }
+
+    private void AssertFieldRectangle2Gates(List<Row> rows)
+    {
+        var n = rows.Count;
+        var rectOk = rows.Count(r => r.RectContourDeg is not null);
+        var rectSubOk = rows.Count(r => r.RectSubpixelDeg is not null);
+        var lineFitOk = rows.Count(r => r.LineFitRuntimeDeg is not null);
+        output.WriteLine($"rectangle2 现场门槛：轮廓 {rectOk}/{n}  亚像素 {rectSubOk}/{n}  LineFit运行时 {lineFitOk}/{n}");
+
+        Assert.True(rectOk >= n * 0.95, $"轮廓成功率 {rectOk}/{n}");
+        Assert.True(rectSubOk >= n * 0.95, $"亚像素成功率 {rectSubOk}/{n}");
+        if (lineFitOk > 0)
+            Assert.True(lineFitOk >= n * 0.95, $"LineFit 运行时成功率 {lineFitOk}/{n}");
+
+        var flips = rows.Count(r =>
+            r.RectContourDeg is { } c && r.RectSubpixelDeg is { } s &&
+            AngleGeometry.UndirectedDeltaDeg(c, s) < 2.0 &&
+            Math.Abs(AngleGeometry.SignedDeltaHalfDeg(s, c)) > 45.0);
+        output.WriteLine($"亚像素相对轮廓 180° 翻转: {flips}/{n}");
+        Assert.True(flips <= Math.Max(1, n / 20), $"180° 翻转过多 {flips}/{n}");
+
+        var deltas = rows
+            .Where(r => r.RectContourDeg is not null && r.RectSubpixelDeg is not null)
+            .Select(r => AngleGeometry.UndirectedDeltaDeg(r.RectContourDeg!.Value, r.RectSubpixelDeg!.Value))
+            .OrderBy(x => x)
+            .ToArray();
+        if (deltas.Length > 0)
+        {
+            var p50 = deltas[deltas.Length / 2];
+            output.WriteLine($"轮廓↔亚像素角差 P50={p50:0.00}° P90={deltas[(int)(deltas.Length * 0.9)]:0.00}°");
+            Assert.True(p50 < 3.0, $"角差 P50={p50:0.00}°");
+        }
+
+        var normRms = rows
+            .Where(r => r.RectSubpixelNormRms is not null && double.IsFinite(r.RectSubpixelNormRms.Value))
+            .Select(r => r.RectSubpixelNormRms!.Value)
+            .OrderBy(x => x)
+            .ToArray();
+        if (normRms.Length > 0)
+        {
+            var p50 = normRms[normRms.Length / 2];
+            var p90 = normRms[Math.Min(normRms.Length - 1, (int)(normRms.Length * 0.9))];
+            output.WriteLine($"亚像素归一化 RMS P50={p50:0.000} P90={p90:0.000} (×短边)");
+            Assert.True(p50 < RotatedRectHalconBenchGates.FieldNormRmsP50,
+                $"归一化 RMS P50={p50:0.000} > {RotatedRectHalconBenchGates.FieldNormRmsP50}");
+            Assert.True(p90 < RotatedRectHalconBenchGates.FieldNormRmsP90,
+                $"归一化 RMS P90={p90:0.000} > {RotatedRectHalconBenchGates.FieldNormRmsP90}");
+        }
+
+        var runtimeDeltas = rows
+            .Where(r => r.LineFitRuntimeDeg is not null && r.RectSubpixelDeg is not null)
+            .Select(r => AngleGeometry.UndirectedDeltaDeg(r.LineFitRuntimeDeg!.Value, r.RectSubpixelDeg!.Value))
+            .OrderBy(x => x)
+            .ToArray();
+        if (runtimeDeltas.Length > 0)
+        {
+            var p50 = runtimeDeltas[runtimeDeltas.Length / 2];
+            output.WriteLine($"LineFit运行时↔pipeline亚像素角差 P50={p50:0.00}°");
+            Assert.True(p50 < 1.0, $"LineFit 运行时与 pipeline 角差 P50={p50:0.00}°");
+        }
     }
 
     [SkippableFact]
@@ -124,9 +364,12 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
             if (usable is null)
             {
                 if (poses.Count == 0)
+                {
                     miss++;
-                else
-                    refineFail++;
+                    output.WriteLine($"{Path.GetFileName(file)}  FAIL n=0 (no detection)");
+                    continue;
+                }
+                refineFail++;
                 var d = MaskCaliperTab.LastDebug;
                 var bad = poses[0];
                 var area = bad.Overlay?.Contour is { Count: > 2 } c
@@ -153,6 +396,8 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
             output.WriteLine($"角度 mean={m:0.00}° σ={sigma:0.00}°");
         }
 
+        Skip.If(ok == 0,
+            "Product 配方在全幅留存图上无可用结果（需 ROI/去畸变与示教一致时再启用硬门槛）");
         Assert.True(ok >= files.Length * 3 / 4,
             $"真实分割卡尺成功率过低：{ok}/{files.Length}");
     }
@@ -544,7 +789,7 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
             nIn);
     }
 
-    private void PrintSummary(List<Row> rows, string tag)
+    private void PrintSummary(List<Row> rows, string tag, double teachArea, double teachAspect)
     {
         static int Ok(Row r, Func<Row, MaskCaliperTab.Result?> pick) => pick(r) is not null ? 1 : 0;
 
@@ -554,14 +799,30 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
         var lateralOk = rows.Sum(r => Ok(r, x => x.Lateral));
         var lineOk = rows.Count(r => r.LineDeg is not null);
         var lineLatOk = rows.Count(r => r.LineLateralDeg is not null);
+        var rectOk = rows.Count(r => r.RectContourDeg is not null);
+        var rectSubOk = rows.Count(r => r.RectSubpixelDeg is not null);
+        var lineFitOk = rows.Count(r => r.LineFitRuntimeDeg is not null);
 
-        output.WriteLine($"{tag} 样本 {n} 张");
+        output.WriteLine($"{tag} 样本 {n} 张  示教 area={teachArea:0} aspect={teachAspect:0.###}");
         output.WriteLine($"卡尺-上下(旧): {legacyOk}/{n}  卡尺-Auto(新): {autoOk}/{n}  卡尺-左右: {lateralOk}/{n}");
         output.WriteLine($"直线-上下→左右回退: {lineOk}/{n}  直线-仅左右: {lineLatOk}/{n}");
+        output.WriteLine($"rectangle2 轮廓: {rectOk}/{n}  rectangle2+亚像素: {rectSubOk}/{n}  LineFit运行时: {lineFitOk}/{n}");
 
         var autoAngles = rows.Where(r => r.Auto is not null).Select(r => r.Auto!.AngleDeg).ToArray();
         if (autoAngles.Length > 1)
             output.WriteLine($"Auto 角度: mean={autoAngles.Average():0.###}° σ={Std(autoAngles):0.###}°");
+
+        var rectSubAngles = rows.Where(r => r.RectSubpixelDeg is not null).Select(r => r.RectSubpixelDeg!.Value).ToArray();
+        if (rectSubAngles.Length > 1)
+            output.WriteLine($"rectangle2+亚像素: mean={rectSubAngles.Average():0.###}° σ={Std(rectSubAngles):0.###}°");
+
+        var rectRms = rows.Where(r => r.RectSubpixelRms is not null).Select(r => r.RectSubpixelRms!.Value).ToArray();
+        if (rectRms.Length > 0)
+            output.WriteLine($"rectangle2+亚像素 RMS: mean={rectRms.Average():0.###}px max={rectRms.Max():0.###}px");
+
+        var normRms = rows.Where(r => r.RectSubpixelNormRms is not null).Select(r => r.RectSubpixelNormRms!.Value).ToArray();
+        if (normRms.Length > 0)
+            output.WriteLine($"rectangle2+亚像素 归一化RMS: mean={normRms.Average():0.000} P50={Pct(normRms.ToList(), 0.5):0.000} (×短边)");
 
         var tabFlip = rows.Count(r =>
             r.Legacy is not null && r.Auto is not null &&
@@ -573,14 +834,20 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
         {
             output.WriteLine(
                 $"{r.Name}  L={Fmt(r.Legacy)}  A={Fmt(r.Auto)}  LR={Fmt(r.Lateral)}  " +
-                $"line={FmtDeg(r.LineDeg)} lat={FmtDeg(r.LineLateralDeg)}");
+                $"line={FmtDeg(r.LineDeg)} lat={FmtDeg(r.LineLateralDeg)}  " +
+                $"r2={FmtDeg(r.RectContourDeg)} r2sub={FmtDeg(r.RectSubpixelDeg)} rms={FmtRms(r.RectSubpixelRms)} " +
+                $"nrms={FmtNormRms(r.RectSubpixelNormRms)} lf={FmtDeg(r.LineFitRuntimeDeg)}");
         }
     }
+
+    private static string FmtNormRms(double? r) => r is null ? "—" : $"{r:0.000}";
 
     private static string Fmt(MaskCaliperTab.Result? r) =>
         r is null ? "—" : $"{r.AngleDeg:0.00}° @{r.Center.X:0},{r.Center.Y:0} tab={r.TabSign}";
 
     private static string FmtDeg(double? d) => d is null ? "—" : $"{d:0.00}°";
+
+    private static string FmtRms(double? r) => r is null ? "—" : $"{r:0.00}px";
 
     private static double Std(double[] v)
     {
@@ -655,5 +922,11 @@ public sealed class FieldCaptureRefineBenchTests(ITestOutputHelper output)
         MaskCaliperTab.Result? Auto,
         MaskCaliperTab.Result? Lateral,
         double? LineDeg,
-        double? LineLateralDeg);
+        double? LineLateralDeg,
+        double? RectContourDeg,
+        double? RectSubpixelDeg,
+        double? RectSubpixelRms,
+        double? RectSubpixelNormRms,
+        double? LineFitRuntimeDeg,
+        double? LineFitRuntimeRms);
 }

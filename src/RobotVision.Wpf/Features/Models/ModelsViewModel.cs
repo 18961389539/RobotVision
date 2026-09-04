@@ -605,6 +605,7 @@ public partial class ModelsViewModel : ObservableObject, ICommitPendingEdits, ID
     /// <summary>保存测试参数（尽力而为：失败只忽略，不影响功能）。</summary>
     private void SavePrefs()
     {
+        this.Commit();
         try
         {
             var prefs = new TestPrefs(SelectedFile?.Name, TestImageFolder, SelectedTask,

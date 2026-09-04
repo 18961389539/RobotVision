@@ -25,7 +25,6 @@ namespace RobotVision.Infrastructure.Cameras;
 /// </summary>
 public sealed class GigEVisionCamera : ICamera, IExposureControl
 {
-    private static readonly TimeSpan DiscoverTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
 
     private readonly string _deviceId;
@@ -80,13 +79,13 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
         ObjectDisposedException.ThrowIf(_disposed, this);
         ct.ThrowIfCancellationRequested();
 
-        lock (_grabLock)
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            if (_disposed)
-                throw new VisionException(VisionErrorCode.CameraGrabFailed, $"GigE Vision 相机 {Id} 已释放");
-
-            for (var attempt = 0; attempt < 2; attempt++)
+            lock (_grabLock)
             {
+                if (_disposed)
+                    throw new VisionException(VisionErrorCode.CameraGrabFailed, $"GigE Vision 相机 {Id} 已释放");
+
                 var needConnect = !_connected || _session is null || _stream is null || attempt > 0;
                 if (needConnect && !ConnectCore())
                 {
@@ -94,12 +93,18 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
                         continue;
                     break;
                 }
+            }
 
-                try
+            try
+            {
+                var grabWatch = Stopwatch.StartNew();
+                // 等帧不占 _grabLock：取消/Dispose/调光可在超时预算内插进，不必等满 grabTimeout。
+                var frame = WaitForFrame(ct);
+                var acquireMs = grabWatch.Elapsed.TotalMilliseconds;
+                lock (_grabLock)
                 {
-                    var grabWatch = Stopwatch.StartNew();
-                    var frame = WaitForFrame(ct);
-                    var acquireMs = grabWatch.Elapsed.TotalMilliseconds;
+                    if (_disposed)
+                        throw new VisionException(VisionErrorCode.CameraGrabFailed, $"GigE Vision 相机 {Id} 已释放");
                     Mat? mat = ToMat(frame);
                     try
                     {
@@ -113,61 +118,51 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
                         mat?.Dispose();
                     }
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (TimeoutException ex)
-                {
-                    throw new VisionException(VisionErrorCode.CameraGrabFailed,
-                        $"GigE Vision 相机 {Id} 采集超时（{_grabTimeoutMs}ms）: {ex.Message}");
-                }
-                catch (VisionException vex) when (attempt == 0)
-                {
-                    _connected = false;
-                    if (_log is { } log)
-                        GigEVisionCameraLog.GrabFailedRetry(log, Id, vex.Message);
-                }
-                catch (Exception ex) when (attempt == 0)
-                {
-                    _connected = false;
-                    if (_log is { } log)
-                        GigEVisionCameraLog.GrabExceptionRetry(log, ex, Id);
-                }
-                catch (VisionException vex) when (attempt == 1)
-                {
-                    throw new VisionException(VisionErrorCode.CameraGrabFailed,
-                        $"GigE Vision 相机 {Id} 重连后采集仍失败: {vex.Message}");
-                }
-                catch (Exception ex) when (attempt == 1)
-                {
-                    throw new VisionException(VisionErrorCode.CameraGrabFailed,
-                        $"GigE Vision 相机 {Id} 重连后采集异常: {ex.Message}", ex);
-                }
             }
-
-            throw new VisionException(VisionErrorCode.CameraGrabFailed,
-                $"GigE Vision 相机 {Id} 采集失败且自动重连未恢复");
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (TimeoutException ex)
+            {
+                throw new VisionException(VisionErrorCode.CameraGrabFailed,
+                    $"GigE Vision 相机 {Id} 采集超时（{_grabTimeoutMs}ms）: {ex.Message}");
+            }
+            catch (VisionException vex) when (attempt == 0)
+            {
+                lock (_grabLock)
+                    _connected = false;
+                if (_log is { } log)
+                    GigEVisionCameraLog.GrabFailedRetry(log, Id, vex.Message);
+            }
+            catch (Exception ex) when (attempt == 0)
+            {
+                lock (_grabLock)
+                    _connected = false;
+                if (_log is { } log)
+                    GigEVisionCameraLog.GrabExceptionRetry(log, ex, Id);
+            }
+            catch (VisionException vex) when (attempt == 1)
+            {
+                throw new VisionException(VisionErrorCode.CameraGrabFailed,
+                    $"GigE Vision 相机 {Id} 重连后采集仍失败: {vex.Message}");
+            }
+            catch (Exception ex) when (attempt == 1)
+            {
+                throw new VisionException(VisionErrorCode.CameraGrabFailed,
+                    $"GigE Vision 相机 {Id} 重连后采集异常: {ex.Message}", ex);
+            }
         }
+
+        throw new VisionException(VisionErrorCode.CameraGrabFailed,
+            $"GigE Vision 相机 {Id} 采集失败且自动重连未恢复");
     }
 
     /// <summary>网口广播发现（含不同网段的 APIPA 相机）。</summary>
-    public static IReadOnlyList<GigECameraInfo> DiscoverCameras() => Discover(DiscoverTimeout);
+    public static IReadOnlyList<GigECameraInfo> DiscoverCameras() => GigECameraDiscovery.DiscoverCameras();
 
     /// <summary>枚举网口可见的 GigE Vision 相机。失败返回空列表，不抛异常。</summary>
-    public static IReadOnlyList<string> EnumerateDevices()
-    {
-        try
-        {
-            return Discover(DiscoverTimeout)
-                .Select(FormatDevice)
-                .ToList();
-        }
-        catch (Exception)
-        {
-            return [];
-        }
-    }
+    public static IReadOnlyList<string> EnumerateDevices() => GigECameraDiscovery.EnumerateDevices();
 
     public bool TrySetExposureTimeUs(double value)
     {
@@ -230,20 +225,20 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
             DisconnectCore();
 
             GigECameraInfo info;
-            if (TryParseIpv4(_deviceId, out var ip) && GigEForceIp.IsOnLocalFixedSubnet(ip))
+            if (GigECameraDiscovery.TryParseIpv4(_deviceId, out var ip) && GigEForceIp.IsOnLocalFixedSubnet(ip))
             {
                 info = new GigECameraInfo { IpAddress = ip };
             }
             else
             {
-                var cameras = Discover(DiscoverTimeout);
+                var cameras = GigECameraDiscovery.DiscoverCameras();
                 if (cameras.Count == 0)
                     throw new InvalidOperationException("网口上未发现 GigE Vision 相机（检查网线、IP 网段、网卡与 UDP 3956 防火墙）");
 
-                info = SelectDevice(cameras, _deviceId)
+                info = GigECameraDiscovery.SelectDevice(cameras, _deviceId)
                     ?? throw new InvalidOperationException(
                         CameraDeviceSelection.UnresolvedMessage(
-                            Id, _deviceId, cameras.Count, string.Join("; ", cameras.Select(FormatDevice))));
+                            Id, _deviceId, cameras.Count, string.Join("; ", cameras.Select(GigECameraDiscovery.FormatDevice))));
                 info = GigEForceIp.EnsureReachable(info, _log);
             }
 
@@ -644,102 +639,6 @@ public sealed class GigEVisionCamera : ICamera, IExposureControl
         _disposed = true;
         lock (_grabLock)
             DisconnectCore();
-    }
-
-    private static IReadOnlyList<GigECameraInfo> Discover(TimeSpan timeout)
-    {
-        return RunSync(ct => DiscoverOnAllInterfacesAsync(timeout, ct), timeout + TimeSpan.FromSeconds(2));
-    }
-
-    /// <summary>
-    /// 在每个本机 IPv4 网卡上绑定后广播发现。默认 255.255.255.255 会走默认路由（常为 Wi-Fi），
-    /// 相机所在的 USB 网口（如 169.254.x）收不到包。
-    /// </summary>
-    private static async Task<IReadOnlyList<GigECameraInfo>> DiscoverOnAllInterfacesAsync(
-        TimeSpan timeout, CancellationToken ct)
-    {
-        var locals = LocalIpv4Addresses();
-        if (locals.Count == 0)
-            locals.Add(IPAddress.Any);
-
-        var tasks = locals.Select(local => DiscoverOnInterfaceAsync(local, timeout, ct));
-        var batches = await Task.WhenAll(tasks);
-        var found = new Dictionary<string, GigECameraInfo>(StringComparer.Ordinal);
-        foreach (var camera in batches.SelectMany(b => b))
-            found.TryAdd(camera.IpAddress.ToString(), camera);
-        return found.Values.ToList();
-    }
-
-    private static async Task<IReadOnlyList<GigECameraInfo>> DiscoverOnInterfaceAsync(
-        IPAddress local, TimeSpan timeout, CancellationToken ct)
-    {
-        try
-        {
-            using var client = new UdpClient(new IPEndPoint(local, 0));
-            using var transport = new UdpTransportAdapter(client);
-            using var discovery = new GigEDiscovery(transport);
-            return await discovery.DiscoverAsync((int)timeout.TotalMilliseconds, cancellationToken: ct);
-        }
-        catch (Exception)
-        {
-            return [];
-        }
-    }
-
-    private static List<IPAddress> LocalIpv4Addresses()
-    {
-        var list = new List<IPAddress>();
-        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (nic.OperationalStatus != OperationalStatus.Up)
-                continue;
-            if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-                continue;
-            foreach (var ua in nic.GetIPProperties().UnicastAddresses)
-            {
-                if (ua.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ua.Address))
-                    list.Add(ua.Address);
-            }
-        }
-        return list;
-    }
-
-    private static bool TryParseIpv4(string deviceId, out IPAddress ip) =>
-        IPAddress.TryParse(deviceId, out ip!) && ip.AddressFamily == AddressFamily.InterNetwork;
-
-    private static GigECameraInfo? SelectDevice(IReadOnlyList<GigECameraInfo> cameras, string deviceId) =>
-        CameraDeviceSelection.Resolve(cameras, deviceId, static (camera, needle) =>
-            string.Equals(camera.SerialNumber, needle, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(camera.IpAddress.ToString(), needle, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(camera.UserDefinedName, needle, StringComparison.OrdinalIgnoreCase)
-            || MacMatches(camera.MacAddress, needle));
-
-    private static bool MacMatches(byte[] mac, string deviceId)
-    {
-        if (mac.Length < 6)
-            return false;
-        var dashed = FormatMac(mac);
-        var compact = dashed.Replace("-", "", StringComparison.Ordinal);
-        var needle = deviceId.Replace(":", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal);
-        return string.Equals(dashed, deviceId, StringComparison.OrdinalIgnoreCase)
-               || string.Equals(compact, needle, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string FormatMac(byte[] mac) =>
-        mac.Length >= 6
-            ? string.Join("-", mac.Take(6).Select(b => b.ToString("X2", CultureInfo.InvariantCulture)))
-            : "";
-
-    private static string FormatDevice(GigECameraInfo info)
-    {
-        var id = string.IsNullOrWhiteSpace(info.SerialNumber)
-            ? info.IpAddress.ToString()
-            : info.SerialNumber;
-        var name = string.Join(" ", new[] { info.ManufacturerName, info.ModelName }
-            .Where(s => !string.IsNullOrWhiteSpace(s)));
-        if (name.Length == 0)
-            name = info.UserDefinedName;
-        return $"{id} | {info.IpAddress} | {name}";
     }
 
     private static T RunSync<T>(Func<CancellationToken, Task<T>> work, TimeSpan timeout)

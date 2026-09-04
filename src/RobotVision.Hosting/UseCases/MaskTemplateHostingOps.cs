@@ -1,24 +1,23 @@
 using OpenCvSharp;
-using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.JlVision;
 
 namespace RobotVision.Hosting;
 
-/// <summary>掩码模板匹配基础设施的统一入口（Hosting 内聚 Infrastructure 策略细节）。</summary>
+/// <summary>掩码模板匹配基础设施的统一入口（Hosting 内聚转正裁剪与 PNG 编解码）。</summary>
 internal static class MaskTemplateHostingOps
 {
-    public static Mat DecodeTemplatePng(string base64Png) => MaskTemplateMatcher.DecodeTemplatePng(base64Png);
+    public static Mat DecodeTemplatePng(string base64Png) => JlTemplateIo.DecodePng(base64Png);
 
-    public static string EncodeTemplatePng(Mat template) => MaskTemplateMatcher.EncodeTemplatePng(template);
+    public static string EncodeTemplatePng(Mat template) => JlTemplateIo.EncodePng(template);
 
-    public static UprightCropResult UprightCrop(Mat image, Point2f[] contour, double marginRatio) =>
-        MaskTemplateMatcher.UprightCrop(image, contour, marginRatio);
+    public static JlUprightCrop UprightCrop(Mat image, Point2f[] contour, double marginRatio) =>
+        JlTemplateIo.UprightCrop(image, contour, marginRatio);
 
     public static Mat CropUprightBySourceRect(
-        UprightCropResult crop,
+        JlUprightCrop crop,
         double sourceX,
         double sourceY,
         double sourceWidth,
         double sourceHeight) =>
-        MaskTemplateMatcher.CropUprightBySourceRect(crop, sourceX, sourceY, sourceWidth, sourceHeight);
+        JlTemplateIo.CropUprightBySourceRect(crop, sourceX, sourceY, sourceWidth, sourceHeight);
 }

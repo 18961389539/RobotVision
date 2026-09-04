@@ -24,15 +24,20 @@ internal sealed partial class RecipeSetupWizardViewModel
         RequestClose?.Invoke();
     }
 
+    private void FlushPendingNumbers()
+    {
+        this.Commit();
+        _host.CommitEdits();
+    }
+
     private void ApplyRecommendationToEditor()
     {
+        FlushPendingNumbers();
         if (_chosen is null)
             return;
         var chosen = _chosen;
         var editor = _host.Editor;
         editor.AngleMode = chosen.AngleMode;
-        if (Constraints.ExpectedCount > 0)
-            editor.Template.ExpectedCount = Constraints.ExpectedCount;
         if (chosen.AngleMode == AngleMode.MaskTemplate && chosen.Refine is { } refine)
         {
             editor.Template.RefineMethod = refine;
@@ -53,6 +58,9 @@ internal sealed partial class RecipeSetupWizardViewModel
             else if (refine == SegmentRefineMethod.Sift)
                 _host.Editor.Template.Roi = null;
         }
+
+        editor.Template.ExpectedCount = Math.Clamp(Constraints.ExpectedCount, 0, 20);
+        RecipeEditorModeCleanup.Apply(editor);
 
         _host.RefreshEditorBindings();
         OnPropertyChanged(nameof(ShowTeachActions));
@@ -85,7 +93,7 @@ internal sealed partial class RecipeSetupWizardViewModel
         if (tune.MatchThreshold is { } th)
             t.MatchThreshold = th;
         if (tune.RefineRangeDeg is { } range)
-            t.RefineRangeDeg = range;
+            t.SetSymmetricRefineRange(range);
         if (tune.UseEdgeMatch is { } edge)
             t.UseEdgeMatch = edge;
         if (tune.ExpectedCount is { } n)

@@ -38,12 +38,14 @@ public sealed partial class RecipeRoiEditor : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasRoiRefFrame))]
     [NotifyPropertyChangedFor(nameof(RoiPxX), nameof(RoiPxY), nameof(RoiPxWidth), nameof(RoiPxHeight))]
+    [NotifyPropertyChangedFor(nameof(SecondaryRoiPxX), nameof(SecondaryRoiPxY), nameof(SecondaryRoiPxWidth), nameof(SecondaryRoiPxHeight))]
     [NotifyPropertyChangedFor(nameof(RoiRefFrameHint), nameof(RoiRatioHint))]
     private int _roiRefWidth;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasRoiRefFrame))]
     [NotifyPropertyChangedFor(nameof(RoiPxX), nameof(RoiPxY), nameof(RoiPxWidth), nameof(RoiPxHeight))]
+    [NotifyPropertyChangedFor(nameof(SecondaryRoiPxX), nameof(SecondaryRoiPxY), nameof(SecondaryRoiPxWidth), nameof(SecondaryRoiPxHeight))]
     [NotifyPropertyChangedFor(nameof(RoiRefFrameHint), nameof(RoiRatioHint))]
     private int _roiRefHeight;
 
@@ -168,6 +170,76 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         });
     }
 
+    public bool UseSecondaryRoi
+    {
+        get => Editor.Blob.SecondaryRoi is not null;
+        set
+        {
+            if (value)
+            {
+                var addedPrimary = EnsurePrimaryRoiForDualBlob();
+                Editor.Blob.SecondaryRoi ??= new Roi(0.55, 0.15, 0.4, 0.7);
+                if (addedPrimary)
+                    NotifyRoiChanged();
+            }
+            else
+                Editor.Blob.SecondaryRoi = null;
+            NotifySecondaryRoiChanged();
+        }
+    }
+
+    public double SecondaryRoiPxX
+    {
+        get => Editor.Blob.SecondaryRoi is { } r && RoiRefWidth > 0 ? Math.Round(r.X * RoiRefWidth) : 0;
+        set
+        {
+            if (RoiRefWidth <= 0 || Editor.Blob.SecondaryRoi is not { } r)
+                return;
+            var w = Math.Max(1, (int)Math.Round(r.Width * RoiRefWidth));
+            var px = Math.Clamp((int)Math.Round(value), 0, Math.Max(0, RoiRefWidth - w));
+            SetSecondaryRoi(nameof(SecondaryRoiPxX), x => x with { X = px / (double)RoiRefWidth });
+        }
+    }
+
+    public double SecondaryRoiPxY
+    {
+        get => Editor.Blob.SecondaryRoi is { } r && RoiRefHeight > 0 ? Math.Round(r.Y * RoiRefHeight) : 0;
+        set
+        {
+            if (RoiRefHeight <= 0 || Editor.Blob.SecondaryRoi is not { } r)
+                return;
+            var h = Math.Max(1, (int)Math.Round(r.Height * RoiRefHeight));
+            var px = Math.Clamp((int)Math.Round(value), 0, Math.Max(0, RoiRefHeight - h));
+            SetSecondaryRoi(nameof(SecondaryRoiPxY), v => v with { Y = px / (double)RoiRefHeight });
+        }
+    }
+
+    public double SecondaryRoiPxWidth
+    {
+        get => Editor.Blob.SecondaryRoi is { } r && RoiRefWidth > 0 ? Math.Round(r.Width * RoiRefWidth) : 0;
+        set
+        {
+            if (RoiRefWidth <= 0 || Editor.Blob.SecondaryRoi is not { } r)
+                return;
+            var x = (int)Math.Round(r.X * RoiRefWidth);
+            var px = Math.Clamp((int)Math.Round(value), 1, Math.Max(1, RoiRefWidth - x));
+            SetSecondaryRoi(nameof(SecondaryRoiPxWidth), v => v with { Width = px / (double)RoiRefWidth });
+        }
+    }
+
+    public double SecondaryRoiPxHeight
+    {
+        get => Editor.Blob.SecondaryRoi is { } r && RoiRefHeight > 0 ? Math.Round(r.Height * RoiRefHeight) : 0;
+        set
+        {
+            if (RoiRefHeight <= 0 || Editor.Blob.SecondaryRoi is not { } r)
+                return;
+            var y = (int)Math.Round(r.Y * RoiRefHeight);
+            var px = Math.Clamp((int)Math.Round(value), 1, Math.Max(1, RoiRefHeight - y));
+            SetSecondaryRoi(nameof(SecondaryRoiPxHeight), v => v with { Height = px / (double)RoiRefHeight });
+        }
+    }
+
     public bool UseTemplateRoi
     {
         get => Editor.Template?.Roi is not null;
@@ -239,7 +311,7 @@ public sealed partial class RecipeRoiEditor : ObservableObject
     public bool HasRefineLine => Editor.Template?.RefineLine is not null;
 
     public string RefineLineStatusText => Editor.Template?.RefineLine is not { } line
-        ? "未示教基准线（直线拟合无向 [0,180)，不判头尾）"
+        ? "未手动画基准线：默认沿长轴自动采头尾明暗（较亮一端为头）"
         : line.HasReliableSignature
             ? $"基准线已示教：头尾明暗差 {line.HeadMinusTailGray:0.#}（可消 180°，输出有向角）"
             : $"基准线已画，但头尾明暗差仅 {line.HeadMinusTailGray:0.#}（<4，对称件判不了头尾，建议端头留明暗差或改用卡尺）";
@@ -342,6 +414,26 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         NotifyTemplateRoiChanged();
     }
 
+    public void ApplySecondaryRoiFromRect(double centerXPx, double centerYPx, double widthPx, double heightPx)
+    {
+        if (RoiRefWidth <= 0 || RoiRefHeight <= 0)
+            return;
+        var addedPrimary = EnsurePrimaryRoiForDualBlob();
+        Editor.Blob.SecondaryRoi = RoiFromCenterPx(centerXPx, centerYPx, widthPx, heightPx, RoiRefWidth, RoiRefHeight);
+        if (addedPrimary)
+            NotifyRoiChanged();
+        NotifySecondaryRoiChanged();
+    }
+
+    /// <summary>双 ROI 时 BLOB1 必须有 ROI1；未设则给左侧默认框，避免退回全图误检 ROI2 里的斑。</summary>
+    private bool EnsurePrimaryRoiForDualBlob()
+    {
+        if (Editor.Roi is not null)
+            return false;
+        Editor.Roi = new Roi(0.05, 0.15, 0.4, 0.7);
+        return true;
+    }
+
     /// <summary>
     /// 用当前结果图当框选底板，不再 Grab。文件夹相机会进下一张，看起来像换图。
     /// <paramref name="keepCurrentPreview"/> 为 true 时不改 PreviewImage，避免切到 ROI 预览页。
@@ -411,13 +503,18 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         OnPropertyChanged(nameof(TemplateRoiPxY));
         OnPropertyChanged(nameof(TemplateRoiPxWidth));
         OnPropertyChanged(nameof(TemplateRoiPxHeight));
+        OnPropertyChanged(nameof(UseSecondaryRoi));
+        OnPropertyChanged(nameof(SecondaryRoiPxX));
+        OnPropertyChanged(nameof(SecondaryRoiPxY));
+        OnPropertyChanged(nameof(SecondaryRoiPxWidth));
+        OnPropertyChanged(nameof(SecondaryRoiPxHeight));
         OnPropertyChanged(nameof(HasRefineLine));
         OnPropertyChanged(nameof(RefineLineStatusText));
     }
 
     public void NotifyCanExecuteChanged() => PreviewRoiCommand.NotifyCanExecuteChanged();
 
-    private bool CanPreviewRoi => !_host.IsBusy;
+    private bool CanPreviewRoi => !_host.IsBusy && !_host.IsPipelineOccupied;
 
     [RelayCommand(CanExecute = nameof(CanPreviewRoi))]
     private async Task PreviewRoiAsync()
@@ -528,6 +625,27 @@ public sealed partial class RecipeRoiEditor : ObservableObject
         OnPropertyChanged(nameof(TemplateRoiPxY));
         OnPropertyChanged(nameof(TemplateRoiPxWidth));
         OnPropertyChanged(nameof(TemplateRoiPxHeight));
+        _host.NotifyDirty();
+        if (callerProperty != null)
+            OnPropertyChanged(callerProperty);
+    }
+
+    private void SetSecondaryRoi(string propertyName, Func<Roi, Roi> update)
+    {
+        if (Editor.Blob.SecondaryRoi is { } roi)
+        {
+            Editor.Blob.SecondaryRoi = update(roi);
+            NotifySecondaryRoiChanged(propertyName);
+        }
+    }
+
+    private void NotifySecondaryRoiChanged(string? callerProperty = null)
+    {
+        OnPropertyChanged(nameof(UseSecondaryRoi));
+        OnPropertyChanged(nameof(SecondaryRoiPxX));
+        OnPropertyChanged(nameof(SecondaryRoiPxY));
+        OnPropertyChanged(nameof(SecondaryRoiPxWidth));
+        OnPropertyChanged(nameof(SecondaryRoiPxHeight));
         _host.NotifyDirty();
         if (callerProperty != null)
             OnPropertyChanged(callerProperty);

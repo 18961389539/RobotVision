@@ -103,7 +103,7 @@
             </UniformGrid>
         </ui:Card>
 
-        <!-- 默认打开「请求历史」：PING / 未知序列号等不会进入「运行统计"-->
+        <!-- 默认打开「请求历史」：PING / 未知序列号等不会进入「运行统计） -->
         <TabControl Grid.Row="3" SelectedIndex="0">
             <TabItem>
                 <TabItem.Header>
@@ -193,7 +193,7 @@
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </TabItem.Header>
-                <!-- 仅统计进入 VisionService 的配方触发；TCP 协议错误如 1001 未知序列号等）只在「请求历史"-->
+                <!-- 仅统计进入 VisionService 的配方触发；TCP 协议错误如 1001 未知序列号等）只在「请求历史） -->
                 <Grid>
                     <TextBlock Text="暂无配方触发。此处只统计真正跑过视觉管线的配方；#1 未绑定序列号时只会在「请求历史」出现 ERR,1001"
                                TextWrapping="Wrap" Margin="8" FontSize="12"
@@ -278,7 +278,7 @@
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </TabItem.Header>
-                <!-- 方案 A：连接卡片流（替代 DataGrid"-->
+                <!-- 方案 A：连接卡片流（替代 DataGrid） -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
                     <ItemsControl ItemsSource="{Binding Clients}">
                         <ItemsControl.ItemsPanel>

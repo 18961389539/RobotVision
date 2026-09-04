@@ -1,0 +1,330 @@
+<UserControl x:Class="RobotVision.WpfHost.Features.CalibrationWizard.CalibrationWizardParamPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:RobotVision.WpfHost.Features.CalibrationWizard"
+             xmlns:host="clr-namespace:RobotVision.WpfHost.Shared">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/RobotVision.Wpf;component/Shared/PagePanelResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="PanelIntrinsic" TargetType="StackPanel">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding Mode}" Value="{x:Static vm:WizardMode.Intrinsic}">
+                        <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="PanelExtrinsic" TargetType="StackPanel">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding Mode}" Value="{x:Static vm:WizardMode.Extrinsic}">
+                        <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="PanelRotation" TargetType="StackPanel">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding Mode}" Value="{x:Static vm:WizardMode.Rotation}">
+                        <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="PanelPolynomial" TargetType="StackPanel">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding Mode}" Value="{x:Static vm:WizardMode.Polynomial}">
+                        <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <Border Width="420" Margin="8,0,0,0" VerticalAlignment="Stretch" ClipToBounds="True"
+            Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+            BorderThickness="1" CornerRadius="6"
+            Visibility="{Binding IsParamPanelVisible,
+                Converter={StaticResource BoolToVisibilityConverter}}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid Margin="10,8,10,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ui:TextBlock Text="参数" FontTypography="BodyStrong" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="收起" Padding="8,3" FontSize="11"
+                        Command="{Binding ToggleParamPanelCommand}" />
+            </Grid>
+            <TabControl Grid.Row="1" Margin="6,0,6,8" Style="{StaticResource CockpitTabControl}">
+                <TabItem Header="标定">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,8,4,8"
+                                  host:ViewportPageLayout.IsolateWheel="True">
+                        <StackPanel>
+                            <!-- 内参参数 -->
+                            <StackPanel Style="{StaticResource PanelIntrinsic}" Margin="0,0,0,10">
+                                <ui:TextBlock FontTypography="BodyStrong" Text="棋盘格参数" Margin="0,0,0,8" />
+                                <UniformGrid Columns="3">
+                                    <StackPanel Margin="0,0,8,8">
+                                        <TextBlock Text="内角点列" Margin="0,0,0,4" FontSize="12" />
+                                        <ui:NumberBox Value="{Binding Cols}" Minimum="3" Maximum="30"
+                                                      SmallChange="1" SpinButtonPlacementMode="Inline" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,8">
+                                        <TextBlock Text="内角点行" Margin="0,0,0,4" FontSize="12" />
+                                        <ui:NumberBox Value="{Binding Rows}" Minimum="3" Maximum="30"
+                                                      SmallChange="1" SpinButtonPlacementMode="Inline" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Text="方格边长(mm)" Margin="0,0,0,4" FontSize="12" />
+                                        <ui:NumberBox Value="{Binding SquareMm}" Minimum="0.1" Maximum="100"
+                                                      SmallChange="0.5" SpinButtonPlacementMode="Inline" />
+                                    </StackPanel>
+                                </UniformGrid>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="已采集帧" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="12" />
+                                    <ui:TextBlock Grid.Column="1" Text="{Binding CollectedFrames}" VerticalAlignment="Center" />
+                                    <ui:Button Grid.Column="2" Content="清空采集" Command="{Binding ClearIntrinsicCommand}" />
+                                </Grid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:Button Content="加入当前" Appearance="Primary"
+                                               Command="{Binding CaptureFrameCommand}" />
+                                    <ui:TextBlock Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11"
+                                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                  Text="建议 15~25 帧" />
+                                </Grid>
+                            </StackPanel>
+
+                            <!-- 外参参数 -->
+                            <StackPanel Style="{StaticResource PanelExtrinsic}" Margin="0,0,0,10">
+                                <ui:TextBlock FontTypography="BodyStrong" Text="九点标定" Margin="0,0,0,6" />
+                                <ui:TextBlock FontSize="12"
+                                              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                              TextWrapping="Wrap" Margin="0,0,0,8"
+                                              Text="在图上依次点 9 个点（建议覆盖视场四角与中心），随后把示教器上的机器人坐标逐行抄入点表" />
+                                <UniformGrid Columns="2" Margin="0,0,0,8">
+                                    <StackPanel Margin="0,0,8,8">
+                                        <TextBlock Text="相机安装模式" Margin="0,0,0,4" FontSize="12" />
+                                        <ComboBox ItemsSource="{Binding MountOptions}" ToolTip="相机安装模式（如眼在手 / 眼在地）"
+                                                  DisplayMemberPath="Label" SelectedValuePath="Value"
+                                                  SelectedValue="{Binding SelectedMount}" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Text="标定平面 Z（可选）" Margin="0,0,0,4" FontSize="12" />
+                                        <ui:NumberBox Value="{Binding CalibrationPlaneZ}"
+                                                      SmallChange="0.1" SpinButtonPlacementMode="Inline" />
+                                    </StackPanel>
+                                </UniformGrid>
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SelectedMount}" Value="OnArm">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <ui:TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"
+                                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                  Text="OnArm：标定取图与生产拍照必须同一位姿（TCP 与 RZ 一致），换位姿须重标" />
+                                    <UniformGrid Columns="3">
+                                        <StackPanel Margin="0,0,8,8">
+                                            <TextBlock Text="拍照点 TCP X" Margin="0,0,0,4" FontSize="12" />
+                                            <ui:NumberBox Value="{Binding TeachTcpX}"
+                                                          SmallChange="0.1" SpinButtonPlacementMode="Inline" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,8">
+                                            <TextBlock Text="拍照点 TCP Y" Margin="0,0,0,4" FontSize="12" />
+                                            <ui:NumberBox Value="{Binding TeachTcpY}"
+                                                          SmallChange="0.1" SpinButtonPlacementMode="Inline" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,8">
+                                            <TextBlock Text="拍照点 RZ (°)" Margin="0,0,0,4" FontSize="12" />
+                                            <ui:NumberBox Value="{Binding TeachRzDeg}"
+                                                          SmallChange="1" SpinButtonPlacementMode="Inline" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- 多项式标定（单图模式） -->
+                            <StackPanel Style="{StaticResource PanelPolynomial}" Margin="0,0,0,10">
+                                <ui:TextBlock FontTypography="BodyStrong" Text="多项式标定（单图）" Margin="0,0,0,6" />
+                                <UniformGrid Columns="2" Margin="0,0,0,8">
+                                    <StackPanel Margin="0,0,8,8">
+                                        <TextBlock Text="输出坐标" Margin="0,0,0,4" FontSize="12" />
+                                        <ComboBox ItemsSource="{Binding SpaceOptions}" ToolTip="输出坐标空间（如机器人基坐标 / 相机坐标系）"
+                                                  DisplayMemberPath="Label" SelectedValuePath="Value"
+                                                  SelectedValue="{Binding SelectedSpace}" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Text="阶数(2/3)" Margin="0,0,0,4" FontSize="12" />
+                                        <ui:NumberBox Value="{Binding PolynomialOrder}" Minimum="2" Maximum="3"
+                                                      SmallChange="1" SpinButtonPlacementMode="Inline" />
+                                    </StackPanel>
+                                </UniformGrid>
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding PolynomialImageSpace}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <ui:TextBlock FontSize="11"
+                                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                  TextWrapping="Wrap"
+                                                  Text="免示教：目标坐标 = 棋盘平面毫米系（原点=棋盘首角点，沿棋盘行列方向）。棋盘放平在工件平面 → 取图 → 直接「计算」：像素→毫米的比例/畸变/旋转全部解出，无需任何示教点。输出毫米坐标（图像系语义，y 方向可能随棋盘摆放翻转，量值不受影响）" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding PolynomialImageSpace}" Value="False">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <ui:TextBlock FontSize="11"
+                                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                  TextWrapping="Wrap" Margin="0,0,0,8"
+                                                  Text="输出机器人系坐标：点选同一行的 2 个参考角点（自动吸附）并抄录机器人坐标（机器人带针尖对准示教）" />
+                                    <UniformGrid Columns="2" Margin="0,0,0,8">
+                                        <StackPanel Margin="0,0,8,8">
+                                            <TextBlock Text="安装模式" Margin="0,0,0,4" FontSize="12" />
+                                            <ComboBox ItemsSource="{Binding MountOptions}" ToolTip="相机安装模式（如眼在手 / 眼在地）"
+                                                      DisplayMemberPath="Label" SelectedValuePath="Value"
+                                                      SelectedValue="{Binding SelectedMount}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,8">
+                                            <TextBlock Text="位姿处理" Margin="0,0,0,4" FontSize="12" />
+                                            <ComboBox ItemsSource="{Binding ComposeOptions}" ToolTip="位姿合成方式（如何组合平移与旋转）"
+                                                      DisplayMemberPath="Label" SelectedValuePath="Value"
+                                                      SelectedValue="{Binding SelectedCompose}" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <StackPanel>
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SelectedMount}" Value="OnArm">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <UniformGrid Columns="3">
+                                            <StackPanel Margin="0,0,8,8">
+                                                <TextBlock Text="拍照点 TCP X" Margin="0,0,0,4" FontSize="12" />
+                                                <ui:NumberBox Value="{Binding TeachTcpX}"
+                                                              SmallChange="0.1" SpinButtonPlacementMode="Inline" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,8,8">
+                                                <TextBlock Text="拍照点 TCP Y" Margin="0,0,0,4" FontSize="12" />
+                                                <ui:NumberBox Value="{Binding TeachTcpY}"
+                                                              SmallChange="0.1" SpinButtonPlacementMode="Inline" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,0,8">
+                                                <TextBlock Text="拍照点 RZ (°)" Margin="0,0,0,4" FontSize="12" />
+                                                <ui:NumberBox Value="{Binding TeachRzDeg}"
+                                                              SmallChange="1" SpinButtonPlacementMode="Inline" />
+                                            </StackPanel>
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- 旋转中心参数 -->
+                            <StackPanel Style="{StaticResource PanelRotation}" Margin="0,0,0,10">
+                                <ui:TextBlock FontTypography="BodyStrong" Text="多角度标记点" Margin="0,0,0,6" />
+                                <ui:TextBlock FontSize="11"
+                                              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                              TextWrapping="Wrap" Margin="0,0,0,8"
+                                              Text="第 4 轴每转一个角度取一次图并点选标记点；建议 5~9 个等间隔角度。点表填 ≥ 3 个第4轴角可做方向自检" />
+                                <StackPanel Margin="0,0,0,8">
+                                    <TextBlock Text="工具零位偏角 δ(°)" Margin="0,0,0,4" FontSize="12" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ui:NumberBox Value="{Binding ToolOffsetDeg}"
+                                                      SmallChange="0.5" SpinButtonPlacementMode="Inline" />
+                                        <ui:Button Grid.Column="1" Content="填入实测偏角" Margin="8,0,0,0"
+                                                   Command="{Binding FillMeasuredOffsetCommand}" />
+                                    </Grid>
+                                    <ui:TextBlock FontSize="11"
+                                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                  Margin="0,6,0,0" TextWrapping="Wrap"
+                                                  Text="第 4 轴零位时工具指向相对 X 轴的偏角：输出第 4 轴角 = 零件角 − δ；点 ≥ 3 个第4轴角可实测填入" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem Header="点表"
+                         Visibility="{Binding Clickable, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,8,4,8"
+                                  host:ViewportPageLayout.IsolateWheel="True">
+                        <Border Padding="6" MinHeight="140"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1" CornerRadius="4">
+                            <DockPanel>
+                                <Grid DockPanel.Dock="Bottom" Margin="4,6,4,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="像素坐标不可编辑；机器人坐标抄自示教" FontSize="11"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center" />
+                                    <ui:Button Grid.Column="1" Content="删除末点" Command="{Binding RemoveLastPointCommand}" />
+                                </Grid>
+                                <DataGrid ItemsSource="{Binding Points}" AutoGenerateColumns="False"
+                                          CanUserAddRows="False" HeadersVisibility="Column"
+                                          IsReadOnly="False" MaxHeight="360">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="#" Binding="{Binding Index}" IsReadOnly="True" Width="28" />
+                                        <DataGridTextColumn Header="像素X" Binding="{Binding PixelX, StringFormat=0.0}" IsReadOnly="True" Width="58" />
+                                        <DataGridTextColumn Header="像素Y" Binding="{Binding PixelY, StringFormat=0.0}" IsReadOnly="True" Width="58" />
+                                        <DataGridTextColumn Header="机器人X" Binding="{Binding RobotX, UpdateSourceTrigger=PropertyChanged}" Width="76" />
+                                        <DataGridTextColumn Header="机器人Y" Binding="{Binding RobotY, UpdateSourceTrigger=PropertyChanged}" Width="76" />
+                                        <DataGridCheckBoxColumn Header="已抄" Binding="{Binding RobotEntered}" Width="56" />
+                                        <DataGridTextColumn Header="第4轴角" Binding="{Binding RobotRzDeg, UpdateSourceTrigger=PropertyChanged}" Width="60" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </Border>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
+        </Grid>
+    </Border>
+</UserControl>

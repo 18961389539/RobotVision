@@ -177,7 +177,7 @@
                         </Button.Style>
                     </Button>
 
-                    <!-- 右：比例录入参数（浮动面�?428px，可折叠"-->
+                    <!-- 右：比例录入参数（浮动面板 428px，可折叠） -->
                     <Border HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="428" Margin="12"
                             Panel.ZIndex="20" ClipToBounds="True" Background="#F01E2836"
                             BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
@@ -215,7 +215,7 @@
                                         <StackPanel Margin="0,0,8,8">
                                             <TextBlock Text="工位 Id" Margin="0,0,0,4" FontSize="12" />
                                             <ui:TextBox Text="{Binding ScaleStationId, UpdateSourceTrigger=PropertyChanged}"
-                                                        ToolTip="与配方外参同名的工位标" />
+                                                        ToolTip="与配方外参同名的工位标定" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,8">
                                             <TextBlock Text="相机" Margin="0,0,0,4" FontSize="12" />
@@ -244,11 +244,11 @@
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                         <ui:Button Content="取图显示" Command="{Binding GrabScalePreviewCommand}"
                                                    IsEnabled="{Binding CanUseScaleGrab}"
-                                                   ToolTip="取一帧显示在主画面，并同步填入宽" />
+                                                   ToolTip="取一帧显示在主画面，并同步填入宽高" />
                                         <ui:Button Content="仅读分辨率" Margin="6,0,0,0"
                                                    Command="{Binding ReadCameraResolutionCommand}"
                                                    IsEnabled="{Binding CanUseScaleGrab}"
-                                                   ToolTip="只填宽高，不刷新主画" />
+                                                   ToolTip="只填宽高，不刷新主画面" />
                                     </StackPanel>
                                     <UniformGrid Columns="2" Margin="0,0,0,8">
                                         <StackPanel Margin="0,0,8,8">
@@ -265,7 +265,7 @@
                                     <Border Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="4"
                                             Padding="10,8" Margin="0,0,0,4">
                                         <StackPanel>
-                                            <TextBlock Text="换算助手：物�?mm ÷ 图上 px = 比例" FontSize="11"
+                                            <TextBlock Text="换算助手：物长 (mm) ÷ 图上 px = 比例" FontSize="11"
                                                        Foreground="#FFD0D8E4" />
                                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                                 <ui:NumberBox Value="{Binding RefLengthMm}" Minimum="0" Maximum="100000"
@@ -274,9 +274,9 @@
                                                 <ui:NumberBox Value="{Binding RefLengthPx}" Minimum="0" Maximum="100000"
                                                               SmallChange="1" SpinButtonPlacementMode="Compact"
                                                               MinWidth="80" Margin="6,0,0,0" ToolTip="图上像素长度" />
-                                                <ui:Button Content="�?X" Padding="8,3" Margin="6,0,0,0"
+                                                <ui:Button Content="→X" Padding="8,3" Margin="6,0,0,0"
                                                            Command="{Binding ApplyRefToXCommand}" />
-                                                <ui:Button Content="�?Y" Padding="8,3" Margin="6,0,0,0"
+                                                <ui:Button Content="→Y" Padding="8,3" Margin="6,0,0,0"
                                                            Command="{Binding ApplyRefToYCommand}" />
                                             </StackPanel>
                                         </StackPanel>

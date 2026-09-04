@@ -8,6 +8,56 @@ namespace RobotVision.Tests;
 public sealed class ChatToolSecurityTests
 {
     [Fact]
+    public void RunRecipe_WithoutConfirm_IsBlocked()
+    {
+        using var doc = JsonDocument.Parse("""{"name":"A01"}""");
+        var check = ChatDangerousActionGuard.Evaluate("run_recipe", doc.RootElement, "跑一次 A01");
+        Assert.True(check.IsBlocked);
+        Assert.Contains("confirm", check.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RunRecipe_WithConfirmAndNamedRecipe_Allows()
+    {
+        using var doc = JsonDocument.Parse("""{"name":"A01","confirm":true}""");
+        var check = ChatDangerousActionGuard.Evaluate("run_recipe", doc.RootElement, "确认跑一次配方 A01");
+        Assert.False(check.IsBlocked);
+    }
+
+    [Fact]
+    public void CaptureFrame_WithoutConfirm_IsBlocked()
+    {
+        using var doc = JsonDocument.Parse("""{"camera_id":"CAM1"}""");
+        var check = ChatDangerousActionGuard.Evaluate("capture_frame", doc.RootElement, "拍一张 CAM1");
+        Assert.True(check.IsBlocked);
+    }
+
+    [Fact]
+    public void CaptureFrame_WithConfirmAndPhotoIntent_Allows()
+    {
+        using var doc = JsonDocument.Parse("""{"confirm":true}""");
+        var check = ChatDangerousActionGuard.Evaluate("capture_frame", doc.RootElement, "确认拍一张");
+        Assert.False(check.IsBlocked);
+    }
+
+    [Fact]
+    public void SetLight_OnWithoutConfirm_IsBlocked()
+    {
+        using var doc = JsonDocument.Parse("""{"id":"light_ring","action":"on","brightness":200}""");
+        var check = ChatDangerousActionGuard.Evaluate("set_light", doc.RootElement, "把 light_ring 打开");
+        Assert.True(check.IsBlocked);
+        Assert.Contains("confirm", check.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SetLight_OffWithConfirmAndNamedId_Allows()
+    {
+        using var doc = JsonDocument.Parse("""{"id":"light_ring","action":"off","confirm":true}""");
+        var check = ChatDangerousActionGuard.Evaluate("set_light", doc.RootElement, "确认关掉 light_ring");
+        Assert.False(check.IsBlocked);
+    }
+
+    [Fact]
     public void TryParse_InvalidJson_ReturnsError()
     {
         var result = ChatToolArguments.TryParse("{not json");

@@ -1,12 +1,12 @@
-using System.Diagnostics.CodeAnalysis;
+using JLVisionLib;
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Recipe;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.JlVision;
 
 namespace RobotVision.Teach;
 
-/// <summary>同一帧四条精修路径的实测结果（配方页赛马，不进 TRIGGER）。</summary>
+/// <summary>同一帧多路精修（最多六条）的实测结果（配方页赛马，不进 TRIGGER）。</summary>
 public sealed record SegmentRefineCandidate(
     SegmentRefineMethod Method,
     bool Ok,
@@ -20,8 +20,8 @@ public sealed record SegmentRefineCandidate(
 /// <summary>对同一分割目标跑卡尺 / 直线 / 孔槽 / 模板，给出可比较的精修分。</summary>
 public static class SegmentRefineBakeOff
 {
-    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
-        Justification = "Locally built SIFT teach models disposed in finally when not cache-owned.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "ownedNcc/ownedShape 在 finally 释放；缓存模型由 TeachCache 持有。")]
     public static IReadOnlyList<SegmentRefineCandidate> Run(
         Mat bgr,
         IReadOnlyList<Point2f> contour,
@@ -32,142 +32,135 @@ public static class SegmentRefineBakeOff
         TemplateOptions? options = null,
         TeachCache? teachCache = null)
     {
-        var list = new List<SegmentRefineCandidate>(4);
-        var housing = MaskHousing.Fit(contour);
+        var list = new List<SegmentRefineCandidate>(6);
+        var pts = contour as Point2f[] ?? [.. contour];
+        var housing = JlHousing.Fit(pts);
 
-        var line = MaskTemplateMatcher.RefineByLineFit(contour, housing.LongAxisDeg);
+        var line = JlPoseAlign.TryLineFit(pts, housing.LongAxisDeg);
         if (line.Fitted)
         {
             var residual = Math.Abs(AngleGeometry.UndirectedDeltaDeg(line.AngleDeg, housing.LongAxisDeg));
             var score = Math.Clamp(1.0 - residual / 5.0, 0.2, 1);
             list.Add(new(SegmentRefineMethod.LineFit, true, false, score,
-                $"直线拟合过门（残差 {residual:0.00}°）", line.AngleDeg));
+                TeachNarrator.LineFitOk(residual), line.AngleDeg));
         }
         else
-            list.Add(new(SegmentRefineMethod.LineFit, false, false, 0, "直线拟合未过门"));
+            list.Add(new(SegmentRefineMethod.LineFit, false, false, 0, TeachNarrator.LineFitMiss));
 
         if (bitPackedMask is { Length: > 0 } && maskWidth > 0 && maskHeight > 0)
         {
-            var hole = MaskTemplateMatcher.RefineByCentroidHoleLine(bitPackedMask, maskWidth, maskHeight);
+            var hole = JlCentroidHole.TryRefine(bitPackedMask, maskWidth, maskHeight);
             list.Add(hole is null
-                ? new(SegmentRefineMethod.CentroidHoleLine, false, true, 0, "掩码内无稳定孔/槽")
-                : new(SegmentRefineMethod.CentroidHoleLine, true, true, hole.Quality,
-                    $"质心-内标连线过门（质量 {hole.Quality:0.00}）", hole.AngleDeg));
+                ? new(SegmentRefineMethod.CentroidHoleLine, false, true, 0, TeachNarrator.CentroidHoleMiss)
+                : new(SegmentRefineMethod.CentroidHoleLine, true, true, hole.Value.Quality,
+                    TeachNarrator.CentroidHoleOk(hole.Value.Quality), hole.Value.AngleDeg));
         }
         else
-            list.Add(new(SegmentRefineMethod.CentroidHoleLine, false, true, 0, "无分割掩码，未跑孔槽",
+            list.Add(new(SegmentRefineMethod.CentroidHoleLine, false, true, 0, TeachNarrator.CentroidHoleSkip,
                 Skipped: true));
 
-        var caliper = MaskCaliperTab.TryRefine(bgr, contour, CaliperRefineOptions.From(options));
-        if (caliper.Pose is not null)
+        try
         {
-            var q = MaskCaliperTab.QualityScore(MaskCaliperTab.LastDebug);
-            list.Add(new(SegmentRefineMethod.CaliperTab, true, true, q,
-                $"卡尺过门（平行差 {MaskCaliperTab.LastDebug.ParallelDeg:0.00}°）",
-                caliper.Pose.AngleDeg));
+            using var scene = JlImageConvert.FromGrayMat(bgr);
+            var polarity = options?.HousingEdgePolarity ?? HousingEdgePolarity.Auto;
+            var caliper = JlMeasureRefine.TryRefine(scene, pts, polarity);
+            if (caliper.Found)
+                list.Add(new(SegmentRefineMethod.CaliperTab, true, true, caliper.Score,
+                    "JLVision 卡尺 " + caliper.Note, caliper.AngleDeg));
+            else
+                list.Add(new(SegmentRefineMethod.CaliperTab, false, true, 0, TeachNarrator.CaliperMiss));
         }
-        else
-            list.Add(new(SegmentRefineMethod.CaliperTab, false, true, 0, "卡尺未过门（无边或凸起不可判）"));
+        catch
+        {
+            list.Add(new(SegmentRefineMethod.CaliperTab, false, true, 0, TeachNarrator.CaliperMiss));
+        }
 
         if (template is null || template.Empty())
         {
-            list.Add(new(SegmentRefineMethod.Template, false, true, 0, "未示教模板，未跑匹配", Skipped: true));
-            list.Add(new(SegmentRefineMethod.ShapeMatch, false, true, 0, "未示教模板，未跑形状匹配", Skipped: true));
-            list.Add(new(SegmentRefineMethod.Sift, false, true, 0, "未示教模板，未跑 SIFT", Skipped: true));
+            list.Add(new(SegmentRefineMethod.Template, false, true, 0, TeachNarrator.TemplateSkip, Skipped: true));
+            list.Add(new(SegmentRefineMethod.ShapeMatch, false, true, 0, TeachNarrator.ShapeSkip, Skipped: true));
+            list.Add(new(SegmentRefineMethod.Sift, false, true, 0, TeachNarrator.SiftSkip, Skipped: true));
             return list;
         }
 
+        var range = JlHousing.AdaptiveRefineRange(options?.RefineRangeDeg ?? 5, housing);
+        var minScore = options is { MatchThreshold: > 0 } ? options.MatchThreshold : 0.6;
+        JlNCCModel? ownedNcc = null;
+        JlShapeModel? ownedShape = null;
         try
         {
-            var crop = MaskTemplateMatcher.UprightCrop(bgr, contour, 0.15);
-            using (crop.Upright)
-            {
-                var range = MaskHousing.AdaptiveRefineRange(options?.RefineRangeDeg ?? 5, housing);
-                var minScore = options is { MatchThreshold: > 0 } ? options.MatchThreshold : 0.6;
-                var match = options?.UseEdgeMatch == true
-                    ? MaskTemplateMatcher.MatchBestHybrid(crop.Upright, template, range, 0.01)
-                    : MaskTemplateMatcher.MatchBest(crop.Upright, template, range, 0.01);
-                if (match is null)
-                    list.Add(new(SegmentRefineMethod.Template, false, true, 0, "模板匹配无峰"));
-                else
-                    list.Add(new(SegmentRefineMethod.Template, match.Score >= minScore, true, match.Score,
-                        match.Score >= minScore
-                            ? $"模板过门（NCC {match.Score:0.00}）"
-                            : $"模板分 {match.Score:0.00} 低于阈值 {minScore:0.00}",
-                        AngleGeometry.NormalizeSignedDeg(crop.WarpAngleDeg + match.RotationDeg)));
-            }
-        }
-        catch (InvalidOperationException)
-        {
-            list.Add(new(SegmentRefineMethod.Template, false, true, 0, "转正裁剪失败"));
-        }
-
-        var shapeModel = teachCache?.Shape ?? MaskShapeMatch.BuildTeach(template);
-        if (shapeModel is null)
-            list.Add(new(SegmentRefineMethod.ShapeMatch, false, true, 0, "示教图边缘太少，未跑形状匹配"));
-        else
-        {
-            var range = MaskHousing.AdaptiveRefineRange(options?.RefineRangeDeg ?? 5, housing);
-            var shape = MaskShapeMatch.TryRefine(bgr, contour, shapeModel, range);
-            if (shape.Pose is null)
-                list.Add(new(SegmentRefineMethod.ShapeMatch, false, true, 0,
-                    $"形状匹配未过门（命中 {MaskShapeMatch.LastDebug.HitRate:0.00} 均距 {MaskShapeMatch.LastDebug.MeanDist:0.00}px）"));
-            else
-                list.Add(new(SegmentRefineMethod.ShapeMatch, true, true, shape.Pose.Score,
-                    $"形状匹配过门（命中 {shape.Pose.HitRate:0.00} 均距 {shape.Pose.MeanDistPx:0.00}px）",
-                    shape.Pose.AngleDeg));
-        }
-
-        var siftOwned = teachCache is null;
-        MaskSiftRefine.TeachModel? siftTeach = teachCache?.Sift;
-        if (siftTeach is null)
-            siftTeach = MaskSiftRefine.BuildTeach(template);
-        try
-        {
-            if (siftTeach is null)
-            {
-                list.Add(new(SegmentRefineMethod.Sift, false, true, 0, "示教图 SIFT 特征太少"));
-            }
+            using var grayTpl = JlImageConvert.ToGray(template);
+            ownedNcc = teachCache?.Ncc is null ? JlNccRefine.CreateModel(grayTpl) : null;
+            ownedShape = teachCache?.Shape is null ? JlShapeRefine.CreateModel(grayTpl) : null;
+            var ncc = teachCache?.Ncc ?? ownedNcc!;
+            var shape = teachCache?.Shape ?? ownedShape!;
+            using var scene = JlImageConvert.FromGrayMat(bgr);
+            var nccHit = JlNccRefine.TryRefine(scene, pts, ncc, range, 0.01, JlFindOptions.ProductDefault);
+            if (!nccHit.Found)
+                list.Add(new(SegmentRefineMethod.Template, false, true, 0, TeachNarrator.TemplateNoPeak));
             else
             {
-                var sift = MaskSiftRefine.TryRefine(bgr, contour, siftTeach);
-                if (sift.Pose is null)
-                    list.Add(new(SegmentRefineMethod.Sift, false, true, 0, "SIFT 未过门（匹配点不够）"));
-                else
-                    list.Add(new(SegmentRefineMethod.Sift, true, true, sift.Pose.Score,
-                        $"SIFT 过门（内点 {sift.Pose.Inliers}/{sift.Pose.Matches}）",
-                        sift.Pose.AngleDeg));
+                var passed = nccHit.Score >= minScore;
+                list.Add(new(SegmentRefineMethod.Template, passed, true, nccHit.Score,
+                    TeachNarrator.TemplatePeak(nccHit.Score, minScore, passed), nccHit.AngleDeg));
             }
+
+            var shapeHit = JlShapeRefine.TryRefine(
+                scene, pts, shape, range, JlShapeDefaults.FindMinScore, JlFindOptions.ProductDefault);
+            if (!shapeHit.Found)
+                shapeHit = JlGeometryFallback.TryRefine(scene, pts, options?.HousingEdgePolarity ?? HousingEdgePolarity.Auto);
+            if (!shapeHit.Found)
+                list.Add(new(SegmentRefineMethod.ShapeMatch, false, true, 0, "JLVision 形状未命中"));
+            else
+                list.Add(new(SegmentRefineMethod.ShapeMatch, true, true, shapeHit.Score,
+                    "JLVision shape " + shapeHit.Note, shapeHit.AngleDeg));
+
+            list.Add(new(SegmentRefineMethod.Sift, shapeHit.Found, true, shapeHit.Found ? shapeHit.Score : 0,
+                shapeHit.Found ? "JLVision shape（SIFT 已并入形状匹配）" : TeachNarrator.SiftMiss,
+                shapeHit.Found ? shapeHit.AngleDeg : double.NaN));
+        }
+        catch (Exception)
+        {
+            list.Add(new(SegmentRefineMethod.Template, false, true, 0, TeachNarrator.TemplateCropFail));
+            list.Add(new(SegmentRefineMethod.ShapeMatch, false, true, 0, "JLVision 形状异常"));
+            list.Add(new(SegmentRefineMethod.Sift, false, true, 0, TeachNarrator.SiftMiss));
         }
         finally
         {
-            if (siftOwned)
-                siftTeach?.Dispose();
+            ownedNcc?.Dispose();
+            ownedShape?.Dispose();
         }
 
         return list;
     }
 
-    /// <summary>回放打分时复用示教模型，避免每帧重建 SIFT / 形状点集。</summary>
+    /// <summary>回放打分时复用 JL 示教模型，避免每帧重建。</summary>
     public sealed class TeachCache : IDisposable
     {
-        public MaskShapeMatch.ShapeModel? Shape { get; }
-        public MaskSiftRefine.TeachModel? Sift { get; }
+        public JlShapeModel? Shape { get; }
+        public JlNCCModel? Ncc { get; }
 
-        public TeachCache(MaskShapeMatch.ShapeModel? shape, MaskSiftRefine.TeachModel? sift)
+        public TeachCache(JlShapeModel? shape, JlNCCModel? ncc)
         {
             Shape = shape;
-            Sift = sift;
+            Ncc = ncc;
         }
 
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+            Justification = "模型所有权交给 TeachCache，由 Dispose 释放。")]
         public static TeachCache? TryCreate(Mat? template)
         {
             if (template is null || template.Empty())
                 return null;
-            return new TeachCache(MaskShapeMatch.BuildTeach(template), MaskSiftRefine.BuildTeach(template));
+            using var gray = JlImageConvert.ToGray(template);
+            return new TeachCache(JlShapeRefine.CreateModel(gray), JlNccRefine.CreateModel(gray));
         }
 
-        public void Dispose() => Sift?.Dispose();
+        public void Dispose()
+        {
+            Shape?.Dispose();
+            Ncc?.Dispose();
+        }
     }
 
     /// <summary>
@@ -206,26 +199,13 @@ public static class SegmentRefineBakeOff
                 }
             }
 
-            var okRows = rows.Where(c => c.Ok).ToList();
             var directed = rows.Count > 0 && rows.Exists(c => c.Directed);
-            var meanOk = okRows.Count == 0 ? 0 : okRows.Average(c => c.Score);
-            var period = directed ? 360.0 : 180.0;
-            var angles = okRows.Where(c => double.IsFinite(c.AngleDeg)).Select(c => c.AngleDeg).ToList();
-            var std = AngleGeometry.CircularStdDeg(angles, period);
-            var consistency = angles.Count < 2 ? 1.0 : Math.Clamp(1.0 - std / 8.0, 0, 1);
-            var score = (okRows.Count / (double)n) * meanOk * consistency;
-            var ok = okRows.Count > 0 && score >= 0.35;
-            string note;
-            if (okRows.Count == 0)
-                note = $"{n} 帧均未过门";
-            else if (angles.Count < 2)
-                note = $"{okRows.Count}/{n} 过门，均分 {meanOk:0.00}";
-            else
-                note = $"{okRows.Count}/{n} 过门，均分 {meanOk:0.00}，角σ {std:0.00}°";
-            var meanAngle = angles.Count == 0 ? double.NaN : angles[0];
-            var stdStored = angles.Count < 2 ? double.NaN : std;
+            var okRows = rows.Where(c => c.Ok).ToList();
+            var agg = RaceScore.Compute(okRows, n, directed);
             var skipped = rows.Count > 0 && rows.TrueForAll(c => c.Skipped);
-            result.Add(new SegmentRefineCandidate(method, ok, directed, score, note, meanAngle, stdStored, skipped));
+            result.Add(new SegmentRefineCandidate(
+                method, agg.Ok, directed, agg.Score, TeachNarrator.RaceSummary(agg),
+                agg.SampleAngleDeg, agg.AngleStdDeg, skipped));
         }
 
         return result;
@@ -241,7 +221,7 @@ public static class SegmentRefineBakeOff
         IReadOnlyList<SegmentRefineMethod>? policyOrder = null,
         SegmentRefineMethod? downrank = null)
     {
-        var ok = candidates.Where(c => c.Ok && c.Score >= 0.35).ToList();
+        var ok = candidates.Where(c => c.Ok && c.Score >= RaceScore.OkGate).ToList();
         if (ok.Count == 0)
             return null;
 
@@ -272,10 +252,10 @@ public static class SegmentRefineBakeOff
         var pool = directed.Count > 0 ? directed : ok;
         var policy = pool.OrderBy(c => Rank(c.Method)).ThenByDescending(c => c.Score).First();
         var byScore = pool.OrderByDescending(c => c.Score).ThenBy(c => Rank(c.Method)).First();
-        if (double.IsFinite(policy.AngleStdDeg) && policy.AngleStdDeg > 8)
+        if (double.IsFinite(policy.AngleStdDeg) && policy.AngleStdDeg > TeachThresholds.AngleStdUnstableDeg)
         {
             var stable = pool
-                .Where(c => double.IsFinite(c.AngleStdDeg) && c.AngleStdDeg < 4)
+                .Where(c => double.IsFinite(c.AngleStdDeg) && c.AngleStdDeg < TeachThresholds.AngleStdStableDeg)
                 .OrderBy(c => c.AngleStdDeg)
                 .ThenBy(c => Rank(c.Method))
                 .FirstOrDefault();
@@ -288,7 +268,7 @@ public static class SegmentRefineBakeOff
         if (!ScoresComparable(byScore, policy))
             return policy;
 
-        return byScore.Score >= policy.Score + 0.08 ? byScore : policy;
+        return byScore.Score >= policy.Score + TeachThresholds.WinMarginScore ? byScore : policy;
     }
 
     private static int DefaultRank(SegmentRefineMethod m) => m switch

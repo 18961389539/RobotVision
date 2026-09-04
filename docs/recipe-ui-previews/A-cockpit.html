@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>配方页预览 A · 工位驾驶舱</title>
+  <style>
+    :root {
+      --bg: #0b1118;
+      --panel: #151c26;
+      --panel-2: #1b2430;
+      --line: #2a3544;
+      --text: #e8eef6;
+      --muted: #8b97a8;
+      --accent: #3d8bff;
+      --accent-dim: #1a3a6a;
+      --warn: #e8a33d;
+      --ok: #3ddc97;
+      --danger: #f97171;
+      --image: #070b10;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", "Microsoft YaHei", sans-serif; }
+    a { color: var(--accent); text-decoration: none; }
+    button, select, input { font: inherit; color: var(--text); }
+    button { cursor: pointer; border: 1px solid var(--line); background: var(--panel-2); border-radius: 4px; padding: 6px 10px; }
+    button:hover { border-color: #3d4d63; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.ghost { background: transparent; }
+    button.danger { color: var(--danger); }
+    button.active { background: var(--accent-dim); border-color: var(--accent); }
+    input, select { background: #0f1620; border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px; width: 100%; }
+    .app { display: grid; grid-template-rows: auto auto 1fr auto auto; height: 100%; }
+    .banner { display: flex; gap: 16px; align-items: center; padding: 8px 14px; background: #111820; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+    .banner strong { color: var(--text); font-weight: 600; }
+    .ident { display: grid; grid-template-columns: minmax(140px, 1.2fr) 90px 1.1fr 1.4fr auto auto; gap: 10px; align-items: end; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    .ident label { display: block; font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); font-size: 12px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+    .dot.warn { background: var(--warn); }
+    .dot.off { background: var(--danger); }
+    .body { display: grid; grid-template-columns: 200px 1fr 320px; min-height: 0; }
+    .list, .insp { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+    .insp { border-right: 0; border-left: 1px solid var(--line); }
+    .list h2, .insp-head { margin: 0; padding: 10px 10px 6px; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+    .search { margin: 0 10px 8px; }
+    .recipes { overflow: auto; flex: 1; }
+    .rec { padding: 8px 10px; border-left: 3px solid transparent; cursor: pointer; }
+    .rec:hover { background: #1c2633; }
+    .rec.on { background: #1c2633; border-left-color: var(--accent); }
+    .rec .name { font-weight: 600; }
+    .rec .sum { font-size: 11px; color: var(--muted); }
+    .rec.bad .sum { color: var(--danger); }
+    .list-foot { padding: 8px 10px; border-top: 1px solid var(--line); display: flex; gap: 6px; }
+    .stage { position: relative; background: var(--image); min-height: 0; }
+    .viewbar { position: absolute; top: 10px; left: 10px; z-index: 2; display: flex; gap: 4px; background: #0008; padding: 4px; border-radius: 4px; }
+    .tools { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 4px; background: #0008; padding: 4px; border-radius: 4px; }
+    svg.frame { width: 100%; height: 100%; display: block; }
+    .legend { position: absolute; bottom: 10px; left: 10px; font-size: 11px; color: #c5d0dc; background: #0007; padding: 6px 8px; border-radius: 4px; }
+    .tabs { display: flex; border-bottom: 1px solid var(--line); }
+    .tabs button { flex: 1; border: 0; border-radius: 0; border-bottom: 2px solid transparent; background: transparent; padding: 8px 4px; font-size: 12px; }
+    .tabs button.on { border-bottom-color: var(--accent); color: var(--text); font-weight: 600; }
+    .pane { padding: 10px; overflow: auto; flex: 1; display: none; }
+    .pane.on { display: block; }
+    .field { margin-bottom: 10px; }
+    .field span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .hint { font-size: 11px; color: var(--muted); margin: 0 0 8px; }
+    .warn { color: var(--warn); font-size: 11px; }
+    .cmd { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border-top: 1px solid var(--line); }
+    .cmd .spacer { flex: 1; }
+    .status { padding: 6px 12px; font-size: 11px; color: var(--muted); background: #10161e; border-top: 1px solid var(--line); }
+    .status b { color: var(--warn); font-weight: 600; }
+    .busy { outline: 2px solid var(--warn); outline-offset: -2px; }
+    .more { position: relative; }
+    .menu { display: none; position: absolute; right: 0; bottom: 36px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; min-width: 160px; z-index: 5; }
+    .menu.open { display: block; }
+    .menu button { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; }
+    .toast { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); background: #123; border: 1px solid var(--ok); color: var(--ok); padding: 6px 12px; border-radius: 4px; display: none; z-index: 3; }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="banner">
+      <strong>预览 A · 工位驾驶舱</strong>
+      <span>图像铺满，身份条永远可见；参数改成页签而不是默认全折叠。相对现状：浮层改成停靠，脚条只留测试/保存。</span>
+      <span style="margin-left:auto">
+        <a href="B-taskflow.html">B 任务流</a> ·
+        <a href="C-ide.html">C 三栏编辑器</a>
+      </span>
+    </div>
+
+    <div class="ident">
+      <div><label>名称</label><input id="name" value="A01" /></div>
+      <div><label>PLC 序列号</label><input id="sn" value="12" /></div>
+      <div><label>相机</label><select id="cam"><option>cam_gige</option><option>cam_file</option></select></div>
+      <div><label>角度模式</label>
+        <select id="mode">
+          <option value="mask">分割+精修 · 模板匹配</option>
+          <option value="dual">双模型连线</option>
+          <option value="blob">双 BLOB 连线</option>
+          <option value="rect">最小外接矩形</option>
+        </select>
+      </div>
+      <div class="chip"><span class="dot warn" id="dirtyDot"></span><span id="dirty">未保存 · 试触发走编辑器</span></div>
+      <div class="chip"><span class="dot" id="lineDot"></span><span id="line">产线空闲</span></div>
+    </div>
+
+    <div class="body">
+      <aside class="list">
+        <h2>配方 <button class="ghost" id="btnNew">新建</button></h2>
+        <input class="search" placeholder="搜索名称 / 备注" />
+        <div class="recipes" id="recipes"></div>
+        <div class="list-foot">
+          <button id="btnCopy">复制</button>
+          <button class="ghost">打开目录</button>
+        </div>
+      </aside>
+
+      <main class="stage" id="stage">
+        <div class="viewbar">
+          <button class="active" data-view="result">结果</button>
+          <button data-view="ref">参考帧</button>
+        </div>
+        <div class="tools">
+          <button data-tool="roi">框选检测区</button>
+          <button data-tool="feat">框选特征</button>
+          <button data-tool="teach">示教模板</button>
+        </div>
+        <svg class="frame" viewBox="0 0 640 400" preserveAspectRatio="xMidYMid slice">
+          <rect width="640" height="400" fill="#0c1218"/>
+          <rect x="0" y="0" width="640" height="400" fill="#15202b"/>
+          <g id="work">
+            <rect x="210" y="120" width="220" height="140" rx="10" fill="#3a4554" stroke="#9aa7b8" stroke-width="2"/>
+            <rect x="292" y="92" width="56" height="28" rx="4" fill="#2e3845" stroke="#c9b48a" stroke-width="2"/>
+          </g>
+          <g id="overlays" opacity="0">
+            <rect x="190" y="88" width="260" height="200" fill="none" stroke="#3ddc97" stroke-width="2"/>
+            <rect x="286" y="86" width="68" height="40" fill="none" stroke="#e8a33d" stroke-width="2"/>
+            <rect x="248" y="118" width="148" height="108" fill="none" stroke="#d4b45a" stroke-width="1.5"/>
+            <circle cx="320" cy="172" r="4" fill="#d4b45a"/>
+            <line x1="320" y1="172" x2="360" y2="150" stroke="#d4b45a" stroke-width="1.5"/>
+          </g>
+        </svg>
+        <div class="legend">绿=检测 · 橙=特征 · 金=匹配峰（不是壳体中心）</div>
+        <div class="toast" id="toast">测试完成 · 1 件 · ΔRz 0.12°</div>
+      </main>
+
+      <aside class="insp">
+        <div class="insp-head">参数</div>
+        <div class="tabs" id="tabs">
+          <button class="on" data-tab="id">身份</button>
+          <button data-tab="det">检测</button>
+          <button data-tab="teach">示教</button>
+          <button data-tab="out">输出</button>
+        </div>
+        <div class="pane on" id="tab-id">
+          <p class="hint">名称、相机、工位始终在顶栏。这里只放不常改的身份字段。</p>
+          <div class="field"><span>工位（标定档案）</span><select><option>st1</option><option>（空）</option></select></div>
+          <div class="field"><span>备注</span><input value="A 线壳体，模板匹配判头尾" /></div>
+          <div class="field"><span>启用</span><label style="color:var(--text)"><input type="checkbox" checked /> 停用触发返回 1015</label></div>
+          <p class="hint">哈希未钉扎 · TRIGGER 不校验 1017</p>
+          <button>钉死当前哈希</button>
+        </div>
+        <div class="pane" id="tab-det">
+          <p class="hint" id="modeHint">分割给粗框，精修过门才输出有向角。失败默认 1019。</p>
+          <div class="field" id="m1"><span>主模型</span><select><option>housing_seg.onnx</option></select></div>
+          <div class="field" id="m2" hidden><span>次模型 B</span><select><option>tab_det.onnx</option></select></div>
+          <div class="row2" id="thr">
+            <div class="field"><span>检测置信度</span><input value="0.50" /></div>
+            <div class="field"><span>IoU</span><input value="0.45" /></div>
+          </div>
+          <div class="field" id="refine"><span>精修方法</span>
+            <select>
+              <option>模板匹配（需示教）</option>
+              <option>直线拟合</option>
+              <option>卡尺+凸起</option>
+              <option>SIFT</option>
+            </select>
+          </div>
+          <p class="warn" id="prodWarn" hidden>产线占用相机时禁用测试触发，避免 1009/1010。</p>
+        </div>
+        <div class="pane" id="tab-teach">
+          <p class="hint">示教写进当前编辑器，保存后才上产线。特征框过扁会跳齿。</p>
+          <div class="field"><span>期望件数（0=不检查）</span><input value="1" /></div>
+          <div class="field"><span>匹配阈值</span><input value="0.60" /></div>
+          <p class="hint">已示教 186×142px · 未保存不上产线</p>
+        </div>
+        <div class="pane" id="tab-out">
+          <div class="field"><span>旋转中心补偿</span><select><option>不补偿</option><option>偏心工具</option></select></div>
+          <div class="row2">
+            <div class="field"><span>ΔX</span><input value="0" /></div>
+            <div class="field"><span>ΔY</span><input value="0" /></div>
+          </div>
+          <div class="field"><span>光源</span><label style="color:var(--text)"><input type="checkbox" /> 取图前点亮</label></div>
+        </div>
+      </aside>
+    </div>
+
+    <div class="cmd">
+      <button class="primary" id="btnTest">测试触发</button>
+      <button id="btnSave">保存</button>
+      <span class="spacer"></span>
+      <div class="more">
+        <button id="btnMore">更多</button>
+        <div class="menu" id="menu">
+          <button>配置工作台（写入编辑器，不保存）</button>
+          <button>打开配方目录</button>
+          <button class="danger">删除磁盘配方</button>
+        </div>
+      </div>
+    </div>
+    <div class="status" id="status">试触发走当前编辑器，不写产量。保存后才上产线。绿框=检测，橙框=特征，金框=匹配峰。</div>
+  </div>
+  <script>
+    const recipes = [
+      { id: "A01", sum: "分割+精修 · cam_gige · #12", ok: true },
+      { id: "B02", sum: "最小外接矩形 · st1", ok: true },
+      { id: "A03", sum: "读取失败：未知角度模式", ok: false },
+    ];
+    const recBox = document.getElementById("recipes");
+    let current = "A01";
+    function renderList() {
+      recBox.innerHTML = recipes.map(r =>
+        `<div class="rec ${r.id===current?"on":""} ${r.ok?"":"bad"}" data-id="${r.id}">
+           <div class="name">${r.id}${r.ok?"":" · 损坏"}</div>
+           <div class="sum">${r.sum}</div>
+         </div>`).join("");
+    }
+    renderList();
+    recBox.onclick = e => {
+      const n = e.target.closest(".rec");
+      if (!n) return;
+      current = n.dataset.id;
+      document.getElementById("name").value = current;
+      renderList();
+    };
+
+    document.getElementById("tabs").onclick = e => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x===b));
+      document.querySelectorAll(".pane").forEach(p => p.classList.toggle("on", p.id === "tab-"+b.dataset.tab));
+    };
+
+    const overlays = document.getElementById("overlays");
+    document.getElementById("btnTest").onclick = () => {
+      overlays.setAttribute("opacity", "1");
+      const t = document.getElementById("toast");
+      t.style.display = "block";
+      document.getElementById("status").innerHTML = "<b>测试完成（编辑器，未保存）</b> · 1 件过门 · 保存后才上产线";
+      setTimeout(() => t.style.display = "none", 1600);
+    };
+    document.getElementById("btnSave").onclick = () => {
+      document.getElementById("dirty").textContent = "已保存";
+      document.getElementById("dirtyDot").className = "dot";
+      document.getElementById("status").textContent = "已写入 A01.json。PLC 用名称或 #12 触发。";
+    };
+    document.getElementById("btnMore").onclick = () => document.getElementById("menu").classList.toggle("open");
+    document.addEventListener("click", e => {
+      if (!e.target.closest(".more")) document.getElementById("menu").classList.remove("open");
+    });
+
+    document.getElementById("mode").onchange = e => {
+      const v = e.target.value;
+      document.getElementById("m2").hidden = v !== "dual";
+      document.getElementById("refine").hidden = v !== "mask";
+      document.getElementById("thr").hidden = v === "blob";
+      document.getElementById("m1").hidden = v === "blob";
+      const hints = {
+        mask: "分割给粗框，精修过门才输出有向角。失败默认 1019。",
+        dual: "A→B 连线有方向。多目标请开窗口配对，避免跨件配错。",
+        blob: "无需模型。主 BLOB 定位，主→次质心定向。",
+        rect: "角度 [0,180)，无头尾。不要和偏心工具一起用。"
+      };
+      document.getElementById("modeHint").textContent = hints[v];
+      if (v !== "dual") {
+        document.getElementById("status").textContent = "已改为单模型模式，次模型已从名单移除。";
+      }
+    };
+
+    let lineBusy = false;
+    document.getElementById("line").parentElement.onclick = () => {
+      lineBusy = !lineBusy;
+      document.getElementById("line").textContent = lineBusy ? "产线占用相机" : "产线空闲";
+      document.getElementById("lineDot").className = lineBusy ? "dot warn" : "dot";
+      document.getElementById("btnTest").disabled = lineBusy;
+      document.getElementById("prodWarn").hidden = !lineBusy;
+      document.getElementById("stage").classList.toggle("busy", lineBusy);
+    };
+  </script>
+</body>
+</html>

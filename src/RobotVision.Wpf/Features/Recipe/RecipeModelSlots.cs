@@ -21,6 +21,23 @@ internal static class RecipeModelSlots
         };
     }
 
+    /// <summary>单模型角度模式只使用 Models[0]（与 <see cref="RecipeLoader.Validate"/> 口径一致）。</summary>
+    public static bool UsesSingleModelSlot(AngleMode mode) =>
+        mode is AngleMode.MaskMinAreaRect or AngleMode.KeyPointLine or AngleMode.MaskTemplate;
+
+    /// <summary>
+    /// 离开双模型后把名单裁成主模型。返回是否丢掉了有名字的次模型（用于提示）。
+    /// </summary>
+    public static bool TrimToSingleModelSlot(RecipeConfig editor)
+    {
+        if (!UsesSingleModelSlot(editor.AngleMode) || editor.Models.Count <= 1)
+            return false;
+
+        var hadNamedExtras = editor.Models.Skip(1).Any(m => !string.IsNullOrWhiteSpace(m));
+        editor.Models = [editor.Models[0]];
+        return hadNamedExtras;
+    }
+
     private static string? GuardExtraModels(RecipeConfig editor, int maxSlots, string modeLabel)
     {
         if (editor.Models.Count <= maxSlots)
@@ -41,14 +58,6 @@ internal static class RecipeModelSlots
 
     private static string? NormalizeSingleModelSlot(RecipeConfig editor, string primary)
     {
-        var extras = editor.Models
-            .Select((model, index) => (model, index))
-            .Where(t => t.index > 0 && !string.IsNullOrWhiteSpace(t.model))
-            .Select(t => t.model)
-            .ToList();
-        if (extras.Count > 0)
-            return $"当前角度模式只需 1 个模型；配方里还有多余项：{string.Join("、", extras)}。";
-
         var chosen = string.IsNullOrWhiteSpace(primary)
             ? editor.Models.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m)) ?? ""
             : primary;

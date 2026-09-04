@@ -58,7 +58,7 @@ internal static class RecipeEditorHints
         AngleMode.MaskMinAreaRect => "最小外接矩形角度为 [0,180)，无头尾。与偏心工具同时保存会被拒绝。",
         AngleMode.DualCenterLine => "默认全局就近配对，多目标间距接近时可能配错；开「窗口配对」后 B 只在 A 外扩窗口内检测，多目标不配错",
         AngleMode.MaskTemplate => "分割给粗框，精修过门才输出有向角。失败默认 1019。方法推荐与赛马见配方向导；示教仅写极性/阈值。保存后才上产线。",
-        AngleMode.DualBlobCenterLine => "主BLOB质心定位、主→次质心定向（有方向）；次BLOB缺失该目标不输出；无需模型",
+        AngleMode.DualBlobCenterLine => "BLOB1 只在 ROI1 内定位，BLOB2 只在 ROI2 内定向（有方向）。不设 ROI2 则用主包围盒外扩窗口。次BLOB缺失该目标不输出；无需模型",
         _ => "",
     };
 

@@ -197,6 +197,38 @@ public class CameraManagerTests
     }
 
     [Fact]
+    public async Task GrabAsync_CancelDuringGrab_ReleasesGateForNextCaller()
+    {
+        using var manager = new CameraManager();
+        using var entered = new ManualResetEventSlim(false);
+        var grabs = 0;
+        var camera = new FakeCamera("cam1")
+        {
+            OnGrab = ct =>
+            {
+                if (Interlocked.Increment(ref grabs) == 1)
+                {
+                    entered.Set();
+                    if (!ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(10)))
+                        throw new TimeoutException("测试应在等待期间被取消");
+                    ct.ThrowIfCancellationRequested();
+                }
+                return new CameraFrame(VisionImage.AllocateZero(4, 4, 3), DateTime.UtcNow);
+            },
+        };
+        manager.Register(camera);
+
+        using var cts = new CancellationTokenSource();
+        var first = manager.GrabAsync("cam1", cts.Token);
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+
+        using var frame = await manager.GrabAsync("cam1", CancellationToken.None);
+        Assert.Equal(4, frame.Image.Width);
+    }
+
+    [Fact]
     public void Grab_Unregistered_Throws()
     {
         using var manager = new CameraManager();

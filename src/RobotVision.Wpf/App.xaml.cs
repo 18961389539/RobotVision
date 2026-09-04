@@ -127,7 +127,20 @@ public partial class App : Application, IDisposable
                 foreach (var (recipeName, error) in recipeErrors)
                     AppLog.RecipeLoadFailed(logger, recipeName, error);
 
-                await host.StartAsync().ConfigureAwait(false);
+                // 配方"静默半加载"此前仅落日志；此处汇总到状态栏，避免产线对加载失败无感。
+                // 注：上方 ConfigureAwait(false) 后回到线程池线程，ReportBackgroundFailure 内部自行切回 UI。
+                if (recipeErrors.Count > 0)
+                    shellViewModel.ReportBackgroundFailure($"{recipeErrors.Count} 个配方加载失败，详见「配方管理」页与日志");
+
+                try
+                {
+                    await host.StartAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    shellViewModel.ReportBackgroundFailure($"后台服务启动失败，详见日志：{ex.Message}");
+                    throw; // 保留 UiFireAndForget 的原有记录路径
+                }
             }, logger);
         }, System.Windows.Threading.DispatcherPriority.Loaded);
     }

@@ -15,18 +15,21 @@ namespace RobotVision.WpfHost.Features.Recipe;
 /// </summary>
 internal sealed class RecipeRoiLiveSync : IDisposable
 {
-    private enum LiveRoiKind { Detection, Template }
+    private enum LiveRoiKind { Detection, Template, Secondary }
 
     private readonly RecipeRoiEditor _roi;
     private readonly Func<IRoiViewport> _activeViewport;
     private readonly IReadOnlyList<IRoiViewport> _viewports;
     private readonly Func<Roi?> _detectionRoi;
     private readonly Func<Roi?> _templateRoi;
+    private readonly Func<Roi?> _secondaryRoi;
     private readonly Func<bool> _usesFeatureTeachRoi;
     private readonly Func<bool> _showTemplateRoi;
+    private readonly Func<bool> _showSecondaryRoi;
 
     private RotatedRect? _detectionRect;
     private RotatedRect? _templateRect;
+    private RotatedRect? _secondaryRect;
     private LineMeasureRoi? _refineLineRoi;
     private readonly Func<RefineLine?> _refineLine;
     private readonly Func<bool> _usesRefineLine;
@@ -34,6 +37,7 @@ internal sealed class RecipeRoiLiveSync : IDisposable
     private bool _syncingRect;
     private bool _startDrawAfterGrab;
     private bool _startDrawTemplateAfterGrab;
+    private bool _startDrawSecondaryAfterGrab;
     private bool _wired;
 
     public RecipeRoiLiveSync(
@@ -45,7 +49,9 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         Func<bool> usesFeatureTeachRoi,
         Func<bool> showTemplateRoi,
         Func<RefineLine?> refineLine,
-        Func<bool> usesRefineLine)
+        Func<bool> usesRefineLine,
+        Func<Roi?>? secondaryRoi = null,
+        Func<bool>? showSecondaryRoi = null)
     {
         _roi = roi;
         _activeViewport = activeViewport;
@@ -56,6 +62,8 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         _showTemplateRoi = showTemplateRoi;
         _refineLine = refineLine;
         _usesRefineLine = usesRefineLine;
+        _secondaryRoi = secondaryRoi ?? (() => null);
+        _showSecondaryRoi = showSecondaryRoi ?? (() => false);
     }
 
     public bool IsTemplateDrawTarget
@@ -63,6 +71,14 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         get => _drawTarget == LiveRoiKind.Template;
         set => _drawTarget = value ? LiveRoiKind.Template : LiveRoiKind.Detection;
     }
+
+    public void SetDrawTarget(RecipeRoiDrawKind kind) =>
+        _drawTarget = kind switch
+        {
+            RecipeRoiDrawKind.Template => LiveRoiKind.Template,
+            RecipeRoiDrawKind.SecondaryBlob => LiveRoiKind.Secondary,
+            _ => LiveRoiKind.Detection,
+        };
 
     public bool StartDrawAfterGrab
     {
@@ -74,6 +90,12 @@ internal sealed class RecipeRoiLiveSync : IDisposable
     {
         get => _startDrawTemplateAfterGrab;
         set => _startDrawTemplateAfterGrab = value;
+    }
+
+    public bool StartDrawSecondaryAfterGrab
+    {
+        get => _startDrawSecondaryAfterGrab;
+        set => _startDrawSecondaryAfterGrab = value;
     }
 
     public void Wire()
@@ -112,6 +134,8 @@ internal sealed class RecipeRoiLiveSync : IDisposable
     {
         if (_drawTarget == LiveRoiKind.Template)
             _roi.EnsureFeatureRoiDrawable();
+        else if (_drawTarget == LiveRoiKind.Secondary)
+            _roi.UseSecondaryRoi = true;
         _activeViewport().StartRoiMode();
     }
 
@@ -132,6 +156,15 @@ internal sealed class RecipeRoiLiveSync : IDisposable
             if (_usesFeatureTeachRoi())
             {
                 _drawTarget = LiveRoiKind.Template;
+                StartRoiMode();
+            }
+        }
+        else if (_startDrawSecondaryAfterGrab)
+        {
+            _startDrawSecondaryAfterGrab = false;
+            if (_showSecondaryRoi())
+            {
+                _drawTarget = LiveRoiKind.Secondary;
                 StartRoiMode();
             }
         }
@@ -175,6 +208,15 @@ internal sealed class RecipeRoiLiveSync : IDisposable
                         ClearLiveRect(ref _templateRect);
                 }
                 break;
+            case nameof(RecipeRoiEditor.UseSecondaryRoi):
+                if (!_syncingRect && _roi.HasRoiRefFrame)
+                {
+                    if (_showSecondaryRoi() && _roi.UseSecondaryRoi)
+                        SyncLiveRectsFromRecipe();
+                    else
+                        ClearLiveRect(ref _secondaryRect);
+                }
+                break;
             case nameof(RecipeRoiEditor.HasRefineLine):
                 if (!_syncingRect && _roi.HasRoiRefFrame)
                     SyncLiveLineFromRecipe();
@@ -196,6 +238,13 @@ internal sealed class RecipeRoiLiveSync : IDisposable
                 if (_usesFeatureTeachRoi())
                     UpdateLiveRectFromRecipe(_templateRect, _templateRoi());
                 break;
+            case nameof(RecipeRoiEditor.SecondaryRoiPxX):
+            case nameof(RecipeRoiEditor.SecondaryRoiPxY):
+            case nameof(RecipeRoiEditor.SecondaryRoiPxWidth):
+            case nameof(RecipeRoiEditor.SecondaryRoiPxHeight):
+                if (_showSecondaryRoi())
+                    UpdateLiveRectFromRecipe(_secondaryRect, _secondaryRoi());
+                break;
         }
     }
 
@@ -205,12 +254,16 @@ internal sealed class RecipeRoiLiveSync : IDisposable
             return;
         if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems?[0] is RotatedRect added)
         {
-            if (ReferenceEquals(added, _detectionRect) || ReferenceEquals(added, _templateRect))
+            if (ReferenceEquals(added, _detectionRect) ||
+                ReferenceEquals(added, _templateRect) ||
+                ReferenceEquals(added, _secondaryRect))
                 return;
             if (_drawTarget == LiveRoiKind.Template)
-                AdoptDrawnRect(added, ref _templateRect, isTemplate: true);
+                AdoptDrawnRect(added, ref _templateRect, LiveRoiKind.Template);
+            else if (_drawTarget == LiveRoiKind.Secondary)
+                AdoptDrawnRect(added, ref _secondaryRect, LiveRoiKind.Secondary);
             else
-                AdoptDrawnRect(added, ref _detectionRect, isTemplate: false);
+                AdoptDrawnRect(added, ref _detectionRect, LiveRoiKind.Detection);
         }
         else if (e.Action == NotifyCollectionChangedAction.Remove)
         {
@@ -218,22 +271,25 @@ internal sealed class RecipeRoiLiveSync : IDisposable
                 DetachRect(ref _detectionRect);
             else if (ReferenceEquals(e.OldItems?[0], _templateRect))
                 DetachRect(ref _templateRect);
+            else if (ReferenceEquals(e.OldItems?[0], _secondaryRect))
+                DetachRect(ref _secondaryRect);
         }
         else if (e.Action == NotifyCollectionChangedAction.Reset)
         {
             DetachRect(ref _detectionRect);
             DetachRect(ref _templateRect);
+            DetachRect(ref _secondaryRect);
         }
     }
 
-    private void AdoptDrawnRect(RotatedRect added, ref RotatedRect? slot, bool isTemplate)
+    private void AdoptDrawnRect(RotatedRect added, ref RotatedRect? slot, LiveRoiKind kind)
     {
         var previous = slot;
         DetachRect(ref slot);
         slot = added;
-        StyleLiveRect(added, isTemplate);
+        StyleLiveRect(added, kind);
         added.PropertyChanged += OnLiveRectPropertyChanged;
-        ApplyLiveRectToRecipe(added, isTemplate);
+        ApplyLiveRectToRecipe(added, kind);
         if (previous is not null)
             ScheduleRemoveStale(previous);
     }
@@ -242,7 +298,9 @@ internal sealed class RecipeRoiLiveSync : IDisposable
     {
         if (!_wired)
             return;
-        if (ReferenceEquals(previous, _detectionRect) || ReferenceEquals(previous, _templateRect))
+        if (ReferenceEquals(previous, _detectionRect) ||
+            ReferenceEquals(previous, _templateRect) ||
+            ReferenceEquals(previous, _secondaryRect))
             return;
         var dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
         dispatcher.BeginInvoke(DispatcherPriority.DataBind, new Action(() => RemoveRoiFromAll(previous)));
@@ -265,19 +323,25 @@ internal sealed class RecipeRoiLiveSync : IDisposable
 
         if (!_syncingRect &&
             e.PropertyName is nameof(RotatedRect.Center) or nameof(RotatedRect.Width) or nameof(RotatedRect.Height))
-            ApplyLiveRectToRecipe(rect, ReferenceEquals(rect, _templateRect));
+            ApplyLiveRectToRecipe(rect, KindOf(rect));
     }
 
-    private void ApplyLiveRectToRecipe(RotatedRect rect, bool isTemplate)
+    private void ApplyLiveRectToRecipe(RotatedRect rect, LiveRoiKind kind)
     {
         _syncingRect = true;
         try
         {
-            if (isTemplate)
+            if (kind == LiveRoiKind.Template)
             {
                 if (!_usesFeatureTeachRoi())
                     return;
                 _roi.ApplyTemplateRoiFromRect(rect.Center.X, rect.Center.Y, rect.Width, rect.Height);
+            }
+            else if (kind == LiveRoiKind.Secondary)
+            {
+                if (!_showSecondaryRoi())
+                    return;
+                _roi.ApplySecondaryRoiFromRect(rect.Center.X, rect.Center.Y, rect.Width, rect.Height);
             }
             else
                 _roi.ApplyRoiFromRect(rect.Center.X, rect.Center.Y, rect.Width, rect.Height);
@@ -286,6 +350,15 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         {
             _syncingRect = false;
         }
+    }
+
+    private LiveRoiKind KindOf(RotatedRect rect)
+    {
+        if (ReferenceEquals(rect, _templateRect))
+            return LiveRoiKind.Template;
+        if (ReferenceEquals(rect, _secondaryRect))
+            return LiveRoiKind.Secondary;
+        return LiveRoiKind.Detection;
     }
 
     private void UpdateLiveRectFromRecipe(RotatedRect? rect, Roi? r)
@@ -320,9 +393,11 @@ internal sealed class RecipeRoiLiveSync : IDisposable
         {
             ClearAllLiveRects();
             if (_detectionRoi() is { } det)
-                _detectionRect = AddLiveRect(det, isTemplate: false);
+                _detectionRect = AddLiveRect(det, LiveRoiKind.Detection);
             if (_showTemplateRoi() && _templateRoi() is { } feat)
-                _templateRect = AddLiveRect(feat, isTemplate: true);
+                _templateRect = AddLiveRect(feat, LiveRoiKind.Template);
+            if (_showSecondaryRoi() && _secondaryRoi() is { } sec)
+                _secondaryRect = AddLiveRect(sec, LiveRoiKind.Secondary);
         }
         finally
         {
@@ -447,7 +522,7 @@ internal sealed class RecipeRoiLiveSync : IDisposable
             viewport.RemoveLineRoi(line);
     }
 
-    private RotatedRect AddLiveRect(Roi r, bool isTemplate)
+    private RotatedRect AddLiveRect(Roi r, LiveRoiKind kind)
     {
         var rect = new RotatedRect
         {
@@ -457,22 +532,28 @@ internal sealed class RecipeRoiLiveSync : IDisposable
             Width = r.Width * _roi.RoiRefWidth,
             Height = r.Height * _roi.RoiRefHeight,
         };
-        StyleLiveRect(rect, isTemplate);
+        StyleLiveRect(rect, kind);
         rect.PropertyChanged += OnLiveRectPropertyChanged;
         _activeViewport().AddRoi(rect);
         return rect;
     }
 
-    private static void StyleLiveRect(RotatedRect rect, bool isTemplate)
+    private void StyleLiveRect(RotatedRect rect, LiveRoiKind kind)
     {
-        rect.Label = isTemplate ? "特征" : "检测";
-        rect.StrokeColor = isTemplate ? Colors.Orange : Colors.Lime;
+        (rect.Label, rect.StrokeColor) = kind switch
+        {
+            LiveRoiKind.Template => ("特征", Colors.Orange),
+            LiveRoiKind.Secondary => ("ROI2", Colors.DeepSkyBlue),
+            LiveRoiKind.Detection when _roi.UseSecondaryRoi => ("ROI1", Colors.Lime),
+            _ => ("检测", Colors.Lime),
+        };
     }
 
     private void ClearAllLiveRects()
     {
         ClearLiveRect(ref _detectionRect);
         ClearLiveRect(ref _templateRect);
+        ClearLiveRect(ref _secondaryRect);
     }
 
     private void ClearLiveRect(ref RotatedRect? slot)

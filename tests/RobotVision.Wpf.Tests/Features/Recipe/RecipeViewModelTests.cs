@@ -185,7 +185,7 @@ public class RecipeViewModelTests : IDisposable
 
             vm.HasUnsavedChanges.Should().BeTrue();
             vm.Editor.Roi.Should().NotBeNull();
-            vm.UnsavedHint.Should().Contain("试触发已用当前编辑器");
+            vm.UnsavedHint.Should().Contain("测试走当前编辑器");
         }
         finally { vm.Dispose(); }
     }
@@ -501,6 +501,156 @@ public class RecipeViewModelTests : IDisposable
             vm.PolarityLockHint.Should().Contain("已锁定");
             vm.PolarityLockHint.Should().Contain("亮场");
             vm.PolarityLockHint.Should().Contain("凸起在+短轴");
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public async Task DirtyChipText_TracksUnsaved_AndPipelineDefaultsIdle()
+    {
+        var vm = CreateVm();
+        try
+        {
+            await vm.List.RefreshAsync("B02");
+            vm.Editor.Name.Should().Be("B02");
+
+            vm.DirtyChipText.Should().Be("已保存");
+            vm.IsPipelineOccupied.Should().BeFalse();
+
+            vm.Editor.Confidence = 0.11;
+            vm.NotifyEditorMutated();
+
+            vm.HasUnsavedChanges.Should().BeTrue();
+            vm.DirtyChipText.Should().Be("未保存 · 产线仍是旧版");
+            vm.UnsavedHint.Should().Contain("产线 TRIGGER 仍是磁盘旧版");
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void LineFit_HidesPolarityLockHint()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.AngleMode = AngleMode.MaskTemplate;
+            vm.Editor.Template.RefineMethod = SegmentRefineMethod.LineFit;
+            vm.Editor.Template.HousingEdgePolarity = HousingEdgePolarity.BrightToDark;
+            vm.Editor.Template.TabPolarity = TabPolarityLock.PlusShortAxis;
+            vm.NotifyEditorMutated();
+
+            vm.PolarityLockHint.Should().BeEmpty();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void EditorAngleMode_DualToSingle_TrimsSecondaryAndClearsTeachImage()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.AngleMode = AngleMode.DualCenterLine;
+            vm.Editor.Models = ["b.onnx", "extra.onnx"];
+            vm.Editor.Template.TemplateImageBase64 = "abc==";
+
+            vm.EditorAngleMode = AngleMode.MaskMinAreaRect;
+
+            vm.Editor.Models.Should().Equal("b.onnx");
+            vm.SecondaryModel.Should().BeEmpty();
+            vm.Editor.Template.TemplateImageBase64.Should().BeEmpty();
+            vm.Message.Should().Contain("次模型");
+            vm.Message.Should().Contain("示教模板图");
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void EditorRefineMethod_TemplateToLineFit_ClearsTeachImage()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.Editor.AngleMode = AngleMode.MaskTemplate;
+            vm.Editor.Template.RefineMethod = SegmentRefineMethod.Template;
+            vm.Editor.Template.TemplateImageBase64 = "abc==";
+            vm.Editor.Template.Roi = new RobotVision.Core.Models.Roi(0.1, 0.2, 0.3, 0.4);
+
+            vm.EditorRefineMethod = SegmentRefineMethod.LineFit;
+
+            vm.Editor.Template.TemplateImageBase64.Should().BeEmpty();
+            vm.Editor.Template.Roi.Should().BeNull();
+            vm.Message.Should().Contain("示教模板图");
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void Refresh_FlushesNumberBoxBeforeDirtyCheck()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            _dialogs.ConfirmDiscardResult = false;
+            vm.FlushPendingEdits = () => vm.Editor.Confidence = 0.91;
+
+            vm.RefreshCommand.Execute(null);
+
+            vm.Editor.Name.Should().Be("B02");
+            vm.Editor.Confidence.Should().Be(0.91);
+            vm.HasUnsavedChanges.Should().BeTrue();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void Copy_FlushesNumberBoxIntoClone()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            vm.FlushPendingEdits = () => vm.Editor.Confidence = 0.77;
+
+            vm.CopyCommand.Execute(null);
+
+            vm.IsNew.Should().BeTrue();
+            vm.Editor.Confidence.Should().Be(0.77);
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void New_FlushesNumberBoxBeforeDiscardCheck()
+    {
+        var vm = CreateVm();
+        try
+        {
+            var target = vm.Recipes.First(r => r.Name == "B02");
+            vm.Selected = null;
+            vm.Selected = target;
+            _dialogs.ConfirmDiscardResult = false;
+            vm.FlushPendingEdits = () => vm.Editor.SerialNumber = 12;
+
+            vm.NewCommand.Execute(null);
+
+            vm.IsNew.Should().BeFalse();
+            vm.Editor.Name.Should().Be("B02");
+            vm.Editor.SerialNumber.Should().Be(12);
         }
         finally { vm.Dispose(); }
     }

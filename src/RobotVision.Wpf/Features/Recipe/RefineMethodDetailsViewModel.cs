@@ -3,13 +3,14 @@ using CommunityToolkit.Mvvm.Input;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
+using RobotVision.WpfHost.Shared;
 using System.ComponentModel;
 using System.Windows.Media;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
 /// <summary>精修方法参数详情弹窗：编辑当前 <see cref="TemplateOptions"/>，取消时恢复快照。</summary>
-internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
+internal sealed partial class RefineMethodDetailsViewModel : ObservableObject, ICommitPendingEdits
 {
     private readonly RecipeViewModel _host;
     private TemplateOptions _snapshot;
@@ -40,6 +41,8 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
     internal void DetachHostForClose() => DetachHost();
 
     public RecipeViewModel Host => _host;
+
+    public Action? FlushPendingEdits { get; set; }
 
     public TemplateOptions Template => _host.Editor.Template;
 
@@ -95,16 +98,30 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
     public bool ShowCentroidPanel => Template.RefineMethod == SegmentRefineMethod.CentroidHoleLine;
 
     public bool ShowRefineRange =>
-        Template.RefineMethod is SegmentRefineMethod.Template or SegmentRefineMethod.ShapeMatch;
+        Template.RefineMethod is SegmentRefineMethod.Template
+            or SegmentRefineMethod.ShapeMatch
+            or SegmentRefineMethod.Sift;
+
+    public bool ShowNoFlip => ShowRefineRange;
 
     public bool ShowFeatureRoi => TemplateOptions.UsesFeatureTeachRoi(Template.RefineMethod);
 
     public bool ShowPolarity =>
-        Template.RefineMethod is SegmentRefineMethod.CaliperTab or SegmentRefineMethod.Template;
+        Template.RefineMethod is SegmentRefineMethod.CaliperTab
+            or SegmentRefineMethod.Template
+            or SegmentRefineMethod.LineFit;
 
-    public bool ShowGeometryGates => Template.TeachAreaPx > 1;
+    public string AdaptiveRangeHint =>
+        ShowRefineRange
+            ? $"配置 {TemplateOptions.FormatRefineAngleWindow(Template)}。细长件（轴比≥2.5）运行时每侧最多 ±3°；中等轴比最多 ±5°；近方形用完整配置。"
+            : "";
 
-    /// <summary>精修范围语义提示：范围 = 实际角度窗 ±range°；NoFlip 时仅 0 支（无 ±180° 额外搜索）。</summary>
+    public string SuggestedMatchThresholdHint =>
+        Template.TeachPeakScore >= 0.3
+            ? $"示教峰 {Template.TeachPeakScore:0.00} → 建议匹配阈值 {TemplateOptions.MatchThresholdFromTeachPeak(Template.TeachPeakScore):0.00}"
+            : "尚未记录示教峰（示教模板后写入）。";
+
+    /// <summary>角度范围语义提示：输入值为半宽 ±range°；NoFlip 时仅 0 支（无 ±180° 额外搜索）。</summary>
     public string RefineRangeHint => TemplateOptions.RefineRangeHintText(Template);
 
     public IReadOnlyList<EnumItem<HousingEdgePolarity>> EdgePolarityOptions { get; } =
@@ -119,6 +136,13 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
         new(TabPolarityLock.Auto, "自动（每帧实测凸起侧）"),
         new(TabPolarityLock.PlusShortAxis, "示教：凸起在 +短轴"),
         new(TabPolarityLock.MinusShortAxis, "示教：凸起在 −短轴"),
+    ];
+
+    public IReadOnlyList<EnumItem<ShapeMatchMetric>> ShapeMetricOptions { get; } =
+    [
+        new(ShapeMatchMetric.UsePolarity, "使用极性（亮暗方向一致）"),
+        new(ShapeMatchMetric.IgnoreLocalPolarity, "忽略局部极性"),
+        new(ShapeMatchMetric.IgnoreGlobalPolarity, "忽略全局极性"),
     ];
 
     public bool RequestTemplateRoiDrawAfterClose { get; private set; }
@@ -145,10 +169,12 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowLineFitPanel));
         OnPropertyChanged(nameof(ShowCentroidPanel));
         OnPropertyChanged(nameof(ShowRefineRange));
+        OnPropertyChanged(nameof(ShowNoFlip));
         OnPropertyChanged(nameof(ShowFeatureRoi));
         OnPropertyChanged(nameof(ShowPolarity));
-        OnPropertyChanged(nameof(ShowGeometryGates));
         OnPropertyChanged(nameof(RefineRangeHint));
+        OnPropertyChanged(nameof(AdaptiveRangeHint));
+        OnPropertyChanged(nameof(SuggestedMatchThresholdHint));
         OnPropertyChanged(nameof(TeachGeometryHint));
         OnPropertyChanged(nameof(TeachPeakHint));
         OnPropertyChanged(nameof(RefineMethodScoreHint));
@@ -191,6 +217,8 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
     {
         if (!ShowFeatureRoi)
             return;
+        this.Commit();
+        Template.EnsureRefineAngleBounds();
         AcceptedByUser = true;
         RequestTemplateRoiDrawAfterClose = true;
         DetachHost();
@@ -208,6 +236,8 @@ internal sealed partial class RefineMethodDetailsViewModel : ObservableObject
     [RelayCommand]
     private void Accept()
     {
+        this.Commit();
+        Template.EnsureRefineAngleBounds();
         AcceptedByUser = true;
         DetachHost();
         _host.NotifyEditorMutated();

@@ -1,0 +1,15 @@
+﻿file,split,usable,cx,cy,angle_deg,score,ms,refine_ms,note,flip
+20260828_153944575_Product_OK.png,dev,yes,2616.986,2139.13,0.109,0.974,911.9,101.8,"JLVision shape score=0.974;br=0",no
+20260828_153945693_Product_OK.png,dev,yes,2611.779,2263.612,-0.09,0.655,244.0,64.4,"JLVision shape score=0.655;br=0",no
+20260828_153947060_Product_OK.png,dev,yes,2749.016,2130.835,-4.864,0.958,233.0,58.7,"JLVision geo fallback-measure;par=0.17°",no
+20260828_153948870_Product_OK.png,dev,yes,2708.103,2143.711,5.14,0.989,208.1,49.9,"JLVision geo fallback-measure;par=0.04°",no
+20260828_154912214_Product_OK.png,dev,yes,2717.35,2151.179,0.376,0.996,230.2,58.6,"JLVision shape score=0.996;br=0",no
+20260828_155032453_Product_OK.png,dev,yes,2715.568,2155.523,0.072,0.982,215.8,57.5,"JLVision shape score=0.982;br=0",no
+20260828_155055353_Product_OK.png,dev,no,2402.5,1856,-90,0.2,170.1,10.4,"refine_fail JLVision 卡尺边不足 0",no
+20260828_155104575_Product_OK.png,dev,yes,2675.18,2190.627,-0.054,0.914,215.5,61.2,"JLVision shape score=0.914;br=0",no
+20260828_155134721_Product_OK.png,dev,yes,2729.003,2163.301,-0.093,0.92,214.9,60.2,"JLVision shape score=0.920;br=0",no
+20260828_160028323_Product_OK.png,dev,yes,2650.978,2336.152,0.624,0.954,199.3,45.2,"JLVision geo fallback-measure;par=0.19°",no
+20260828_160130962_Product_OK.png,dev,yes,2650.521,2345.151,0.603,0.951,206.0,45.7,"JLVision geo fallback-measure;par=0.20°",no
+20260828_160256120_Product_OK.png,dev,yes,2715.673,2297.125,0.014,0.971,207.5,49.8,"JLVision geo fallback-measure;par=0.12°",no
+20260828_160315766_Product_OK.png,dev,yes,2652.807,2041.932,3.472,0.846,202.2,47.4,"JLVision geo fallback-measure;par=0.62°",no
+20260828_160411525_Product_OK.png,dev,yes,2763.501,2152.813,0.226,0.428,209.8,54.0,"JLVision shape score=0.428;br=0",no

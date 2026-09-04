@@ -47,4 +47,15 @@ public sealed class InstanceGeometryTests
         var area = InstanceGeometry.PolygonArea([(0, 0), (10, 0), (10, 4), (0, 4)]);
         Assert.Equal(40, area, 6);
     }
+
+    [Fact]
+    public void DeriveRectangleSides_MatchesAreaAndAspect()
+    {
+        const double area = 281_935.5;
+        const double aspect = 2.182741145059986;
+        var (longLen, shortLen) = InstanceGeometry.DeriveRectangleSides(area, aspect);
+        Assert.True(longLen > shortLen);
+        Assert.Equal(area, longLen * shortLen, 1.0);
+        Assert.Equal(aspect, longLen / shortLen, 0.01);
+    }
 }

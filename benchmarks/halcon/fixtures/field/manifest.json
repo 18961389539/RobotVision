@@ -1,0 +1,66 @@
+[
+  {
+    "id": "field_20260828_153936771_Product_OK",
+    "scenario": "field_product",
+    "seed_deg": 179.77383422851562,
+    "contour_points": 4334,
+    "image": "field_20260828_153936771_Product_OK.png",
+    "contour": "field_20260828_153936771_Product_OK.contour.csv"
+  },
+  {
+    "id": "field_20260828_153937914_Product_OK",
+    "scenario": "field_product",
+    "seed_deg": 179.63506317138672,
+    "contour_points": 4977,
+    "image": "field_20260828_153937914_Product_OK.png",
+    "contour": "field_20260828_153937914_Product_OK.contour.csv"
+  },
+  {
+    "id": "field_20260828_153939015_Product_OK",
+    "scenario": "field_product",
+    "seed_deg": 179.68169403076172,
+    "contour_points": 3989,
+    "image": "field_20260828_153939015_Product_OK.png",
+    "contour": "field_20260828_153939015_Product_OK.contour.csv"
+  },
+  {
+    "id": "field_20260828_153940139_Product_OK",
+    "scenario": "field_product",
+    "seed_deg": 0,
+    "contour_points": 3797,
+    "image": "field_20260828_153940139_Product_OK.png",
+    "contour": "field_20260828_153940139_Product_OK.contour.csv"
+  },
+  {
+    "id": "field_20260828_153941260_Product_OK",
+    "scenario": "field_product",
+    "seed_deg": 179.92461395263672,
+    "contour_points": 3286,
+    "image": "field_20260828_153941260_Product_OK.png",
+    "contour": "field_20260828_153941260_Product_OK.contour.csv"
+  },
+  {
+    "id": "field_20260828_153942369_Product_OK",
+    "scenario": "field_product",
+    "seed_deg": 179.92461395263672,
+    "contour_points": 3327,
+    "image": "field_20260828_153942369_Product_OK.png",
+    "contour": "field_20260828_153942369_Product_OK.contour.csv"
+  },
+  {
+    "id": "field_20260828_153943477_Product_OK",
+    "scenario": "field_product",
+    "seed_deg": 179.9248046875,
+    "contour_points": 3448,
+    "image": "field_20260828_153943477_Product_OK.png",
+    "contour": "field_20260828_153943477_Product_OK.contour.csv"
+  },
+  {
+    "id": "field_20260828_153944575_Product_OK",
+    "scenario": "field_product",
+    "seed_deg": 179.8492202758789,
+    "contour_points": 4368,
+    "image": "field_20260828_153944575_Product_OK.png",
+    "contour": "field_20260828_153944575_Product_OK.contour.csv"
+  }
+]

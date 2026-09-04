@@ -127,9 +127,9 @@ var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "
     ("像素 ?毫米", "像素 → 毫米"),
     ("比?(mm/px)", "比例 (mm/px)"),
     ("配?外参", "配方外参"),
-    ("物?mm", "物体 mm"),
-    ("Content=\"?X\"", "Content=\"填 X\""),
-    ("Content=\"?Y\"", "Content=\"填 Y\""),
+    ("物?mm", "物长 (mm)"),
+    ("Content=\"?X\"", "Content=\"→X\""),
+    ("Content=\"?Y\"", "Content=\"→Y\""),
     ("确?ResultLog", "确认 ResultLog"),
     ("视觉系?·", "视觉系统 ·"),
     ("）?相机", "）· 相机"),
@@ -191,6 +191,19 @@ var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "
     ("<!-- 推理与角\"-->", "<!-- 推理与角度 -->"),
     ("Content=\"取一\"", "Content=\"取一张\""),
     ("Content=\"应用并取图预\"", "Content=\"应用并取图预览\""),
+    ("随时可?-->", "随时可见 -->"),
+    ("操作工按画面像素?-->", "操作工按画面像素调整 -->"),
+    ("结果图视?-->", "结果图视图 -->"),
+    ("语义\"-->", "语义） -->"),
+    ("避免重复\"-->", "避免重复） -->"),
+    ("不留空\"-->", "不留空） -->"),
+    ("关键点模\"-->", "关键点模式 -->"),
+    ("双模型模\"-->", "双模型模式 -->"),
+    ("无需模型\"-->", "无需模型） -->"),
+    ("选择参与标定的相\"", "选择参与标定的相机\""),
+    ("与配方外参同名的工位标\"", "与配方外参同名的工位标定\""),
+    ("并同步填入宽\"", "并同步填入宽高\""),
+    ("已有配方改名后保存：写入新文件并删除旧名（PLC 请改用新名称或序列号\"", "已有配方改名后保存：写入新文件并删除旧名（PLC 请改用新名称或序列号）\""),
     ("Text=\"单帧取图超时（ms\"", "Text=\"单帧取图超时（ms）\""),
     ("Text=\"模拟曝光延时（ms\"", "Text=\"模拟曝光延时（ms）\""),
     ("Content=\"仅读分辨\"", "Content=\"仅读分辨率\""),
@@ -211,9 +224,20 @@ var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "
     ("Text=\"合格\" FontSize=\"11\"\n                                           Foreground=\"{DynamicResource TextFillColorTertiaryBrush}\" />\n                                <TextBlock Text=\"{Binding YieldText}\"", "Text=\"合格率\" FontSize=\"11\"\n                                           Foreground=\"{DynamicResource TextFillColorTertiaryBrush}\" />\n                                <TextBlock Text=\"{Binding YieldText}\""),
 ];
 
+static string NormalizeReplacementChars(string content) =>
+    content
+        .Replace("\uFFFD?", "?")
+        .Replace("\uFFFD", "?");
+
+static string FixTruncatedCommentClosures(string content) =>
+    System.Text.RegularExpressions.Regex.Replace(
+        content,
+        @"<!-- ([^<>\r\n]*?)""-->",
+        m => "<!-- " + m.Groups[1].Value + "） -->");
+
 static string FixReplacementCharArtifacts(string content)
 {
-    if (!content.Contains('\uFFFD')) return content;
+    if (!content.Contains('?') && !content.Contains('\uFFFD')) return content;
 
     (string Pattern, string Replacement)[] rules =
     [
@@ -272,7 +296,32 @@ static string FixReplacementCharArtifacts(string content)
         ("启动时.{0,3}data/calibration", "启动时从 data/calibration"),
         ("Content=\"应用并取图预.{0,3} Appearance=", "Content=\"应用并取图预览\" Appearance="),
         ("预\uFFFD? Appearance=", "预览\" Appearance="),
-        ("合格中位 .{0,3}示教", "合格中位 − 示教"),
+        ("换算助手：物.{0,6}mm ÷ 图上 px = 比例", "换算助手：物长 (mm) ÷ 图上 px = 比例"),
+        ("Content=\".{0,3}X\"", "Content=\"→X\""),
+        ("Content=\".{0,3}Y\"", "Content=\"→Y\""),
+        ("浮动面.{0,6}428px", "浮动面板 428px"),
+        ("三类档.{0,6}TabControl", "三类档案 TabControl"),
+        ("不刷新主画\"", "不刷新主画面\""),
+        ("PLC 触发\\?=未分配", "PLC 触发，0=未分配"),
+        ("档案\\?SHA-256", "档案的 SHA-256"),
+        ("返\\?1017", "返回 1017"),
+        ("关键\\?A", "关键点 A"),
+        ("关键\\?B", "关键点 B"),
+        ("最小间\\?px\\)", "最小间距(px)"),
+        ("最大间\\?px\\)", "最大间距(px)"),
+        ("吸\\?料厚", "吸盘/料厚"),
+        ("检测区\\?ROI", "检测区域 ROI"),
+        ("左上\\?X", "左上角 X"),
+        ("左上\\?Y", "左上角 Y"),
+        ("宽度\\?~1", "宽度，0~1"),
+        ("高度\\?~1", "高度，0~1"),
+        ("控制\\?Id", "控制器 Id"),
+        ("实时预\\?/", "实时预览 /"),
+        ("结果\\?/ ROI", "结果图 / ROI"),
+        ("首次取\\?/", "首次取图 /"),
+        ("结果图视\\?-->", "结果图视图 -->"),
+        ("随时可\\?-->", "随时可见 -->"),
+        ("操作工按画面像素\\?-->", "操作工按画面像素调整 -->"),
     ];
 
     foreach (var (pattern, replacement) in rules)
@@ -310,12 +359,14 @@ foreach (var path in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDi
 {
     var text = File.ReadAllText(path);
     var orig = text;
+    text = NormalizeReplacementChars(text);
     foreach (var (old, @new) in fixes)
         text = text.Replace(old, @new);
     text = FixWhPx(text);
     text = FixBytes(text);
     text = FixEmptyWh(text);
     text = FixReplacementCharArtifacts(text);
+    text = FixTruncatedCommentClosures(text);
     if (text == orig) continue;
     File.WriteAllText(path, text);
     Console.WriteLine("fixed: " + Path.GetFileName(path));

@@ -5,6 +5,7 @@ using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Teach;
+using RobotVision.JlVision;
 
 namespace RobotVision.Hosting;
 
@@ -122,7 +123,7 @@ public sealed class RecipeTestService(
             }
 
             using var roiMat = VisionImageMat.AsMat(roiView);
-            var crop = MaskTemplateHostingOps.UprightCrop(roiMat, points, 0);
+            var crop = MaskTemplateHostingOps.UprightCrop(roiMat, points, JlTemplateIo.CropMarginRatio);
             using (crop.Upright)
             {
                 Mat templateMat = crop.Upright;
@@ -148,14 +149,24 @@ public sealed class RecipeTestService(
 
                 try
                 {
-                    var advice = SegmentRefineAdvisor.Analyze(
-                        roiMat, points, crop.Upright, seg.BitPackedMask, box.Width, box.Height,
-                        editor.Template, templateMat, imgW, imgH, ox, oy,
-                        instanceConfidence: seg.Confidence,
-                        boxConfidence: editor.Confidence,
-                        pixelConfidence: editor.Segmentation.PixelConfidence,
-                        task: ScenePlaybook.FromRecipe(editor),
-                        prior: playbookPrior);
+                    var advice = SegmentRefineAdvisor.Analyze(new SegmentRefineAdvisor.TeachAnalyzeRequest(roiMat, points)
+                    {
+                        Upright = crop.Upright,
+                        BitPackedMask = seg.BitPackedMask,
+                        MaskWidth = box.Width,
+                        MaskHeight = box.Height,
+                        Template = editor.Template,
+                        TemplateImage = templateMat,
+                        FullImageWidth = imgW,
+                        FullImageHeight = imgH,
+                        OriginX = ox,
+                        OriginY = oy,
+                        InstanceConfidence = seg.Confidence,
+                        BoxConfidence = editor.Confidence,
+                        PixelConfidence = editor.Segmentation.PixelConfidence,
+                        Task = ScenePlaybook.FromRecipe(editor),
+                        Prior = playbookPrior,
+                    });
                     using var owned = templateMat.Clone();
                     var b64 = MaskTemplateHostingOps.EncodeTemplatePng(owned);
                     return new RecipeTeachTemplateResult(

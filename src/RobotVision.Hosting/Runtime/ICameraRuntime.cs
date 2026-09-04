@@ -23,6 +23,9 @@ public interface ICameraRuntime
     /// <summary>File 相机回放文件列表；非 File 或无文件时返回 null。</summary>
     IReadOnlyList<string>? GetPlaybackFiles(string cameraId);
 
+    /// <summary>File 相机最近一次取图的回放位置；非 File 或尚未取图时返回 null。</summary>
+    FilePlaybackCursor? GetLastPlayback(string cameraId);
+
     /// <summary>Virtual 相机棋盘内角点数；非 Virtual 时返回 null。</summary>
     VirtualChessboardSpec? GetVirtualChessboardInnerCorners(string cameraId);
 }
@@ -44,6 +47,13 @@ internal sealed class CameraRuntime(CameraManager inner) : ICameraRuntime
         if (!inner.TryGet(cameraId, out var camera) || camera is not FileCamera file)
             return null;
         return file.PlaybackFiles.Count > 0 ? file.PlaybackFiles : null;
+    }
+
+    public FilePlaybackCursor? GetLastPlayback(string cameraId)
+    {
+        if (!inner.TryGet(cameraId, out var camera) || camera is not FileCamera file)
+            return null;
+        return file.LastPlayback;
     }
 
     public VirtualChessboardSpec? GetVirtualChessboardInnerCorners(string cameraId)

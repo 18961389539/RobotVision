@@ -2,12 +2,11 @@ using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
-using RobotVision.Vision.Inference.Strategies;
-using RobotVision.Infrastructure.Inference;
+using RobotVision.JlVision;
 
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
-/// <summary>一次分割实例的精修输入（ROI 图 + 轮廓 + 可选示教缓存）。</summary>
+/// <summary>一次分割实例的精修输入（ROI 图 + 轮廓）。</summary>
 public readonly struct SegmentRefineRequest
 {
     public required Mat RoiView { get; init; }
@@ -17,10 +16,6 @@ public readonly struct SegmentRefineRequest
     public byte[]? BitPackedMask { get; init; }
     public int MaskWidth { get; init; }
     public int MaskHeight { get; init; }
-    public MaskTemplateRotationPack? Pack { get; init; }
-    public Mat? Template { get; init; }
-    public MaskSiftRefine.TeachModel? SiftTeach { get; init; }
-    public MaskShapeMatch.ShapeModel? ShapeModel { get; init; }
     public double BoxLeft { get; init; }
     public double BoxTop { get; init; }
 }
@@ -38,8 +33,7 @@ public readonly struct SegmentRefineHit
 
 /// <summary>
 /// 分割精修运行时：一种 <see cref="SegmentRefineMethod"/> 对应一个实现。
-/// 新增方法 = 实现本接口并 <c>SegmentRefineRuntimeRegistry.Default.Register</c>，
-/// 不再改 <see cref="MaskTemplateStrategy.Compute"/> 主循环。
+/// 全部后端为 JLVision。
 /// </summary>
 public interface ISegmentRefineRuntime
 {
@@ -48,7 +42,7 @@ public interface ISegmentRefineRuntime
     SegmentRefineHit Refine(in SegmentRefineRequest request);
 }
 
-/// <summary>精修方法注册表：与 <see cref="AngleStrategyTypeRegistry"/> 同构。</summary>
+/// <summary>按 <see cref="SegmentRefineMethod"/> 分发精修实现。</summary>
 public sealed class SegmentRefineRuntimeRegistry
 {
     public static SegmentRefineRuntimeRegistry Default { get; } = CreateDefault();
@@ -58,27 +52,26 @@ public sealed class SegmentRefineRuntimeRegistry
     public static SegmentRefineRuntimeRegistry CreateDefault()
     {
         var registry = new SegmentRefineRuntimeRegistry();
-        registry.Register(new TemplateSegmentRefineRuntime());
-        registry.Register(new SiftSegmentRefineRuntime());
-        registry.Register(new ShapeMatchSegmentRefineRuntime());
-        registry.Register(new CaliperTabSegmentRefineRuntime());
-        registry.Register(new CentroidHoleSegmentRefineRuntime());
-        registry.Register(new LineFitSegmentRefineRuntime());
         return registry;
     }
 
-    public void Register(ISegmentRefineRuntime runtime)
+    public SegmentRefineRuntimeRegistry()
     {
-        ArgumentNullException.ThrowIfNull(runtime);
-        _runtimes[runtime.Method] = runtime;
+        Register(new TemplateSegmentRefineRuntime());
+        Register(new SiftSegmentRefineRuntime());
+        Register(new ShapeMatchSegmentRefineRuntime());
+        Register(new CaliperTabSegmentRefineRuntime());
+        Register(new CentroidHoleLineSegmentRefineRuntime());
+        Register(new LineFitSegmentRefineRuntime());
     }
+
+    public void Register(ISegmentRefineRuntime runtime) => _runtimes[runtime.Method] = runtime;
 
     public bool IsKnown(SegmentRefineMethod method) => _runtimes.ContainsKey(method);
 
     public IReadOnlyList<SegmentRefineMethod> Methods =>
-        _runtimes.Keys.OrderBy(m => m).ToArray();
+        _runtimes.Keys.OrderBy(m => (int)m).ToList();
 
-    /// <summary>未注册方法回退直线拟合（与旧 switch 的 else 分支一致）。</summary>
     public ISegmentRefineRuntime Get(SegmentRefineMethod method) =>
         _runtimes.TryGetValue(method, out var runtime)
             ? runtime
@@ -87,98 +80,80 @@ public sealed class SegmentRefineRuntimeRegistry
 
 internal static class SegmentRefineOps
 {
-    public const double CropMarginRatio = 0.15;
-
-    public static PixelPose Fallback(Point2f[] contourPoints, double segConfidence, RecipeConfig recipe, double score)
+    public static SegmentRefineHit Fallback(
+        Point2f[] contour, double segmentConfidence, RecipeConfig recipe)
     {
-        var housing = MaskHousing.Fit(contourPoints);
-        return new PixelPose(housing.Center.X, housing.Center.Y, housing.LongAxisDeg, score)
+        var frame = JlHousing.FitObb(contour);
+        var angle = frame.WarpAngleDeg;
+        var center = new Point2d(frame.Center.X, frame.Center.Y);
+        return new SegmentRefineHit
         {
-            SegmentScore = segConfidence,
-            Usable = recipe.Template.AllowCoarseFallback,
+            Pose = Ok(
+                center.X, center.Y, angle, 0.2, segmentConfidence,
+                recipe.Template.AllowCoarseFallback),
+            TabMarker = HeadingMarker(center, angle, frame),
+            QualityNote = recipe.Template.AllowCoarseFallback
+                ? "精修失败，回退粗角"
+                : null,
         };
     }
 
-    public static PixelPose Ok(double cx, double cy, double angleDeg, double refineScore, double segConfidence) =>
-        new(cx, cy, angleDeg, refineScore)
+    public static PixelPose Ok(
+        double cx, double cy, double angleDeg, double score, double segmentConfidence, bool usable = true) =>
+        new(cx, cy, angleDeg, score)
         {
-            SegmentScore = segConfidence,
-            Usable = true,
+            SegmentScore = segmentConfidence,
+            Usable = usable,
         };
+
+    public const double CropMarginRatio = JlTemplateIo.CropMarginRatio;
 
     public static PixelPoint[] HeadingMarker(Point2d center, double angleDeg, Point2f[] contour)
     {
+        var frame = JlHousing.FitObb(contour);
+        return HeadingMarker(center, angleDeg, frame);
+    }
+
+    public static PixelPoint[] HeadingMarker(Point2d center, double angleDeg, HousingFrame frame)
+    {
+        var halfLong = frame.LongLen * 0.35;
         var rad = angleDeg * Math.PI / 180.0;
-        var housing = MaskHousing.Fit(contour);
-        var markerLen = Math.Max(24, housing.LongLen / 2.0);
+        var dir = new Point2d(Math.Cos(rad), Math.Sin(rad));
+        var from = center - dir * (halfLong * 0.3);
+        var to = center + dir * halfLong;
         return
         [
-            new PixelPoint(center.X, center.Y),
-            new PixelPoint(
-                center.X + Math.Cos(rad) * markerLen,
-                center.Y + Math.Sin(rad) * markerLen),
+            new PixelPoint(from.X, from.Y),
+            new PixelPoint(to.X, to.Y),
         ];
     }
 
-    public static OverlayDot[]? MapMatchDots(
-        IReadOnlyList<Point2d> inliers, IReadOnlyList<Point2d> rejected)
+    public static SegmentRefineHit FromJl(
+        in SegmentRefineRequest request, JlRefineHit hit, string tag, bool alignOrigin = true)
     {
-        var n = inliers.Count + rejected.Count;
-        if (n == 0)
-            return null;
-
-        var buf = new OverlayDot[n];
-        var d = 0;
-        foreach (var p in inliers)
-            buf[d++] = new OverlayDot(new PixelPoint(p.X, p.Y), OverlayDotKind.Inlier);
-        foreach (var p in rejected)
-            buf[d++] = new OverlayDot(new PixelPoint(p.X, p.Y), OverlayDotKind.Rejected);
-        return buf;
-    }
-
-    public static void MapCaliperDebug(
-        MaskCaliperTab.CaliperViz viz,
-        out OverlayLine[]? lines, out OverlayDot[]? dots)
-    {
-        PixelPoint Map(Point2d p) => new(p.X, p.Y);
-        OverlayLine Line(MaskCaliperTab.Segment s, OverlayLineKind kind) =>
-            new(Map(s.A), Map(s.B), kind);
-
-        var nLines = viz.SearchBars.Count + viz.InvalidBars.Count
-            + (viz.FittedMinus is null ? 0 : 1) + (viz.FittedPlus is null ? 0 : 1);
-        var nDots = viz.Inliers.Count + viz.Rejected.Count;
-        if (nLines == 0 && nDots == 0)
+        if (!hit.Found)
         {
-            lines = null;
-            dots = null;
-            return;
+            var fallback = Fallback(request.Points, request.SegmentConfidence, request.Recipe);
+            return fallback with { QualityNote = "JLVision " + hit.Note };
         }
 
-        var lineBuf = nLines == 0 ? Array.Empty<OverlayLine>() : new OverlayLine[nLines];
-        var i = 0;
-        foreach (var bar in viz.SearchBars)
-            lineBuf[i++] = Line(bar, OverlayLineKind.Caliper);
-        foreach (var bar in viz.InvalidBars)
-            lineBuf[i++] = Line(bar, OverlayLineKind.InvalidCaliper);
-        if (viz.FittedMinus is { } fm)
-            lineBuf[i++] = Line(fm, OverlayLineKind.FittedEdge);
-        if (viz.FittedPlus is { } fp)
-            lineBuf[i++] = Line(fp, OverlayLineKind.FittedEdge);
-        lines = nLines == 0 ? null : lineBuf;
-
-        if (nDots == 0)
+        var angle = JlPoseAlign.AlignToTeachAngle(request.Points, hit.AngleDeg);
+        var cx = hit.Cx;
+        var cy = hit.Cy;
+        if (alignOrigin)
         {
-            dots = null;
-            return;
+            var off = JlShapeTeachCache.HousingOffset;
+            var origin = JlPoseAlign.AlignToTeachOrigin(request.Points, angle, off.Ox, off.Oy);
+            cx = origin.X;
+            cy = origin.Y;
         }
 
-        var dotBuf = new OverlayDot[nDots];
-        var d = 0;
-        foreach (var p in viz.Inliers)
-            dotBuf[d++] = new OverlayDot(Map(p), OverlayDotKind.Inlier);
-        foreach (var p in viz.Rejected)
-            dotBuf[d++] = new OverlayDot(Map(p), OverlayDotKind.Rejected);
-        dots = dotBuf;
+        return new SegmentRefineHit
+        {
+            Pose = Ok(cx, cy, angle, hit.Score, request.SegmentConfidence),
+            TabMarker = HeadingMarker(new Point2d(cx, cy), angle, request.Points),
+            QualityNote = $"JLVision {tag} {hit.Note}",
+        };
     }
 }
 
@@ -188,145 +163,50 @@ internal sealed class TemplateSegmentRefineRuntime : ISegmentRefineRuntime
 
     public SegmentRefineHit Refine(in SegmentRefineRequest request)
     {
-        var template = request.Template;
-        if (template is null)
+        try
         {
+            var model = JlNccTeachCache.GetOrCreate(request.Recipe);
+            if (model is null)
+            {
+                var fallback = SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe);
+                return fallback with { QualityNote = "未示教模板或 NCC 模型创建失败" };
+            }
+
+            var housing = JlHousing.Fit(request.Points);
+            var bounds = JlHousing.AdaptiveRefineBounds(request.Recipe.Template.GetRefineAngleWindow(), housing);
+            using var scene = JlImageConvert.FromGrayMat(request.RoiView);
+            var hit = JlNccRefine.TryRefine(
+                scene, request.Points, model, bounds,
+                Math.Min(request.Recipe.Template.MatchThreshold, 0.40),
+                JlFindOptions.ForRecipe(request.Recipe.Template));
+            if (!hit.Found || hit.Score < request.Recipe.Template.MatchThreshold)
+            {
+                var fallback = SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe);
+                return fallback with
+                {
+                    QualityNote = hit.Found
+                        ? $"JLVision ncc {hit.Score:0.00} < 门 {request.Recipe.Template.MatchThreshold:0.00}"
+                        : "JLVision ncc " + hit.Note,
+                };
+            }
+
+            var angle = JlPoseAlign.AlignToTeachAngle(request.Points, hit.AngleDeg);
+            var size = JlNccTeachCache.TemplateSize;
+            var window = PoseOverlay.TemplateMatchWindow(hit.Cx, hit.Cy, angle, size.Width, size.Height);
             return new SegmentRefineHit
             {
-                Pose = SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe, 0),
+                Pose = SegmentRefineOps.Ok(hit.Cx, hit.Cy, angle, hit.Score, request.SegmentConfidence),
+                MatchWindow = window,
+                TabMarker = SegmentRefineOps.HeadingMarker(
+                    new Point2d(hit.Cx, hit.Cy), angle, request.Points),
+                QualityNote = $"JLVision ncc {hit.Note}",
             };
         }
-
-        var refined = RefineByTemplate(
-            request.RoiView, request.Points, template, request.Recipe,
-            request.SegmentConfidence, request.Pack);
-        return new SegmentRefineHit
+        catch (Exception)
         {
-            Pose = refined.Pose,
-            TabMarker = refined.TabMarker,
-            MatchWindow = refined.MatchWindow,
-            QualityNote = refined.QualityNote,
-        };
-    }
-
-    /// <summary>
-    /// 模板匹配失败归因（match 为 null）：读 MatchBest 写入的 LastDebug 诊断字段拼可读文案。
-    /// BestScore=NaN 表示"无候选"（目标过小/靠边被裁等）；BestScore ≥ 阈值但被拒 = 第二峰歧义；
-    /// 否则是"最佳峰低于阈值"并给出差距。
-    /// </summary>
-    private static string TemplateMissReason(RecipeConfig recipe)
-    {
-        var d = MaskTemplateMatcher.LastDebug;
-        var label = $"{recipe.Name} · 模板匹配未过门";
-        if (double.IsNaN(d.BestScore))
-            return $"{label}：转正窗内无匹配候选（目标过小 / 靠边被裁 / 角度窗外？）";
-        var maxRatio = recipe.Template.MaxSecondPeakRatio;
-        if (d.BestScore >= d.MinScore && maxRatio < 1.0 && d.SecondPeakRatio > maxRatio)
-            return $"{label}：第二峰歧义——次峰/主峰 {d.SecondPeakRatio:0.000} > 门 {maxRatio:0.000}" +
-                   $"（@{d.BestDeg:0.0}°，周期性纹理或近对称特征？）";
-        var gap = recipe.Template.MatchThreshold - d.BestScore;
-        return $"{label}：最佳 NCC {d.BestScore:0.000} < 阈值 {d.MinScore:0.000}" +
-               $"（差 {gap:0.000}，@{d.BestDeg:0.0}°，锐度 {d.PeakSharpness:0.000}）";
-    }
-
-    private readonly record struct TemplateRefine(
-        PixelPose Pose, PixelPoint[]? TabMarker, PixelPoint[]? MatchWindow = null, string? QualityNote = null);
-
-    private static TemplateRefine RefineByTemplate(
-        Mat roiView, Point2f[] contour, Mat template, RecipeConfig recipe, double segConfidence,
-        MaskTemplateRotationPack? pack)
-    {
-        var housing = MaskHousing.Fit(contour);
-        var range = MaskHousing.AdaptiveRefineRange(recipe.Template.RefineRangeDeg, housing);
-        var useUpright = recipe.Template.UseUprightCrop;
-
-        UprightCropResult crop;
-        try
-        {
-            crop = useUpright
-                ? MaskTemplateMatcher.UprightCrop(roiView, contour, SegmentRefineOps.CropMarginRatio)
-                : MaskTemplateMatcher.AxisAlignedCrop(roiView, contour, SegmentRefineOps.CropMarginRatio);
+            return SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe)
+                with { QualityNote = "JLVision ncc 异常" };
         }
-        catch (InvalidOperationException)
-        {
-            var fallback = SegmentRefineOps.Fallback(contour, segConfidence, recipe, 0);
-            return new TemplateRefine(fallback, null,
-                QualityNote: $"{recipe.Name} · 转正裁剪失败（目标轮廓异常 / 过小？）");
-        }
-
-        try
-        {
-            var origin = useUpright ? 0.0 : housing.WarpAngleDeg;
-            var bank = useUpright ? pack : null;
-            // NoFlipConstraint：目标永不翻转 180° → 首轮即强制 0 支（跳过 180° 搜索）
-            var noFlip = recipe.Template.NoFlipConstraint;
-            var match = MatchOnUpright(crop.Upright, template, recipe, bank, range, origin,
-                forceZeroBranch: noFlip);
-            // NoFlip 下不做翻转重试（产品不会反放；若匹配峰需翻转窗才对齐，说明示教/粗角方向错了，宁可失败暴露）
-            if (!noFlip && useUpright && match is not null && MaskTemplateMatcher.NeedsUprightAlign(match))
-            {
-                UprightCropResult? flipped = null;
-                try
-                {
-                    flipped = MaskTemplateMatcher.UprightCrop(
-                        roiView, contour, SegmentRefineOps.CropMarginRatio, extraWarpDeg: 180);
-                    var rematch = MatchOnUpright(
-                        flipped.Upright, template, recipe, bank, range, origin, forceZeroBranch: true);
-                    if (rematch is not null && !MaskTemplateMatcher.IsOrientationFlip(rematch.RotationDeg))
-                    {
-                        crop.Upright.Dispose();
-                        crop = flipped;
-                        flipped = null;
-                        match = rematch;
-                    }
-                }
-                catch (InvalidOperationException)
-                {
-                }
-                finally
-                {
-                    flipped?.Upright.Dispose();
-                }
-            }
-
-            if (match is null)
-            {
-                var fallback = SegmentRefineOps.Fallback(contour, segConfidence, recipe, 0);
-                return new TemplateRefine(fallback, null, QualityNote: TemplateMissReason(recipe));
-            }
-
-            var tplSigned = AngleGeometry.NormalizeSignedDeg(crop.WarpAngleDeg + match.RotationDeg);
-            var angled = AngleGeometry.FuseDirected(housing.LongAxisDeg, tplSigned);
-            var center = MaskTemplateMatcher.MapUprightToSource(crop, match.CenterInUpright);
-            var window = PoseOverlay.TemplateMatchWindow(
-                center.X, center.Y, angled, template.Width, template.Height);
-            return new TemplateRefine(
-                SegmentRefineOps.Ok(center.X, center.Y, angled, match.Score, segConfidence),
-                SegmentRefineOps.HeadingMarker(center, angled, contour),
-                window);
-        }
-        finally
-        {
-            crop.Upright.Dispose();
-        }
-    }
-
-    private static MaskTemplateMatchResult? MatchOnUpright(
-        Mat upright, Mat template, RecipeConfig recipe, MaskTemplateRotationPack? pack,
-        double refineRangeDeg, double searchOriginDeg, bool forceZeroBranch = false)
-    {
-        double? branch = forceZeroBranch ? searchOriginDeg : null;
-        var maxSecond = recipe.Template.MaxSecondPeakRatio < 1.0
-            ? recipe.Template.MaxSecondPeakRatio
-            : (double?)null;
-        return recipe.Template.UseEdgeMatch
-            ? MaskTemplateMatcher.MatchBestHybrid(
-                upright, template, refineRangeDeg, recipe.Template.MatchThreshold,
-                pack?.Gray, pack?.Edge, branch, searchOriginDeg)
-            : MaskTemplateMatcher.MatchBest(
-                upright, template, refineRangeDeg, recipe.Template.MatchThreshold,
-                pack?.Gray, orientationBranchDeg: branch, searchOriginDeg: searchOriginDeg,
-                maxSecondPeakRatio: maxSecond);
     }
 }
 
@@ -334,61 +214,52 @@ internal sealed class SiftSegmentRefineRuntime : ISegmentRefineRuntime
 {
     public SegmentRefineMethod Method => SegmentRefineMethod.Sift;
 
-    public SegmentRefineHit Refine(in SegmentRefineRequest request)
-    {
-        var sift = MaskSiftRefine.TryRefine(request.RoiView, request.Points, request.SiftTeach);
-        var dots = SegmentRefineOps.MapMatchDots(sift.Viz.Inliers, sift.Viz.Rejected);
-        if (sift.Pose is null)
-        {
-            return new SegmentRefineHit
-            {
-                Pose = SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe, 0),
-                DebugDots = dots,
-            };
-        }
-
-        var r = sift.Pose;
-        return new SegmentRefineHit
-        {
-            Pose = SegmentRefineOps.Ok(r.Center.X, r.Center.Y, r.AngleDeg, r.Score, request.SegmentConfidence),
-            TabMarker = SegmentRefineOps.HeadingMarker(r.Center, r.AngleDeg, request.Points),
-            DebugDots = dots,
-            QualityNote = MaskSiftRefine.FormatQualityNote(
-                r.Score, request.Recipe.Template.MatchThreshold, MaskSiftRefine.LastDebug),
-        };
-    }
+    public SegmentRefineHit Refine(in SegmentRefineRequest request) =>
+        ShapeMatchSegmentRefineRuntime.RefineJlShape(request, "sift→shape");
 }
 
 internal sealed class ShapeMatchSegmentRefineRuntime : ISegmentRefineRuntime
 {
     public SegmentRefineMethod Method => SegmentRefineMethod.ShapeMatch;
 
-    public SegmentRefineHit Refine(in SegmentRefineRequest request)
-    {
-        var housing = MaskHousing.Fit(request.Points);
-        var range = MaskHousing.AdaptiveRefineRange(request.Recipe.Template.RefineRangeDeg, housing);
-        // NoFlipConstraint：产品永不翻转 → 跳过翻转窗判决（ShapeMatch 极性在中小角度不可靠）
-        var shape = MaskShapeMatch.TryRefine(request.RoiView, request.Points, request.ShapeModel, range,
-            noFlip: request.Recipe.Template.NoFlipConstraint);
-        var dots = SegmentRefineOps.MapMatchDots(shape.Viz.Inliers, shape.Viz.Rejected);
-        if (shape.Pose is null)
-        {
-            return new SegmentRefineHit
-            {
-                Pose = SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe, 0),
-                DebugDots = dots,
-            };
-        }
+    public SegmentRefineHit Refine(in SegmentRefineRequest request) =>
+        RefineJlShape(request, "shape");
 
-        var r = shape.Pose;
-        return new SegmentRefineHit
+    internal static SegmentRefineHit RefineJlShape(in SegmentRefineRequest request, string tag)
+    {
+        try
         {
-            Pose = SegmentRefineOps.Ok(r.Center.X, r.Center.Y, r.AngleDeg, r.Score, request.SegmentConfidence),
-            TabMarker = SegmentRefineOps.HeadingMarker(r.Center, r.AngleDeg, request.Points),
-            DebugDots = dots,
-            QualityNote = MaskShapeMatch.FormatQualityNote(
-                r.Score, request.Recipe.Template.MatchThreshold, MaskShapeMatch.LastDebug),
-        };
+            var model = JlShapeTeachCache.GetOrCreate(request.Recipe);
+            if (model is null)
+            {
+                var fallback = SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe);
+                return fallback with { QualityNote = "JLVision 无形状模型" };
+            }
+
+            var housing = JlHousing.Fit(request.Points);
+            var bounds = JlHousing.AdaptiveRefineBounds(request.Recipe.Template.GetRefineAngleWindow(), housing);
+            using var scene = JlImageConvert.FromGrayMat(request.RoiView);
+            var minScore = Math.Clamp(
+                request.Recipe.Template.MatchThreshold > 0
+                    ? request.Recipe.Template.MatchThreshold
+                    : JlShapeDefaults.FindMinScore,
+                0.01, 1.0);
+            var hit = JlShapeRefine.TryRefine(
+                scene, request.Points, model, bounds,
+                minScore,
+                JlFindOptions.ForRecipe(request.Recipe.Template));
+            var viaShape = hit.Found;
+            if (!hit.Found)
+                hit = JlGeometryFallback.TryRefine(
+                    scene, request.Points, request.Recipe.Template.HousingEdgePolarity);
+            var used = viaShape ? tag : "geo";
+            return SegmentRefineOps.FromJl(request, hit, used);
+        }
+        catch (Exception)
+        {
+            return SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe)
+                with { QualityNote = "JLVision shape 异常" };
+        }
     }
 }
 
@@ -398,57 +269,41 @@ internal sealed class CaliperTabSegmentRefineRuntime : ISegmentRefineRuntime
 
     public SegmentRefineHit Refine(in SegmentRefineRequest request)
     {
-        var attempt = MaskCaliperTab.TryRefine(
-            request.RoiView, request.Points, CaliperRefineOptions.From(request.Recipe.Template));
-        SegmentRefineOps.MapCaliperDebug(attempt.Viz, out var lines, out var dots);
-        if (attempt.Pose is null)
+        try
         {
-            return new SegmentRefineHit
-            {
-                Pose = SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe, 0),
-                DebugLines = lines,
-                DebugDots = dots,
-            };
+            using var scene = JlImageConvert.FromGrayMat(request.RoiView);
+            var hit = JlMeasureRefine.TryRefine(
+                scene, request.Points, request.Recipe.Template.HousingEdgePolarity);
+            return SegmentRefineOps.FromJl(request, hit, "measure", alignOrigin: false);
         }
-
-        var r = attempt.Pose;
-        return new SegmentRefineHit
+        catch (Exception)
         {
-            Pose = SegmentRefineOps.Ok(r.Center.X, r.Center.Y, r.AngleDeg,
-                MaskCaliperTab.QualityScore(MaskCaliperTab.LastDebug), request.SegmentConfidence),
-            TabMarker =
-            [
-                new PixelPoint(r.TabMarkerFrom.X, r.TabMarkerFrom.Y),
-                new PixelPoint(r.TabMarkerTo.X, r.TabMarkerTo.Y),
-            ],
-            DebugLines = lines,
-            DebugDots = dots,
-        };
+            return SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe)
+                with { QualityNote = "JLVision measure 异常" };
+        }
     }
 }
 
-internal sealed class CentroidHoleSegmentRefineRuntime : ISegmentRefineRuntime
+internal sealed class CentroidHoleLineSegmentRefineRuntime : ISegmentRefineRuntime
 {
     public SegmentRefineMethod Method => SegmentRefineMethod.CentroidHoleLine;
 
     public SegmentRefineHit Refine(in SegmentRefineRequest request)
     {
-        var mask = request.BitPackedMask;
-        if (mask is null || request.MaskWidth <= 0 || request.MaskHeight <= 0)
-        {
-            return new SegmentRefineHit
-            {
-                Pose = SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe, 0),
-            };
-        }
+        if (request.BitPackedMask is null || request.MaskWidth < 1 || request.MaskHeight < 1)
+            return SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe);
 
-        var box = Cv2.BoundingRect(request.Points);
-        var r = MaskTemplateMatcher.RefineByCentroidHoleLine(mask, request.MaskWidth, request.MaskHeight);
-        var pose = r is null
-            ? SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe, 0)
-            : SegmentRefineOps.Ok(r.Centroid.X + box.Left, r.Centroid.Y + box.Top,
-                r.AngleDeg, 0.85, request.SegmentConfidence);
-        return new SegmentRefineHit { Pose = pose };
+        var r = JlCentroidHole.TryRefine(request.BitPackedMask, request.MaskWidth, request.MaskHeight);
+        if (r is null)
+            return SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe);
+
+        var cx = r.Value.Centroid.X + request.BoxLeft;
+        var cy = r.Value.Centroid.Y + request.BoxTop;
+        return new SegmentRefineHit
+        {
+            Pose = SegmentRefineOps.Ok(cx, cy, r.Value.AngleDeg, r.Value.Quality, request.SegmentConfidence),
+            QualityNote = "JLVision centroid-hole",
+        };
     }
 }
 
@@ -458,60 +313,32 @@ internal sealed class LineFitSegmentRefineRuntime : ISegmentRefineRuntime
 
     public SegmentRefineHit Refine(in SegmentRefineRequest request)
     {
-        var housing = MaskHousing.Fit(request.Points);
-        var (angle, center, fitted) = MaskTemplateMatcher.RefineByLineFit(request.Points, housing.LongAxisDeg);
-        if (!fitted)
+        var housing = JlHousing.Fit(request.Points);
+        var line = JlPoseAlign.TryLineFit(request.Points, housing.LongAxisDeg);
+        if (line.Fitted)
         {
+            var residual = Math.Abs(AngleGeometry.UndirectedDeltaDeg(line.AngleDeg, housing.LongAxisDeg));
+            var score = Math.Clamp(1.0 - residual / 5.0, 0.2, 1);
+            var angle = JlPoseAlign.AlignToTeachAngle(request.Points, line.AngleDeg);
             return new SegmentRefineHit
             {
-                Pose = SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe, 0),
+                Pose = SegmentRefineOps.Ok(
+                    line.Center.X, line.Center.Y, angle, score, request.SegmentConfidence),
+                TabMarker = SegmentRefineOps.HeadingMarker(line.Center, angle, request.Points),
+                QualityNote = $"JLVision line residual={residual:0.00}°",
             };
         }
 
-        var residual = Math.Abs(AngleGeometry.UndirectedDeltaDeg(angle, housing.LongAxisDeg));
-        var score = Math.Clamp(1.0 - residual / 5.0, 0.2, 1);
-        var line = request.Recipe.Template.RefineLine;
-
-        // 无示教基准线：与旧版完全一致（无向 [0,180)）。
-        if (line is null)
+        try
         {
-            return new SegmentRefineHit
-            {
-                Pose = SegmentRefineOps.Ok(center.X, center.Y, angle, score, request.SegmentConfidence),
-            };
+            using var scene = JlImageConvert.FromGrayMat(request.RoiView);
+            var hit = JlMeasureRefine.TryRefine(
+                scene, request.Points, request.Recipe.Template.HousingEdgePolarity);
+            return SegmentRefineOps.FromJl(request, hit, "line→measure", alignOrigin: false);
         }
-
-        // 有基准线：用长轴两端明暗探针 vs 示教头尾签名消 180°，输出有向角。
-        using (var gray = ToGray(request.RoiView))
+        catch (Exception)
         {
-            var probeHousing = housing with { Center = new Point2f((float)center.X, (float)center.Y) };
-            var res = LineFitHeading.Resolve(gray, probeHousing, angle, line);
-            if (!res.Resolved)
-            {
-                // 不可定：保持无向 + 提示（不阻断，仍按无向输出，与旧行为一致，只是多给现场一条归因）
-                return new SegmentRefineHit
-                {
-                    Pose = SegmentRefineOps.Ok(center.X, center.Y, angle, score, request.SegmentConfidence),
-                    QualityNote = $"{request.Recipe.Name} · 直线拟合 {res.Note}",
-                };
-            }
-
-            return new SegmentRefineHit
-            {
-                Pose = SegmentRefineOps.Ok(center.X, center.Y, res.DirectedDeg, score, request.SegmentConfidence),
-                TabMarker = SegmentRefineOps.HeadingMarker(res.HeadPoint, res.DirectedDeg, request.Points),
-            };
+            return SegmentRefineOps.Fallback(request.Points, request.SegmentConfidence, request.Recipe);
         }
-    }
-
-    private static Mat ToGray(Mat view)
-    {
-        if (view.Channels() == 1)
-            return view.Clone();
-        var gray = new Mat();
-        Cv2.CvtColor(view, gray, view.Channels() == 4
-            ? ColorConversionCodes.BGRA2GRAY
-            : ColorConversionCodes.BGR2GRAY);
-        return gray;
     }
 }

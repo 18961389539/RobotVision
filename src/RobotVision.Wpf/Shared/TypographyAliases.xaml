@@ -1,7 +1,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- 在覆盖同名键之前，先保存 WPF-UI 库内排版样式，避免 TypographyOverrides 自引用 BasedOn"-->
+    <!-- 在覆盖同名键之前，先保存 WPF-UI 库内排版样式，避免 TypographyOverrides 自引用 BasedOn） -->
     <Style x:Key="__CaptionTextBlockStyle" TargetType="TextBlock"
            BasedOn="{StaticResource CaptionTextBlockStyle}" />
     <Style x:Key="__BodyTextBlockStyle" TargetType="TextBlock"

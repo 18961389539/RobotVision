@@ -1,7 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using Xunit;
 
 namespace RobotVision.Tests;

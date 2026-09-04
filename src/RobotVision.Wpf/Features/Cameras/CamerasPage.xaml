@@ -1,6 +1,7 @@
 <Page x:Class="RobotVision.WpfHost.Features.Cameras.CamerasPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:cameras="clr-namespace:RobotVision.WpfHost.Features.Cameras"
       xmlns:host="clr-namespace:RobotVision.WpfHost.Shared"
       Title="相机管理"
@@ -13,48 +14,140 @@
     <Page.InputBindings>
         <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
     </Page.InputBindings>
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <host:StringToVisibilityConverter x:Key="NonEmptyToVisibilityConverter" />
+    </Page.Resources>
 
-    <Grid Margin="8" VerticalAlignment="Stretch">
+    <Grid Margin="8">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <cameras:CameraImageViewport />
+        <Border Grid.Row="0" Margin="0,0,0,8" Padding="10,8"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.2*" />
+                    <ColumnDefinition Width="1.2*" />
+                    <ColumnDefinition Width="1*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Margin="0,0,10,0">
+                    <TextBlock Text="相机 Id" FontSize="10" Margin="0,0,0,3"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBox Text="{Binding EditId, UpdateSourceTrigger=PropertyChanged}"
+                             IsEnabled="{Binding IsNew}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="0,0,10,0">
+                    <TextBlock Text="显示名" FontSize="10" Margin="0,0,0,3"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="界面展示用；留空时仅显示 Id" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Margin="0,0,10,0">
+                    <TextBlock Text="类型" FontSize="10" Margin="0,0,0,3"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <ComboBox ItemsSource="{Binding TypeOptions}"
+                              SelectedItem="{Binding EditType}"
+                              SelectionChanged="EditType_SelectionChanged"
+                              ToolTip="相机类型，决定参数页签内容" />
+                </StackPanel>
+                <Border Grid.Column="3" Padding="8,6" CornerRadius="4" VerticalAlignment="Bottom"
+                        Background="{DynamicResource ControlFillColorDefaultBrush}">
+                    <TextBlock FontSize="12" Text="{Binding Message}" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Message}" />
+                </Border>
+            </Grid>
+        </Border>
 
-        <!-- 列表收起时的「相机」重新打开按钮 -->
-        <Button HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12"
-                Content="相机" Padding="14,8" FontWeight="SemiBold"
-                Panel.ZIndex="30"
-                Command="{Binding ToggleListPanelCommand}">
-            <Button.Style>
-                <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsListPanelVisible}" Value="True">
+        <Grid Grid.Row="1" MinHeight="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <cameras:CameraListPanel Grid.Column="0" />
+            <Grid Grid.Column="1" MinWidth="0">
+                <cameras:CameraImageViewport />
+            </Grid>
+            <cameras:CameraParamPanel Grid.Column="2" />
+        </Grid>
+
+        <Border Grid.Row="2" Margin="0,8,0,0" Padding="10,8"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button Content="相机" Padding="12,6" Margin="0,0,8,0"
+                        Command="{Binding ToggleListPanelCommand}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                             <Setter Property="Visibility" Value="Collapsed" />
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </Button.Style>
-        </Button>
-
-        <cameras:CameraListPanel Panel.ZIndex="20" />
-
-        <!-- 面板收起时的「参数」重新打开按钮 -->
-        <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
-                Content="参数" Padding="14,8" FontWeight="SemiBold"
-                Panel.ZIndex="30"
-                Command="{Binding ToggleParamPanelCommand}">
-            <Button.Style>
-                <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsParamPanelVisible}" Value="True">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsListPanelVisible}" Value="False">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <ui:Button Grid.Column="1" Content="取一帧" Command="{Binding TestGrabCommand}" />
+                <ui:Button Grid.Column="2" Content="{Binding PreviewButtonText}" Margin="8,0,0,0"
+                           Command="{Binding TogglePreviewCommand}" />
+                <ui:Button Grid.Column="3" Content="保存" Appearance="Primary" Margin="8,0,0,0"
+                           Command="{Binding SaveCommand}" />
+                <TextBlock Grid.Column="4" Margin="16,0,8,0" VerticalAlignment="Center" FontSize="11"
+                           TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           Text="保存后立即注册生效，无需重启；切换类型须重填对应参数" />
+                <Button Grid.Column="5" Content="参数" Padding="12,6" Margin="0,0,8,0"
+                        Command="{Binding ToggleParamPanelCommand}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                             <Setter Property="Visibility" Value="Collapsed" />
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </Button.Style>
-        </Button>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsParamPanelVisible}" Value="False">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Grid.Column="6" Content="更多" Padding="12,6" Click="OnMoreClick">
+                    <Button.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="复制为新相机" Command="{Binding CopyCommand}" />
+                            <MenuItem Header="打开目录" Command="{Binding OpenFolderCommand}"
+                                      Visibility="{Binding ShowOpenFolderButton,
+                                          Converter={StaticResource BoolToVisibilityConverter}}" />
+                            <Separator />
+                            <MenuItem Header="删除相机" Command="{Binding DeleteCommand}" />
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+            </Grid>
+        </Border>
 
-        <cameras:CameraParamPanel Panel.ZIndex="20" />
+        <StackPanel Grid.Row="3" Margin="2,6,2,0">
+            <TextBlock FontSize="11" TextWrapping="Wrap"
+                       Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                       Text="{Binding UnsavedHint}"
+                       Visibility="{Binding HasUnsavedChanges,
+                           Converter={StaticResource BoolToVisibilityConverter}}" />
+        </StackPanel>
     </Grid>
 </Page>

@@ -2,7 +2,7 @@ using OpenCvSharp;
 using RobotVision.Core.Models;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.JlVision;
 using RobotVision.Teach;
 using Xunit;
 
@@ -26,7 +26,7 @@ public sealed class FeatureRoiAdvisorTests
         var contour = contours.OrderByDescending(c => Cv2.ContourArea(c)).First()
             .Select(p => new Point2f(p.X, p.Y)).ToArray();
 
-        var crop = MaskTemplateMatcher.UprightCrop(img, contour, 0.05);
+        var crop = JlTemplateIo.UprightCrop(img, contour, 0.05);
         using (crop.Upright)
         {
             var roi = FeatureRoiAdvisor.Suggest(crop, W, H, contour);
@@ -60,7 +60,7 @@ public sealed class FeatureRoiAdvisorTests
         var contour = contours.OrderByDescending(c => Cv2.ContourArea(c)).First()
             .Select(p => new Point2f(p.X, p.Y)).ToArray();
 
-        var crop = MaskTemplateMatcher.UprightCrop(img, contour, 0.05);
+        var crop = JlTemplateIo.UprightCrop(img, contour, 0.05);
         using (crop.Upright)
         {
             var roi = FeatureRoiAdvisor.Suggest(crop, W, H, contour);
@@ -135,7 +135,7 @@ public sealed class FeatureRoiAdvisorTests
         var contour = contours.OrderByDescending(c => Cv2.ContourArea(c)).First()
             .Select(p => new Point2f(p.X, p.Y)).ToArray();
 
-        var crop = MaskTemplateMatcher.UprightCrop(img, contour, 0.05);
+        var crop = JlTemplateIo.UprightCrop(img, contour, 0.05);
         using (crop.Upright)
         {
             var roi = FeatureRoiAdvisor.Suggest(crop, W, H, contour);
@@ -159,7 +159,7 @@ public sealed class FeatureRoiAdvisorTests
         using var img = new Mat(200, 320, MatType.CV_8UC3, new Scalar(200, 200, 200));
         Cv2.Rectangle(img, new Point(40, 70), new Point(280, 130), new Scalar(190, 190, 190), -1);
         Point2f[] contour = [new(40, 70), new(280, 70), new(280, 130), new(40, 130)];
-        var crop = MaskTemplateMatcher.UprightCrop(img, contour, 0.05);
+        var crop = JlTemplateIo.UprightCrop(img, contour, 0.05);
         using (crop.Upright)
             Assert.Null(FeatureRoiAdvisor.Suggest(crop, img.Width, img.Height, contour));
     }

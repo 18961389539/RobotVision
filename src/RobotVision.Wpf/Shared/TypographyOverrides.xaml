@@ -1,7 +1,7 @@
-﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- FontTypography 会加载这些键；库内排版样式不带可读前景，须绑定主题主文字色"-->
+    <!-- FontTypography 会加载这些键；库内排版样式不带可读前景，须绑定主题主文字色） -->
     <Style x:Key="CaptionTextBlockStyle" TargetType="TextBlock"
            BasedOn="{StaticResource __CaptionTextBlockStyle}">
         <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />

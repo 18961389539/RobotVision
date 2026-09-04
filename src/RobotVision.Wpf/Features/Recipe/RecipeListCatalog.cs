@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Hosting;
@@ -13,7 +14,7 @@ internal interface IRecipeListHost
 {
     RecipeConfig Editor { get; set; }
     bool IsNew { get; set; }
-    bool IsBusy { get; }
+    bool IsBusy { get; set; }
     /// <summary>最近一次从磁盘加载配方失败：此时 Editor 为空壳，保存会覆盖磁盘真实文件，必须禁用。</summary>
     bool EditorLoadFailed { get; set; }
     bool HasUnsavedChanges { get; }
@@ -38,7 +39,6 @@ internal interface IRecipeListHost
     string PrimaryModel { get; set; }
     string SecondaryModel { get; set; }
     bool ConfirmGrabOriginIfNeeded(string action);
-    bool ConfirmFlatFeatureRoiIfNeeded(string action);
     void CommitEdits();
 }
 
@@ -49,20 +49,25 @@ public sealed partial class RecipeListCatalog : ObservableObject
     private readonly RecipeLoader _loader;
     private readonly IDialogService _dialogs;
     private readonly SqliteResultStore? _sqlite;
+    private readonly ILogger _log;
 
     private bool _switching;
     private RecipeListItem? _lastConfirmed;
+    private CancellationTokenSource? _refreshCts;
+    private CancellationTokenSource? _loadCts;
 
     internal RecipeListCatalog(
         IRecipeListHost host,
         RecipeLoader loader,
         IDialogService dialogs,
-        SqliteResultStore? sqlite)
+        SqliteResultStore? sqlite,
+        ILogger log)
     {
         _host = host;
         _loader = loader;
         _dialogs = dialogs;
         _sqlite = sqlite;
+        _log = log;
     }
 
     public ObservableCollection<RecipeListItem> Recipes { get; } = [];
@@ -122,18 +127,42 @@ public sealed partial class RecipeListCatalog : ObservableObject
     }
 
     [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
-    public void Refresh() => Refresh(preferName: null, reloadEditor: true);
+    public void Refresh() => ScheduleRefresh();
 
-    public void Refresh(string? preferName, bool reloadEditor, bool ignoreUnsaved = false)
+    public void ScheduleRefresh(string? preferName = null, bool reloadEditor = true, bool ignoreUnsaved = false) =>
+        UiFireAndForget.Run(() => RefreshAsync(preferName, reloadEditor, ignoreUnsaved), _log);
+
+    public void Refresh(string? preferName, bool reloadEditor, bool ignoreUnsaved = false) =>
+        ScheduleRefresh(preferName, reloadEditor, ignoreUnsaved);
+
+    public async Task RefreshAsync(string? preferName = null, bool reloadEditor = true, bool ignoreUnsaved = false)
     {
+        _host.CommitEdits();
         if (!ignoreUnsaved && _host.HasUnsavedChanges && !ConfirmDiscard("刷新列表"))
             return;
 
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        var cts = _refreshCts = new CancellationTokenSource();
+        var token = cts.Token;
         var keepName = preferName ?? Selected?.Name ?? _host.Editor.Name;
 
+        List<RecipeListItem> items;
+        try
+        {
+            items = await Task.Run(() => BuildRecipeListItems(token), token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested)
+            return;
+
         Recipes.Clear();
-        foreach (var name in _loader.ListNames())
-            Recipes.Add(RecipeListItemDescriber.Describe(_loader, name));
+        foreach (var item in items)
+            Recipes.Add(item);
 
         _host.RaiseListFilterBindings();
 
@@ -146,19 +175,33 @@ public sealed partial class RecipeListCatalog : ObservableObject
         if (reloadEditor)
         {
             if (Selected is not null)
-                LoadIntoEditor(Selected.Name);
+                await LoadIntoEditorAsync(Selected.Name, token).ConfigureAwait(true);
             else if (Recipes.Count == 0)
                 ResetEditorForEmptyList();
         }
+
         _host.Message = $"共 {Recipes.Count} 个配方";
         RaiseFilterBindings();
         _host.RefreshTestTriggerGate();
         _host.NotifyDeleteCanExecute();
     }
 
+    private List<RecipeListItem> BuildRecipeListItems(CancellationToken token)
+    {
+        var items = new List<RecipeListItem>();
+        foreach (var name in _loader.ListNames())
+        {
+            token.ThrowIfCancellationRequested();
+            items.Add(RecipeListItemDescriber.Describe(_loader, name));
+        }
+
+        return items;
+    }
+
     [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
     private void New()
     {
+        _host.CommitEdits();
         if (_host.HasUnsavedChanges && !ConfirmDiscard("新建配方"))
             return;
         ClearListSelectionForDraft();
@@ -186,6 +229,7 @@ public sealed partial class RecipeListCatalog : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRunWhenIdle))]
     private void Copy()
     {
+        _host.CommitEdits();
         if (_host.HasUnsavedChanges && !ConfirmCopyCurrentEditor())
             return;
         var source = _host.Editor;
@@ -266,8 +310,6 @@ public sealed partial class RecipeListCatalog : ObservableObject
             }
 
             if (!_host.ConfirmGrabOriginIfNeeded("保存"))
-                return;
-            if (!_host.ConfirmFlatFeatureRoiIfNeeded("保存"))
                 return;
 
             _loader.Save(_host.Editor, _host.IsNew ? null : previousName);
@@ -351,7 +393,7 @@ public sealed partial class RecipeListCatalog : ObservableObject
             return;
         }
 
-        LoadIntoEditor(value.Name);
+        ScheduleLoadIntoEditor(value.Name);
         _lastConfirmed = value;
         _host.ClearTestAdvice();
         RaiseFilterBindings();
@@ -368,31 +410,85 @@ public sealed partial class RecipeListCatalog : ObservableObject
         _host.NotifyDeleteCanExecute();
     }
 
-    private void LoadIntoEditor(string name)
+    private void ScheduleLoadIntoEditor(string name) =>
+        UiFireAndForget.Run(() => LoadIntoEditorAsync(name, CancellationToken.None), _log);
+
+    private async Task LoadIntoEditorAsync(string name, CancellationToken token)
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        var loadCts = _loadCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var loadToken = loadCts.Token;
+
+        _host.IsBusy = true;
+        NotifyIdleCommands();
+        try
+        {
+            LoadResult result;
+            try
+            {
+                result = await Task.Run(() => LoadRecipeFromDisk(name), loadToken).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (loadToken.IsCancellationRequested)
+                return;
+
+            ApplyLoadResult(name, result);
+        }
+        finally
+        {
+            if (ReferenceEquals(_loadCts, loadCts))
+            {
+                _host.IsBusy = false;
+                NotifyIdleCommands();
+            }
+        }
+    }
+
+    private readonly record struct LoadResult(bool Failed, RecipeConfig? Loaded, string? ErrorMessage);
+
+    private LoadResult LoadRecipeFromDisk(string name)
+    {
+        try
+        {
+            return new LoadResult(false, _loader.Get(name), null);
+        }
+        catch (Exception ex)
+        {
+            return new LoadResult(true, null, ex.Message);
+        }
+    }
+
+    private void ApplyLoadResult(string name, LoadResult result)
     {
         _host.IsNew = false;
         _host.OriginalName = name;
-        try
+        if (!result.Failed && result.Loaded is not null)
         {
-            var loaded = _loader.Get(name);
+            var loaded = result.Loaded;
             _host.EditorLoadFailed = false;
             _host.Editor = loaded.Clone();
             _host.Baseline = _host.Editor.Clone();
             _host.ResetDirtyCache();
             _host.NotifyEditorBindings();
             _host.Message = loaded.Enabled ? "" : $"配方 {name} 已停用（Enabled=false），触发将返回 1015";
+            return;
         }
-        catch (Exception ex)
-        {
-            // 关键：不得在失败后提供可保存的空白 Editor —— IsNew=false + 同名保存会用空壳覆盖磁盘真实文件
-            _host.EditorLoadFailed = true;
-            _host.Editor = new RecipeConfig { Name = name };
-            _host.Baseline = _host.Editor.Clone();
-            _host.ResetDirtyCache();
-            _host.NotifyEditorBindings();
-            _host.Message = $"读取失败：{ex.Message}（保存已禁用，防止覆盖磁盘配方）";
-        }
+
+        _host.EditorLoadFailed = true;
+        _host.Editor = new RecipeConfig { Name = name };
+        _host.Baseline = _host.Editor.Clone();
+        _host.ResetDirtyCache();
+        _host.NotifyEditorBindings();
+        _host.Message = $"读取失败：{result.ErrorMessage}（保存已禁用，防止覆盖磁盘配方）";
     }
+
+    private void LoadIntoEditor(string name) =>
+        ScheduleLoadIntoEditor(name);
 
     private void ResetEditorForEmptyList()
     {

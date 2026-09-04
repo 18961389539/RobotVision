@@ -1,6 +1,6 @@
 using OpenCvSharp;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -328,7 +328,7 @@ public sealed class MaskTemplateCropMappingTests
     private static Mat FullImageUprightCrop(Mat src, IReadOnlyList<Point2f> contour, double marginRatio)
     {
         var rect = Cv2.MinAreaRect(contour);
-        var warpAngleDeg = rect.Size.Width >= rect.Size.Height ? rect.Angle : rect.Angle + 90.0;
+        var warpAngleDeg = MaskHousing.WarpFromMinAreaRect(rect);
         using var m = Cv2.GetRotationMatrix2D(rect.Center, -warpAngleDeg, 1.0);
         using var rotated = new Mat();
         Cv2.WarpAffine(src, rotated, m, src.Size(), InterpolationFlags.Linear, BorderTypes.Reflect101);

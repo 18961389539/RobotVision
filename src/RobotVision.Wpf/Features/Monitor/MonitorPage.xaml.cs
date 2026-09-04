@@ -1,7 +1,5 @@
 ﻿using System.Collections.Specialized;
-using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using RobotVision.WpfHost.Shared;
 
 namespace RobotVision.WpfHost.Features.Monitor;
@@ -31,7 +29,9 @@ public partial class MonitorPage : Page
         DataContextChanged += OnDataContextChanged;
     }
 
-    private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+    private ListBox LogList => LogPanel.LogListControl;
+
+    private void OnDataContextChanged(object sender, System.Windows.DependencyPropertyChangedEventArgs e)
     {
         DetachLogSubscription();
         AttachLogSubscription();
@@ -61,23 +61,5 @@ public partial class MonitorPage : Page
         if (LogList.Items.Count == 0)
             return;
         LogList.ScrollIntoView(LogList.Items[^1]);
-    }
-
-    private void OnLogListDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (e.OriginalSource is not DependencyObject source
-            || ItemsControl.ContainerFromElement(LogList, source) is not ListBoxItem)
-            return;
-        if (LogList.SelectedItem is not LogLine line)
-            return;
-        try
-        {
-            Clipboard.SetText(line.ClipboardText);
-        }
-        catch (Exception ex)
-        {
-            // 剪贴板被其他进程占用时忽略，但留痕便于排查
-            System.Diagnostics.Trace.TraceWarning("[Monitor] 复制日志到剪贴板失败: {0}", ex.Message);
-        }
     }
 }

@@ -37,6 +37,6 @@ public interface IRecipeWorkspace
     void ApplySuggestedFeatureRoi(Roi roi);
     /// <summary>精修方法或特征框相对基线已变时确认；取消返回 false。确认后清除已记示教输出。</summary>
     bool ConfirmGrabOriginIfNeeded(string action);
-    /// <summary>模板/形状匹配且特征框过扁时确认；取消返回 false。</summary>
-    bool ConfirmFlatFeatureRoiIfNeeded(string action);
+    /// <summary>产线 TRIGGER 占着队列/相机时为 true，配方页应禁用试触发与示教取图。</summary>
+    bool IsPipelineOccupied { get; }
 }

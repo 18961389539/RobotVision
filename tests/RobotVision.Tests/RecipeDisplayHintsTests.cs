@@ -48,6 +48,25 @@ public sealed class RecipeDisplayHintsTests
         RecipeDisplayHints.Production.ShowRefineDebug.Should().BeFalse();
         RecipeDisplayHints.Production.DrawDetectionRoi.Should().BeFalse();
         RecipeDisplayHints.Production.DetectionRoi.Should().BeNull();
+        RecipeDisplayHints.Production.SecondaryBlobRoi.Should().BeNull();
+    }
+
+    [Fact]
+    public void ForRecipeTest_DualBlob_ExposesSecondaryRoi()
+    {
+        var secondary = new Roi(0.5, 0.1, 0.4, 0.5);
+        var recipe = new RecipeConfig
+        {
+            AngleMode = AngleMode.DualBlobCenterLine,
+            Roi = new Roi(0.0, 0.1, 0.4, 0.5),
+            Blob = { SecondaryRoi = secondary },
+        };
+
+        var hints = RecipeDisplayHints.ForRecipeTest(recipe);
+
+        hints.DetectionRoi.Should().Be(recipe.Roi);
+        hints.SecondaryBlobRoi.Should().Be(secondary);
+        hints.ShowRefineDebug.Should().BeFalse();
     }
 
     [Theory]

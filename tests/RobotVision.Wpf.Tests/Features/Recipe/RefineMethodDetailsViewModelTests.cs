@@ -40,15 +40,16 @@ public sealed class RefineMethodDetailsViewModelTests
         try
         {
             vm.Editor.Template.MatchThreshold = 0.42;
-            vm.Editor.Template.RefineRangeDeg = 12;
+            vm.Editor.Template.SetSymmetricRefineRange(12);
             var dialog = new RefineMethodDetailsViewModel(vm);
             vm.Editor.Template.MatchThreshold = 0.11;
-            vm.Editor.Template.RefineRangeDeg = 3;
+            vm.Editor.Template.SetSymmetricRefineRange(3);
 
             dialog.RestoreSnapshot();
 
             vm.Editor.Template.MatchThreshold.Should().Be(0.42);
-            vm.Editor.Template.RefineRangeDeg.Should().Be(12);
+            vm.Editor.Template.RefineAngleLoDeg.Should().Be(-12);
+            vm.Editor.Template.RefineAngleHiDeg.Should().Be(12);
         }
         finally
         {

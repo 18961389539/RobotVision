@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="24.05.0.0">
+<procedure name="main">
+<interface/>
+<body>
+<c>* RobotVision HALCON rectangle2 side-by-side bench</c>
+<c>* Adjust paths before running.</c>
+<l>FixtureDir := 'E:/RobotVision/benchmarks/halcon/fixtures'</l>
+<l>FieldDir := FixtureDir + '/field'</l>
+<l>ResultDir := 'E:/RobotVision/benchmarks/halcon/results'</l>
+<l>ResultPath := ResultDir + '/halcon_results.csv'</l>
+<l>run_bench_rectangle2 (FixtureDir, ResultPath, 0)</l>
+<l>file_exists (FieldDir, FieldExists)</l>
+<l>if (FieldExists)</l>
+<l>    run_bench_rectangle2 (FieldDir, ResultPath, 1)</l>
+<l>endif</l>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+
+<procedure name="run_bench_rectangle2">
+<interface>
+<param name="FixtureDir" base_type="string"/>
+<param name="ResultPath" base_type="string"/>
+<param name="AppendMode" base_type="integer"/>
+</interface>
+<body>
+<l>if (AppendMode = 0)</l>
+<l>    open_file (FileHandle, ResultPath, 'output')</l>
+<l>    fwrite_string (FileHandle, 'id,scenario,true_deg,engine,ok,angle_deg,center_x,center_y,long_len,short_len,rms_px,quality')</l>
+<l>    fnew_line (FileHandle)</l>
+<l>else</l>
+<l>    open_file (FileHandle, ResultPath, 'append')</l>
+<l>endif</l>
+<l>list_files (FixtureDir + '/*.png', ['files'], ImageFiles)</l>
+<l>for I := 0 to |ImageFiles| - 1 by 1</l>
+<l>    ImagePath := ImageFiles[I]</l>
+<l>    file_base_name (ImagePath, Id)</l>
+<l>    ContourPath := FixtureDir + '/' + Id + '.contour.csv'</l>
+<l>    read_image (Image, ImagePath)</l>
+<l>    read_contour_csv (ContourPath, Rows, Cols)</l>
+<l>    gen_contour_polygon_xld (Contour, Rows, Cols)</l>
+<l>    fit_rectangle2_contour_xld (Contour, 'tukey', -1, 0, 0, 3, 2, Row, Column, Phi, Length1, Length2, PointOrder)</l>
+<l>    PhiDeg := deg(Phi)</l>
+<l>    LongLen := 2.0 * Length1</l>
+<l>    ShortLen := 2.0 * Length2</l>
+<l>  * contour stage</l>
+<l>    write_result_row (FileHandle, Id, Id, PhiDeg, Row, Column, LongLen, ShortLen, 'halcon_contour', 1)</l>
+<l>  * full: metrology rectangle2 measure (fixed angle from contour)</l>
+<l>    create_metrology_model (MetrologyHandle)</l>
+<l>    add_metrology_object_rectangle2_measure (MetrologyHandle, Row, Column, Phi, Length1, Length2, 20, 5, 1, 1.5, [], [], MetrologyObjectIndex)</l>
+<l>    set_metrology_object_param (MetrologyHandle, 'all', 'measure_transition', 'positive')</l>
+<l>    set_metrology_object_param (MetrologyHandle, 'all', 'measure_select', 'first')</l>
+<l>    apply_metrology_model (Image, MetrologyHandle, [], [], RowM, ColumnM, PhiM, Length1M, Length2M)</l>
+<l>    clear_metrology_model (MetrologyHandle)</l>
+<l>    PhiFull := deg(PhiM)</l>
+<l>    write_result_row (FileHandle, Id, Id, PhiFull, RowM, ColumnM, 2.0 * Length1M, 2.0 * Length2M, 'halcon_full', 1)</l>
+<l>endfor</l>
+<l>close_file (FileHandle)</l>
+</body>
+</procedure>
+
+<procedure name="read_contour_csv">
+<interface>
+<param name="Path" base_type="string"/>
+<param name="Rows" base_type="real" dimension="0"/>
+<param name="Cols" base_type="real" dimension="0"/>
+</interface>
+<body>
+<l>open_file (FileHandle, Path, 'input')</l>
+<l>fread_line (FileHandle, Header, IsEOF)</l>
+<l>Rows := []</l>
+<l>Cols := []</l>
+<l>while (not IsEOF)</l>
+<l>    fread_line (FileHandle, Line, IsEOF)</l>
+<l>    if (IsEOF)</l>
+<l>        break</l>
+<l>    endif</l>
+<l>    split_string (Line, ',', [], Parts)</l>
+<l>    if (|Parts| &lt; 2)</l>
+<l>        continue</l>
+<l>    endif</l>
+<l>    Cols := [Cols, number(Parts[0])]</l>
+<l>    Rows := [Rows, number(Parts[1])]</l>
+<l>endwhile</l>
+<l>close_file (FileHandle)</l>
+</body>
+</procedure>
+
+<procedure name="write_result_row">
+<interface>
+<param name="FileHandle" base_type="integer"/>
+<param name="Id" base_type="string"/>
+<param name="Scenario" base_type="string"/>
+<param name="AngleDeg" base_type="real"/>
+<param name="Row" base_type="real"/>
+<param name="Column" base_type="real"/>
+<param name="LongLen" base_type="real"/>
+<param name="ShortLen" base_type="real"/>
+<param name="Engine" base_type="string"/>
+<param name="Ok" base_type="integer"/>
+</interface>
+<body>
+<l>Line := Id + ',' + Scenario + ',0,' + Engine + ',' + Ok + ',' + AngleDeg + ',' + Column + ',' + Row + ',' + LongLen + ',' + ShortLen + ',0,0'</l>
+<l>fwrite_string (FileHandle, Line)</l>
+<l>fnew_line (FileHandle)</l>
+</body>
+</procedure>
+</hdevelop>

@@ -5,6 +5,7 @@
              xmlns:ivc="clr-namespace:ImageViewer.Controls;assembly=ImageViewerControl"
              xmlns:host="clr-namespace:RobotVision.WpfHost.Shared">
     <UserControl.Resources>
+        <host:StringToVisibilityConverter x:Key="NonEmptyToVisibilityConverter" />
         <Style x:Key="ViewTabButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
             <Setter Property="Padding" Value="10,4" />
             <Setter Property="FontSize" Value="11" />
@@ -13,7 +14,7 @@
     </UserControl.Resources>
         <Border Background="#0A0F16" CornerRadius="4" ClipToBounds="True">
             <Grid>
-                <!-- 结果图视�?-->
+                <!-- 结果图视图 -->
                 <ivc:ImageViewer x:Name="TestViewer" ImageSource="{Binding Test.ResultImage}"
                                  PixelSize="{Binding ViewerPixelSize}"
                                  PhysicalUnit="{Binding ViewerPhysicalUnit}"
@@ -41,18 +42,21 @@
                                  ShowCrosshair="False"
                                  ShowScaleBar="False"
                                  Visibility="{Binding ShowRoiImageViewer, Converter={StaticResource BoolToVisibilityConverter}}" />
-                <!-- 无图占位：首次取�?/ 测试前；触发中由旧结果图或深色底 + Message 顶住空白 -->
+                <!-- 无图占位：首次取图 / 测试前；触发中由旧结果图或深色底 + Message 顶住空白 -->
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420"
                             Visibility="{Binding HasAnyImage, Converter={StaticResource InverseBoolToVisibilityConverter}}">
                     <TextBlock Text="尚未有图" FontSize="15" HorizontalAlignment="Center"
                                Foreground="#FFD0D8E4" />
-                    <TextBlock Margin="0,8,0,0" FontSize="12" TextWrapping="Wrap" TextAlignment="Center"
+                    <TextBlock Margin="0,8,0,8" FontSize="12" TextWrapping="Wrap" TextAlignment="Center"
                                Foreground="#FFB8C0CC"
-                               Text="测试触发或「预览区域」取图后在此显示。推理完成（含未检出目标 1007）会显示叠加结果；取图/标定/模型失败则无图" />
+                               Text="先取一帧看检测区，或直接测试触发。推理完成（含未检出 1007）会显示叠加结果。" />
+                    <ui:Button Content="先取一帧" HorizontalAlignment="Center" Padding="14,6"
+                               Command="{Binding Roi.PreviewRoiCommand}"
+                               ToolTip="当前相机取一帧作为参考，不推进算法结论" />
                 </StackPanel>
 
 
-                <!-- 左上：视图切换标签（结果�?/ ROI 预览"-->
+                <!-- 左上：视图切换标签（结果图 / ROI 预览） -->
                 <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,12,10,10"
                         Background="#66000000" CornerRadius="3" Padding="4,3" Panel.ZIndex="30"
                         Visibility="{Binding HasAnyImage, Converter={StaticResource BoolToVisibilityConverter}}">
@@ -72,7 +76,7 @@
                         </Button>
                         <Button Content="ROI 预览" Margin="6,0,0,0"
                                 Command="{Binding ShowRoiPreviewViewCommand}"
-                                ToolTip="检测区域在画面上的位置（取一帧叠加矩形）">
+                                ToolTip="仅参考帧（无测试叠加）。检测绿框也会叠在结果图上。">
                             <Button.Style>
                                 <Style TargetType="Button" BasedOn="{StaticResource ViewTabButton}">
                                     <Style.Triggers>
@@ -87,22 +91,100 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 右上：状态消息角标（面板收起时显示；面板展开时消息在面板头，避免重复"-->
+                <!-- 右上：框选 / 示教（停靠驾驶舱：工具在图上，不埋在折叠面板） -->
                 <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10,12,10,10"
-                        Background="#66000000" CornerRadius="3" Padding="8,4" Panel.ZIndex="30"
-                        IsHitTestVisible="False">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsParamPanelVisible}" Value="False">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <TextBlock Text="{Binding Message}" FontSize="11" Foreground="White"
-                               MaxWidth="360" TextTrimming="CharacterEllipsis" ToolTip="{Binding Message}" />
+                        Background="#66000000" CornerRadius="3" Padding="4,3" Panel.ZIndex="30">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="预览区域" Command="{Binding Roi.PreviewRoiCommand}"
+                                ToolTip="当前相机取一帧作为像素参考帧"
+                                Style="{StaticResource ViewTabButton}" />
+                        <Button Content="框选检测区" Margin="6,0,0,0"
+                                Command="{Binding DrawDetectionRoiCommand}"
+                                ToolTip="在图像上拖拽画出检测区域（双BLOB 的 ROI1：BLOB1 只在此框内）"
+                                Style="{StaticResource ViewTabButton}" />
+                        <Button Content="框选 ROI2" Margin="6,0,0,0"
+                                Command="{Binding DrawSecondaryRoiCommand}"
+                                ToolTip="双BLOB：BLOB2 只在此框内检测">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ViewTabButton}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsDualBlobMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Content="框选特征" Margin="6,0,0,0"
+                                Command="{Binding DrawFeatureRoiCommand}"
+                                ToolTip="框选示教特征（模板/形状匹配）">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ViewTabButton}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding UsesFeatureTeachRoi}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Content="示教模板" Margin="6,0,0,0"
+                                Command="{Binding Test.TeachTemplateCommand}"
+                                ToolTip="取当前画面写入模板。保存后才上产线">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ViewTabButton}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding NeedsTaughtTemplate}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <!-- 左下：测试结论 / 回放序号 -->
+                <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="10,10,10,12"
+                        Background="#99000000" CornerRadius="3" Padding="8,6" Panel.ZIndex="30"
+                        MaxWidth="420"
+                        Visibility="{Binding HasAnyImage, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel>
+                        <TextBlock FontSize="16" FontWeight="SemiBold" Text="{Binding TestResultBadge}"
+                                   Visibility="{Binding HasTestResult, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#FFFF8A80" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding TestResultOk}" Value="True">
+                                            <Setter Property="Foreground" Value="#FF81C784" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                                   Foreground="#FFE8EEF5" Text="{Binding TestNextStepHint}"
+                                   Visibility="{Binding TestNextStepHint,
+                                       Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+                        <TextBlock FontSize="11" Margin="0,4,0,0" Foreground="#FFB8C0CC"
+                                   Text="{Binding PlaybackCaption}"
+                                   Visibility="{Binding ShowPlaybackCaption,
+                                       Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Border Width="10" Height="10" Background="#FF4CAF50" CornerRadius="1" />
+                            <TextBlock Text="ROI1" FontSize="10" Foreground="#FFE8EEF5" Margin="4,0,10,0" />
+                            <Border Width="10" Height="10" Background="#FF03A9F4" CornerRadius="1" />
+                            <TextBlock Text="ROI2" FontSize="10" Foreground="#FFE8EEF5" Margin="4,0,10,0" />
+                            <Border Width="10" Height="10" Background="#FFFF9800" CornerRadius="1" />
+                            <TextBlock Text="特征框" FontSize="10" Foreground="#FFE8EEF5" Margin="4,0,10,0" />
+                            <Border Width="10" Height="10" Background="#FFFFD54F" CornerRadius="1" />
+                            <TextBlock Text="匹配窗 / 十字=峰" FontSize="10" Foreground="#FFE8EEF5" Margin="4,0,0,0" />
+                        </StackPanel>
+                    </StackPanel>
                 </Border>
             </Grid>
         </Border>

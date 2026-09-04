@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Threading;
+using RobotVision.WpfHost.Shared;
 using Wpf.Ui.Controls;
 
 namespace RobotVision.WpfHost.Features.Recipe;
@@ -18,9 +19,15 @@ public partial class RefineMethodDetailsWindow : FluentWindow
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (e.OldValue is RefineMethodDetailsViewModel oldVm)
+        {
             oldVm.RequestClose -= OnRequestClose;
+            oldVm.FlushPendingEdits = null;
+        }
         if (e.NewValue is RefineMethodDetailsViewModel newVm)
+        {
             newVm.RequestClose += OnRequestClose;
+            NumberBoxCommit.Bind(this, newVm);
+        }
     }
 
     private void OnRequestClose()
@@ -42,7 +49,7 @@ public partial class RefineMethodDetailsWindow : FluentWindow
     private void Polarity_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) =>
         (DataContext as RefineMethodDetailsViewModel)?.NotifyPolarityHintChanged();
 
-    /// <summary>精修范围/永不翻转变更 → 刷新角度窗提示（延迟到绑定提交后）。</summary>
+    /// <summary>角度范围/永不翻转变更 → 刷新提示（延迟到绑定提交后）。</summary>
     private void OnRangeOrNoFlipChanged(object sender, EventArgs e)
     {
         if (DataContext is not RefineMethodDetailsViewModel vm)

@@ -1,0 +1,113 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+
+    <AssemblyName>JLVisionLib</AssemblyName>
+
+    <RootNamespace />
+
+    <TargetFramework>netstandard2.0</TargetFramework>
+
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+
+    <LangVersion>14.0</LangVersion>
+
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+
+  </PropertyGroup>
+
+
+
+  <ItemGroup>
+
+    <Compile Include="Properties\AssemblyInfo.cs" />
+
+    <Compile Include="JLVisionLib.Runtime\**\*.cs" Exclude="JLVisionLib.Runtime\obj\**;JLVisionLib.Runtime\bin\**;JLVisionLib.Runtime\Properties\AssemblyInfo.cs" />
+
+  </ItemGroup>
+
+
+
+  <ItemGroup>
+    <Content Include="Libs\JLVisionCore.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>JLVisionCore.dll</Link>
+    </Content>
+  </ItemGroup>
+
+
+
+  <ItemGroup>
+
+    <PackageReference Include="Obfuscar">
+
+      <PrivateAssets>all</PrivateAssets>
+
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+
+    </PackageReference>
+
+  </ItemGroup>
+
+
+
+  <PropertyGroup>
+
+    <ObfuscarConfig>$(MSBuildProjectDirectory)\obfuscar.xml</ObfuscarConfig>
+
+    <DistDir>$(MSBuildProjectDirectory)\dist\$(Configuration)\</DistDir>
+
+  </PropertyGroup>
+
+
+
+  <Target Name="Obfuscate" AfterTargets="Build" Condition="'$(Configuration)'=='Release'">
+
+    <PropertyGroup>
+
+      <ObfuscarTool>$(NuGetPackageRoot)obfuscar\2.2.49\tools\Obfuscar.Console.exe</ObfuscarTool>
+
+      <ObfuscarOutPath>$(TargetDir)obfuscated\</ObfuscarOutPath>
+
+    </PropertyGroup>
+
+    <MakeDir Directories="$(ObfuscarOutPath)" />
+
+    <Exec Command="&quot;$(ObfuscarTool)&quot; &quot;$(ObfuscarConfig)&quot;" WorkingDirectory="$(TargetDir)" />
+
+    <Copy SourceFiles="$(ObfuscarOutPath)JLVisionLib.dll" DestinationFiles="$(TargetDir)JLVisionLib.dll" />
+
+    <Copy SourceFiles="$(ObfuscarOutPath)JLVisionLib.pdb" DestinationFiles="$(TargetDir)JLVisionLib.pdb" Condition="Exists('$(ObfuscarOutPath)JLVisionLib.pdb')" />
+
+  </Target>
+
+
+
+  <Target Name="PublishDist" AfterTargets="Build">
+
+    <MakeDir Directories="$(DistDir)" />
+
+    <ItemGroup>
+
+      <_DistFiles Include="$(TargetDir)JLVisionLib.dll" />
+
+      <_DistFiles Include="$(TargetDir)JLVisionLib.pdb" Condition="Exists('$(TargetDir)JLVisionLib.pdb')" />
+
+      <_DistFiles Include="$(TargetDir)JLVisionCore.dll" />
+
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_DistFiles)" DestinationFolder="$(DistDir)" SkipUnchangedFiles="true" />
+
+    <Message Importance="high" Text="Published to $(DistDir)" />
+
+  </Target>
+
+</Project>
+

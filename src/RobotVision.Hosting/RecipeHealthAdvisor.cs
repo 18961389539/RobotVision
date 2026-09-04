@@ -2,7 +2,6 @@ using RobotVision.Core.Geometry;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
 using RobotVision.Teach;
 
 namespace RobotVision.Hosting;

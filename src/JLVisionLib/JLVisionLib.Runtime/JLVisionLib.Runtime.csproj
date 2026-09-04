@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>JLVisionLib.Runtime</AssemblyName>
+    <RootNamespace />
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <LangVersion>14.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="..\Libs\JLVisionCore.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>JLVisionCore.dll</Link>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Obfuscar" Version="2.2.49">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <ObfuscarConfig>$(MSBuildProjectDirectory)\..\obfuscar.xml</ObfuscarConfig>
+  </PropertyGroup>
+
+  <Target Name="Obfuscate" AfterTargets="Build" Condition="'$(Configuration)'=='Release'">
+    <PropertyGroup>
+      <ObfuscarTool>$(NuGetPackageRoot)obfuscar\2.2.49\tools\Obfuscar.Console.exe</ObfuscarTool>
+      <ObfuscarOutPath>$(TargetDir)obfuscated\</ObfuscarOutPath>
+    </PropertyGroup>
+    <MakeDir Directories="$(ObfuscarOutPath)" />
+    <Exec Command="&quot;$(ObfuscarTool)&quot; &quot;$(MSBuildProjectDirectory)\..\obfuscar.xml&quot;" WorkingDirectory="$(TargetDir)" />
+    <Copy SourceFiles="$(ObfuscarOutPath)JLVisionLib.Runtime.dll" DestinationFiles="$(TargetDir)JLVisionLib.Runtime.dll" />
+    <Copy SourceFiles="$(ObfuscarOutPath)JLVisionLib.Runtime.pdb" DestinationFiles="$(TargetDir)JLVisionLib.Runtime.pdb" Condition="Exists('$(ObfuscarOutPath)JLVisionLib.Runtime.pdb')" />
+  </Target>
+</Project>

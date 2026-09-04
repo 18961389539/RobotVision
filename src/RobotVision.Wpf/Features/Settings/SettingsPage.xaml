@@ -7,7 +7,7 @@
 
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
-        <!-- 生效方式徽章（组标题右侧）：⚡ = 保存后生效"-->
+        <!-- 生效方式徽章（组标题右侧）：⚡ = 保存后生效） -->
         <Style x:Key="HotBadge" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource SystemFillColorSuccessBrush}" />
             <Setter Property="CornerRadius" Value="3" />
@@ -178,7 +178,7 @@
                     </StackPanel>
                 </ui:CardExpander>
 
-                <!-- 末端相机拍照位姿校验（1012/1014）"-->
+                <!-- 末端相机拍照位姿校验（1012/1014）） -->
                 <ui:CardExpander IsExpanded="True" Margin="0,0,0,8" Padding="12">
                     <ui:CardExpander.Header>
                         <StackPanel Orientation="Horizontal">
@@ -479,7 +479,7 @@
                     </StackPanel>
                 </ui:CardExpander>
 
-                <!-- 网络端点（默认收起；保存后热重启监听"-->
+                <!-- 网络端点（默认收起；保存后热重启监听） -->
                 <ui:CardExpander IsExpanded="False" Padding="12">
                     <ui:CardExpander.Header>
                         <StackPanel Orientation="Horizontal">
@@ -508,7 +508,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- 固定底部操作栏：保存/状态反馈始终可"-->
+        <!-- 固定底部操作栏：保存/状态反馈始终可） -->
         <ui:Card Grid.Row="1" Padding="12" Margin="0,8,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>

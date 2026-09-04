@@ -1,4 +1,3 @@
-using RobotVision.Core.Geometry;
 using RobotVision.Core.Recipe;
 
 namespace RobotVision.Teach;
@@ -100,23 +99,19 @@ public static class RefineParamTuner
 
         var parts = new List<string>();
         if (bestTh is { } thSug)
-            parts.Add($"匹配门 {current.MatchThreshold:0.00}→{thSug:0.00}");
+            parts.Add(TeachNarrator.TunerThreshold(current.MatchThreshold, thSug));
         if (range is { } rSug)
-            parts.Add($"搜索角 ±{current.RefineRangeDeg:0}°→±{rSug:0}°");
+            parts.Add(TeachNarrator.TunerRange(current.RefineRangeDeg, rSug));
         if (useEdge is { } eSug)
-            parts.Add(eSug ? "开边缘定角" : "关边缘定角");
+            parts.Add(TeachNarrator.TunerEdgeMatch(eSug));
         if (edge is { } ep)
-            parts.Add(ep == HousingEdgePolarity.BrightToDark ? "锁定亮→暗" : "锁定暗→亮");
+            parts.Add(TeachNarrator.TunerEdgePolarity(ep));
         if (tab is { } tp)
-            parts.Add(tp == TabPolarityLock.PlusShortAxis ? "锁定凸起 +短轴" : "锁定凸起 −短轴");
+            parts.Add(TeachNarrator.TunerTabPolarity(tp));
         if (count is { } nSug)
-            parts.Add(taskExpectedCount == 0
-                ? $"期望件数 {nSug}（回放假数众数）"
-                : $"回放假数众数 {nSug}，与任务期望 {taskExpectedCount} 不符");
+            parts.Add(TeachNarrator.TunerExpectedCount(nSug, taskExpectedCount));
 
-        var summary = parts.Count == 0
-            ? "参数与当前配方接近，无需改门限。"
-            : "方法已定，参数寻优（未写入产线）：" + string.Join("；", parts) + "。采用后请再试触发。";
+        var summary = TeachNarrator.TunerSummary(parts);
 
         return new RefineParamSuggestion(
             bestTh, range, useEdge, edge, tab,
@@ -172,21 +167,8 @@ public static class RefineParamTuner
                 okRows.Add(hit);
         }
 
-        var meanOk = okRows.Count == 0 ? 0 : okRows.Average(c => c.Score);
-        var period = directed ? 360.0 : 180.0;
-        var angles = okRows.Where(c => double.IsFinite(c.AngleDeg)).Select(c => c.AngleDeg).ToList();
-        var std = angles.Count < 2 ? double.NaN : AngleGeometry.CircularStdDeg(angles, period);
-        var consistency = angles.Count < 2 ? 1.0 : Math.Clamp(1.0 - std / 8.0, 0, 1);
-        var score = (okRows.Count / (double)n) * meanOk * consistency;
-        var ok = okRows.Count > 0 && score >= 0.35;
-        string note;
-        if (okRows.Count == 0)
-            note = $"{n} 帧均未过门";
-        else if (angles.Count < 2)
-            note = $"{okRows.Count}/{n} 过门，均分 {meanOk:0.00}";
-        else
-            note = $"{okRows.Count}/{n} 过门，均分 {meanOk:0.00}，角σ {std:0.00}°";
-        return (score, std, note, ok);
+        var agg = RaceScore.Compute(okRows, n, directed);
+        return (agg.Score, agg.AngleStdDeg, TeachNarrator.RaceSummary(agg), agg.Ok);
     }
 
     private static bool CanSweepThreshold(SegmentRefineMethod method) =>

@@ -85,6 +85,7 @@ public sealed partial class RecipeTestSession : ObservableObject, IDisposable
 
     private bool CanTeachTemplate =>
         !_host.IsBusy &&
+        !_host.IsPipelineOccupied &&
         Editor.AngleMode == AngleMode.MaskTemplate &&
         TemplateOptions.NeedsTaughtImage(Editor.Template.RefineMethod);
 
@@ -142,7 +143,7 @@ public sealed partial class RecipeTestSession : ObservableObject, IDisposable
         }
     }
 
-    private bool CanOperate => !_host.IsBusy && _host.CanTestTrigger;
+    private bool CanOperate => !_host.IsBusy && _host.CanTestTrigger && !_host.IsPipelineOccupied;
 
     [RelayCommand(CanExecute = nameof(CanOperate))]
     private async Task TestTriggerAsync()
@@ -155,8 +156,6 @@ public sealed partial class RecipeTestSession : ObservableObject, IDisposable
             return;
         }
         if (!_host.ConfirmGrabOriginIfNeeded("测试触发"))
-            return;
-        if (!_host.ConfirmFlatFeatureRoiIfNeeded("测试触发"))
             return;
 
         _host.IsBusy = true;

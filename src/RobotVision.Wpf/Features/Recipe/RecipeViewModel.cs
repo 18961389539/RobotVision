@@ -39,6 +39,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     private readonly IDialogService _dialogs;
     private readonly IRecipeWindowService _recipeWindows;
     private readonly SqliteResultStore? _sqlite;
+    private readonly VisionService? _vision;
     private readonly ILogger<RecipeViewModel> _log;
     private readonly ISegmentRefineGuidance _refineGuidance;
     private readonly IReadOnlyList<EnumItem<AngleMode>> _angleModeOptions;
@@ -128,7 +129,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         set => _originalName = value;
     }
 
-    void IRecipeListHost.CommitEdits() => this.Commit();
+    void IRecipeListHost.CommitEdits() => CommitPendingEdits();
 
     void IRecipeListHost.ResetDirtyCache() => ResetDirtyCache();
 
@@ -173,7 +174,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         ISegmentRefineGuidance refineGuidance,
         IFrameOverlayPresenter overlay,
         ILogger<RecipeViewModel> log,
-        SqliteResultStore? sqlite = null)
+        SqliteResultStore? sqlite = null,
+        VisionService? vision = null)
     {
         _loader = loader;
         _cfg = cfg;
@@ -188,22 +190,25 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         _refineGuidance = refineGuidance;
         _log = log;
         _sqlite = sqlite;
+        _vision = vision;
         _angleModeOptions = angleRegistry.Options
             .Select(o => new EnumItem<AngleMode>(o.Mode, o.Label))
             .ToList();
         Roi = new RecipeRoiEditor(this, cameras, calibration, lighting, _pageSession);
         Lighting = new RecipeLightingEditor(this, lighting);
         Test = new RecipeTestSession(this, recipeTest, refineGuidance, overlay, dialogs);
-        TemplateUi = new RecipeTemplatePresenter(this, maskTeach, () => HasUnsavedChanges);
-        List = new RecipeListCatalog(this, loader, dialogs, sqlite);
+        TemplateUi = new RecipeTemplatePresenter(this, maskTeach, _pageSession, () => HasUnsavedChanges);
+        List = new RecipeListCatalog(this, loader, dialogs, sqlite, log);
         Roi.PropertyChanged += OnRoiOrTestChanged;
         Test.PropertyChanged += OnRoiOrTestChanged;
         TemplateUi.PropertyChanged += OnTemplateUiChanged;
         List.PropertyChanged += OnListChanged;
         _dirtyTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _dirtyTimer.Tick += (_, _) => RefreshDirtyStateFromTimer();
-        List.Refresh();
+        RefreshPipelineStatus();
     }
+
+    public void ScheduleListRefresh() => List.ScheduleRefresh();
 
     public bool HasAnyImage => Test.ResultImage is not null || Roi.PreviewImage is not null;
 
@@ -222,6 +227,19 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     [RelayCommand]
     private void ShowRoiPreviewView() => ShowTestImage = false;
+
+    public Action? RequestDetectionRoiDraw { get; set; }
+
+    public Action? RequestSecondaryRoiDraw { get; set; }
+
+    [RelayCommand]
+    private void DrawDetectionRoi() => RequestDetectionRoiDraw?.Invoke();
+
+    [RelayCommand]
+    private void DrawSecondaryRoi() => RequestSecondaryRoiDraw?.Invoke();
+
+    [RelayCommand]
+    private void DrawFeatureRoi() => RequestTemplateRoiDraw?.Invoke();
 
     private bool CanOpenSetupWizard => !IsBusy;
 
@@ -269,6 +287,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         RefreshViewerScale();
         TemplateUi.Refresh();
         RefreshAssetPinStatus();
+        RefreshPlaybackCaption();
         NotifyEditorCommands();
 
         if (refreshHealth)
@@ -294,7 +313,13 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     void IRecipeWorkspace.RefreshEditorBindings() => NotifyEditorBindings(refreshHealth: false);
 
-    void IRecipeWorkspace.CommitEdits() => this.Commit();
+    void IRecipeWorkspace.CommitEdits() => CommitPendingEdits();
+
+    private void CommitPendingEdits()
+    {
+        this.Commit();
+        PublishDirtyState();
+    }
 
     void IRecipeWorkspace.NotifyDirty()
     {
@@ -302,6 +327,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         OnPropertyChanged(nameof(TemplateStatusText));
         OnPropertyChanged(nameof(FeatureGrabOriginHint));
         OnPropertyChanged(nameof(RefineDetailsSummary));
+        OnPropertyChanged(nameof(ShowBlobExpandWindow));
         RefreshTestTriggerGate();
     }
 
@@ -315,6 +341,8 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
+        OnPropertyChanged(nameof(DirtyChipText));
+        OnPropertyChanged(nameof(TestNextStepHint));
         OnPropertyChanged(nameof(TemplateStatusText));
         OnPropertyChanged(nameof(RefineDetailsSummary));
         RefreshTestTriggerGate();
@@ -326,12 +354,38 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         _hasUnsavedChangesSync();
     }
 
-    private void RefreshDirtyStateFromTimer() => PublishDirtyState();
+    private void RefreshDirtyStateFromTimer()
+    {
+        PublishDirtyState();
+        RefreshPipelineStatus();
+    }
+
+    private void RefreshPipelineStatus()
+    {
+        var occupied = _vision is not null && !IsBusy && (_vision.IsProcessing || _vision.QueueDepth > 0);
+        var text = occupied
+            ? $"产线占用 {_vision!.QueueDepth}/{_vision.MaxQueueDepth}"
+            : IsBusy ? "本页测试中" : "产线空闲";
+        if (occupied == IsPipelineOccupied && text == PipelineStatusText)
+            return;
+        IsPipelineOccupied = occupied;
+        PipelineStatusText = text;
+        OnPropertyChanged(nameof(IsPipelineOccupied));
+        OnPropertyChanged(nameof(PipelineStatusText));
+        OnPropertyChanged(nameof(CanTestTrigger));
+        OnPropertyChanged(nameof(ShowTestTriggerBlockHint));
+        OnPropertyChanged(nameof(TestTriggerBlockHint));
+        OnPropertyChanged(nameof(TestTriggerButtonToolTip));
+        Test.NotifyCanExecuteChanged();
+        Roi.NotifyCanExecuteChanged();
+    }
 
     private void _hasUnsavedChangesSync()
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(UnsavedHint));
+        OnPropertyChanged(nameof(DirtyChipText));
+        OnPropertyChanged(nameof(TestNextStepHint));
     }
 
     void IRecipeWorkspace.OnTestStarting() => ShowTestImage = true;
@@ -347,14 +401,31 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     {
         OnPropertyChanged(nameof(CameraIds));
         OnPropertyChanged(nameof(CameraOptions));
+        // ItemsSource 刷新会把 ComboBox.SelectedValue 写成 null；立刻把已加载相机打回去。
+        OnPropertyChanged(nameof(EditorCameraId));
     }
 
-    public void RefreshStationIds() => OnPropertyChanged(nameof(StationIds));
+    public void RefreshStationIds()
+    {
+        OnPropertyChanged(nameof(StationIds));
+        // ItemsSource 刷新会把 ComboBox.SelectedItem 写成 null；立刻把已加载工位打回去。
+        OnPropertyChanged(nameof(EditorStationId));
+    }
 
     public IReadOnlyList<string> CameraIds => _cameras.CameraIds.ToList();
 
-    public IReadOnlyList<CameraOption> CameraOptions =>
-        CameraOption.FromRegistered(_cfg.Cameras, _cameras.CameraIds);
+    public IReadOnlyList<CameraOption> CameraOptions
+    {
+        get
+        {
+            var options = CameraOption.FromRegistered(_cfg.Cameras, _cameras.CameraIds);
+            var id = Editor.CameraId;
+            if (string.IsNullOrWhiteSpace(id) ||
+                options.Any(o => string.Equals(o.Id, id, StringComparison.OrdinalIgnoreCase)))
+                return options;
+            return options.Prepend(new CameraOption(id, id)).ToList();
+        }
+    }
 
     public IReadOnlyList<string> ModelFiles => _models.ModelFileNames;
 
@@ -387,8 +458,28 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     public bool HasUnsavedChanges => _dirty.HasUnsavedChanges;
 
     public string UnsavedHint => HasUnsavedChanges
-        ? "有未保存的修改：测试触发已用当前编辑器，保存后才上产线；切换/刷新将丢弃"
+        ? "有未保存的修改：测试走当前编辑器，产线 TRIGGER 仍是磁盘旧版。保存后才上产线；切换/刷新将丢弃"
         : "";
+
+    public string DirtyChipText => HasUnsavedChanges ? "未保存 · 产线仍是旧版" : "已保存";
+
+    public bool HasTestResult => Test.LastPreview is not null;
+
+    public bool TestResultOk => Test.LastPreview is { Ok: true };
+
+    public string TestResultBadge => RecipeTestNextStep.Badge(Test.LastPreview);
+
+    public string TestNextStepHint =>
+        RecipeTestNextStep.For(Test.LastPreview, Test.LastRefineQualityHint, HasUnsavedChanges);
+
+    public string PlaybackCaption { get; private set; } = "";
+
+    public bool ShowPlaybackCaption => PlaybackCaption.Length > 0;
+
+    /// <summary>产线 TRIGGER 正在占队列/相机，且本页没有自己的试触发。此时禁用测试以免 1009/1010。</summary>
+    public bool IsPipelineOccupied { get; private set; }
+
+    public string PipelineStatusText { get; private set; } = "产线空闲";
 
     public string RecipesFolderHint => List.RecipesFolderHint;
 
@@ -396,19 +487,23 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     public string TemplateStatusText => TemplateUi.TemplateStatusText;
 
-    public bool CanTestTrigger => _testTriggerBlockReason is null;
+    public bool CanTestTrigger => _testTriggerBlockReason is null && !IsPipelineOccupied;
 
-    public bool ShowTestTriggerBlockHint => !IsBusy && _testTriggerBlockReason is not null;
+    public bool ShowTestTriggerBlockHint => !IsBusy && (IsPipelineOccupied || _testTriggerBlockReason is not null);
 
     public string TestTriggerBlockHint =>
-        _testTriggerBlockReason is { } reason ? $"无法测试触发：{reason}" : "";
+        IsPipelineOccupied
+            ? "产线占用相机/队列，测试会与 TRIGGER 抢槽（1009/1010）。请等产线空闲。"
+            : _testTriggerBlockReason is { } reason ? $"无法测试触发：{reason}" : "";
 
     public string TestTriggerButtonToolTip =>
         IsBusy
             ? "测试进行中…"
-            : _testTriggerBlockReason is { } reason
-                ? $"无法测试触发：{reason}"
-                : "用当前编辑器（含未保存修改）跑一次完整链路，不写产量。保存后才上产线";
+            : IsPipelineOccupied
+                ? "产线占用相机/队列，请等空闲后再测"
+                : _testTriggerBlockReason is { } reason
+                    ? $"无法测试触发：{reason}"
+                    : "用当前编辑器（含未保存修改）跑一次完整链路，不写产量。保存后才上产线";
 
     private void RefreshTestTriggerGate()
     {
@@ -464,6 +559,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     public bool IsMaskTemplateMode => TemplateUi.IsMaskTemplateMode;
     public bool IsDualBlobMode => Editor.AngleMode == AngleMode.DualBlobCenterLine;
     public bool ShowBlobFixedThreshold => IsDualBlobMode && !Editor.Blob.UseOtsu;
+    public bool ShowBlobExpandWindow => IsDualBlobMode && Editor.Blob.SecondaryRoi is null;
     public bool HasTemplate => TemplateUi.HasTemplate;
 
     public IReadOnlyList<EnumItem<SegmentRefineMethod>> RefineMethodOptions { get; } =
@@ -482,6 +578,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         Editor.Template is { } tmpl && TemplateOptions.UsesTaughtRefineLine(tmpl.RefineMethod);
     public bool NeedsTaughtTemplate => TemplateUi.NeedsTaughtTemplate;
     public bool ShowRefineRange => TemplateUi.ShowRefineRange;
+    public bool ShowMatchThreshold => TemplateUi.ShowMatchThreshold;
     public string RefineDetailsSummary => TemplateUi.RefineDetailsSummary;
 
     public Action? RequestTemplateRoiDraw { get; set; }
@@ -511,8 +608,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             if (Editor.AngleMode == value)
                 return;
             Editor.AngleMode = value;
-            Test.ClearAdvice();
-            NotifyEditorMutated();
+            ApplyModeCleanup();
         }
     }
 
@@ -524,9 +620,17 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             if (Editor.Template.RefineMethod == value)
                 return;
             Editor.Template.RefineMethod = value;
-            Test.ClearAdvice();
-            NotifyEditorMutated();
+            ApplyModeCleanup();
         }
+    }
+
+    private void ApplyModeCleanup()
+    {
+        var note = RecipeEditorModeCleanup.Apply(Editor);
+        Test.ClearAdvice();
+        NotifyEditorMutated();
+        if (note is not null)
+            Message = note;
     }
 
     public bool EditorCropWindowPairing
@@ -553,14 +657,35 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         }
     }
 
-    public string? EditorStationId
+    public string EditorCameraId
     {
-        get => Editor.StationId;
+        get => Editor.CameraId ?? "";
         set
         {
-            if (string.Equals(Editor.StationId, value, StringComparison.Ordinal))
+            var next = value?.Trim() ?? "";
+            if (string.Equals(Editor.CameraId, next, StringComparison.Ordinal))
                 return;
-            Editor.StationId = value;
+            // 可编辑/SelectedValue ComboBox 刷新 ItemsSource 时会把选中项写成空，不能把已加载相机清掉。
+            if (next.Length == 0 && !string.IsNullOrWhiteSpace(Editor.CameraId))
+                return;
+            Editor.CameraId = next;
+            Roi.MaybeClearReferenceFrameForCamera(next);
+            NotifyEditorMutated();
+        }
+    }
+
+    public string EditorStationId
+    {
+        get => Editor.StationId ?? "";
+        set
+        {
+            var next = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (string.Equals(Editor.StationId, next, StringComparison.Ordinal))
+                return;
+            // 可编辑 ComboBox 刷新 ItemsSource 时会把 Text 写成空，不能把已加载工位清掉。
+            if (next is null && !string.IsNullOrWhiteSpace(Editor.StationId))
+                return;
+            Editor.StationId = next;
             RefreshViewerScale();
             NotifyEditorMutated();
         }
@@ -768,6 +893,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
         Roi.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ShowTestImageViewer));
         OnPropertyChanged(nameof(ShowRoiImageViewer));
+        RefreshPipelineStatus();
     }
 
     partial void OnIsNewChanged(bool value) => List.DeleteCommand.NotifyCanExecuteChanged();
@@ -786,11 +912,34 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
             OnPropertyChanged(nameof(ShowRoiImageViewer));
         }
 
-        if (e.PropertyName == nameof(RecipeTestSession.LastPreview))
+        if (e.PropertyName is nameof(RecipeTestSession.LastPreview)
+            or nameof(RecipeTestSession.LastRefineQualityHint))
         {
             RecordTeachOutputCommand.NotifyCanExecuteChanged();
             SuggestOutputOffsetCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(HasTestResult));
+            OnPropertyChanged(nameof(TestResultOk));
+            OnPropertyChanged(nameof(TestResultBadge));
+            OnPropertyChanged(nameof(TestNextStepHint));
         }
+
+        if (e.PropertyName is nameof(RecipeTestSession.ResultImage)
+            or nameof(RecipeRoiEditor.PreviewImage)
+            or nameof(RecipeTestSession.LastPreview))
+            RefreshPlaybackCaption();
+    }
+
+    private void RefreshPlaybackCaption()
+    {
+        var next = "";
+        var id = Editor.CameraId;
+        if (!string.IsNullOrWhiteSpace(id) && _cameras.GetLastPlayback(id) is { } cur)
+            next = $"回放 {cur.Index}/{cur.Total} · {cur.FileName}";
+        if (next == PlaybackCaption)
+            return;
+        PlaybackCaption = next;
+        OnPropertyChanged(nameof(PlaybackCaption));
+        OnPropertyChanged(nameof(ShowPlaybackCaption));
     }
 
     private void OnTemplateUiChanged(object? sender, PropertyChangedEventArgs e)
@@ -816,11 +965,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     bool IRecipeListHost.ConfirmGrabOriginIfNeeded(string action) => ConfirmGrabOriginIfNeeded(action);
 
-    bool IRecipeListHost.ConfirmFlatFeatureRoiIfNeeded(string action) => ConfirmFlatFeatureRoiIfNeeded(action);
-
     bool IRecipeWorkspace.ConfirmGrabOriginIfNeeded(string action) => ConfirmGrabOriginIfNeeded(action);
-
-    bool IRecipeWorkspace.ConfirmFlatFeatureRoiIfNeeded(string action) => ConfirmFlatFeatureRoiIfNeeded(action);
 
     private bool ConfirmGrabOriginIfNeeded(string action)
     {
@@ -858,35 +1003,62 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
 
     private void RefreshRecipeHealth()
     {
-        RecipeHealthHint = "";
-        _playbookPrior = ScenePlaybook.FromTemplate(Editor.Template);
         if (_sqlite is null)
+        {
+            RecipeHealthHint = "";
+            _playbookPrior = ScenePlaybook.FromTemplate(Editor.Template);
             return;
+        }
+
         var name = RecipeLoader.IsValidRecipeName(_originalName) ? _originalName : Editor.Name;
         if (!RecipeLoader.IsValidRecipeName(name))
             return;
-        try
+
+        var template = Editor.Template;
+        var teachPeak = template.TeachPeakScore;
+        var angleMode = Editor.AngleMode;
+        var refineMethod = template.RefineMethod;
+        var refinePolicyOrder = template.RefinePolicyOrder;
+        var generation = _pageSession.CaptureGeneration();
+        var token = _pageSession.Token;
+        _pageSession.Track(Task.Run(() =>
         {
-            var q = new ResultDbQuery { Recipe = name };
-            var total = _sqlite.Count(q);
-            if (total == 0)
+            token.ThrowIfCancellationRequested();
+            try
+            {
+                var q = new ResultDbQuery { Recipe = name };
+                var total = _sqlite.Count(q);
+                if (total == 0)
+                    return (Hints: (IReadOnlyList<RecipeHealthHint>)Array.Empty<RecipeHealthHint>(), Prior: ScenePlaybook.FromTemplate(template));
+
+                var hints = RecipeHealthAdvisor.Analyze(
+                    total,
+                    _sqlite.CountByCode(q),
+                    _sqlite.QueryAngles(q with { OkOnly = true }),
+                    _sqlite.QuerySpread(q with { OkOnly = true }),
+                    teachPeak);
+                var current = angleMode == AngleMode.MaskTemplate ? refineMethod : (SegmentRefineMethod?)null;
+                var prior = ScenePlaybook.Merge(
+                    ScenePlaybook.FromTemplate(template),
+                    RecipeHealthAdvisor.ToPlaybookPrior(hints, current, refinePolicyOrder));
+                return (hints, prior);
+            }
+            catch (Exception ex)
+            {
+                WpfUiLog.RecipeHealthHintFailed(_log, ex, name);
+                return (Hints: (IReadOnlyList<RecipeHealthHint>)Array.Empty<RecipeHealthHint>(), Prior: ScenePlaybook.FromTemplate(template));
+            }
+        }, token).ContinueWith(t =>
+        {
+            if (!_pageSession.IsCurrent(generation) || t.IsCanceled || t.IsFaulted)
                 return;
-            var hints = RecipeHealthAdvisor.Analyze(
-                total,
-                _sqlite.CountByCode(q),
-                _sqlite.QueryAngles(q with { OkOnly = true }),
-                _sqlite.QuerySpread(q with { OkOnly = true }),
-                Editor.Template.TeachPeakScore);
-            RecipeHealthHint = string.Join(Environment.NewLine, hints.Select(h => h.Message));
-            var current = Editor.AngleMode == AngleMode.MaskTemplate ? Editor.Template.RefineMethod : (SegmentRefineMethod?)null;
-            _playbookPrior = ScenePlaybook.Merge(
-                ScenePlaybook.FromTemplate(Editor.Template),
-                RecipeHealthAdvisor.ToPlaybookPrior(hints, current, Editor.Template.RefinePolicyOrder));
-        }
-        catch (Exception ex)
-        {
-            // 结果库读失败不影响编辑，但需留痕以便排查
-            WpfUiLog.RecipeHealthHintFailed(_log, ex, name);
-        }
+
+            var (hints, prior) = t.Result;
+            RecipeHealthHint = hints.Count == 0
+                ? ""
+                : string.Join(Environment.NewLine, hints.Select(h => h.Message));
+            _playbookPrior = prior;
+            OnPropertyChanged(nameof(RecipeHealthHint));
+        }, token, TaskContinuationOptions.None, TaskScheduler.FromCurrentSynchronizationContext()));
     }
 }

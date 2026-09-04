@@ -12,7 +12,7 @@ using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using RobotVision.Infrastructure.Lighting;
 using RobotVision.WpfHost.Features.Recipe;
 
@@ -218,6 +218,21 @@ public sealed class RecipeRoiLiveSyncTests : IDisposable
             vm.Roi.UseRoi = false;
 
             active.Rects.Should().BeEmpty();
+        }
+        finally { vm.Dispose(); }
+    }
+
+    [Fact]
+    public void UseSecondaryRoi_EnablesPrimaryRoi()
+    {
+        var vm = CreateVm();
+        try
+        {
+            vm.Roi.UseRoi.Should().BeFalse();
+            vm.Roi.UseSecondaryRoi = true;
+            vm.Roi.UseRoi.Should().BeTrue();
+            vm.Editor.Roi.Should().NotBeNull();
+            vm.Editor.Blob.SecondaryRoi.Should().NotBeNull();
         }
         finally { vm.Dispose(); }
     }

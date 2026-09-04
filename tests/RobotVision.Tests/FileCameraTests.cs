@@ -40,6 +40,28 @@ public class FileCameraTests : IDisposable
     }
 
     [Fact]
+    public void LastPlayback_NullUntilGrab_ThenOneBasedIndexAndFileName()
+    {
+        using var camera = new FileCamera("cam", _dir);
+        Assert.Null(camera.LastPlayback);
+
+        camera.Grab().Dispose();
+        var first = camera.LastPlayback;
+        Assert.NotNull(first);
+        Assert.Equal(1, first.Value.Index);
+        Assert.Equal(3, first.Value.Total);
+        Assert.Equal("f0.png", first.Value.FileName);
+
+        camera.Grab().Dispose();
+        Assert.Equal(2, camera.LastPlayback!.Value.Index);
+        Assert.Equal("f1.png", camera.LastPlayback.Value.FileName);
+
+        camera.RepeatLast().Dispose();
+        Assert.Equal(2, camera.LastPlayback!.Value.Index);
+        Assert.Equal("f1.png", camera.LastPlayback.Value.FileName);
+    }
+
+    [Fact]
     public void RepeatLast_DoesNotAdvancePlayback()
     {
         using var camera = new FileCamera("cam", _dir);

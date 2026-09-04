@@ -184,10 +184,23 @@ public sealed class RecipeLoader(string folder)
         {
             if (recipe.Template.MatchThreshold is < 0 or > 1)
                 throw new InvalidRecipeException(name, "template.matchThreshold 必须在 [0,1]");
+            recipe.Template.EnsureRefineAngleBounds();
+            if (recipe.Template.RefineAngleLoDeg is < -45 or > 45 ||
+                recipe.Template.RefineAngleHiDeg is < -45 or > 45 ||
+                recipe.Template.RefineAngleHiDeg - recipe.Template.RefineAngleLoDeg < 1)
+                throw new InvalidRecipeException(name, "template.refineAngleLoDeg/HiDeg 必须在 [-45,45] 且上限至少比下限大 1°");
             if (recipe.Template.RefineRangeDeg is <= 0 or > 45)
                 throw new InvalidRecipeException(name, "template.refineRangeDeg 必须在 (0,45]");
             if (recipe.Template.TeachPeakScore is < 0 or > 1)
                 throw new InvalidRecipeException(name, "template.teachPeakScore 必须在 [0,1]");
+            if (recipe.Template.MaxSecondPeakRatio is <= 0 or > 1)
+                throw new InvalidRecipeException(name, "template.maxSecondPeakRatio 必须在 (0,1]");
+            if (recipe.Template.ShapeMatchNumLevels is < 1 or > 5)
+                throw new InvalidRecipeException(name, "template.shapeMatchNumLevels 必须在 [1,5]");
+            if (recipe.Template.ShapeMatchMinContrast is < 0 or > 255)
+                throw new InvalidRecipeException(name, "template.shapeMatchMinContrast 必须在 [0,255]");
+            if (!Enum.IsDefined(recipe.Template.ShapeMatchMetric))
+                throw new InvalidRecipeException(name, "template.shapeMatchMetric 无效");
             if (!Enum.IsDefined(recipe.Template.HousingEdgePolarity))
                 throw new InvalidRecipeException(name, "template.housingEdgePolarity 无效");
             if (!Enum.IsDefined(recipe.Template.TabPolarity))
@@ -275,6 +288,10 @@ public sealed class RecipeLoader(string folder)
             ValidateNormalizedRoi(name, "roi", roi);
         if (recipe.Template?.Roi is { } templateRoi)
             ValidateNormalizedRoi(name, "template.roi", templateRoi);
+        if (isBlobMode && recipe.Blob.SecondaryRoi is not null && recipe.Roi is null)
+            throw new InvalidRecipeException(name, "双BLOB 启用次区时必须同时设置主检测区：BLOB1 只在 roi，BLOB2 只在 blob.secondaryRoi");
+        if (isBlobMode && recipe.Blob.SecondaryRoi is { } secondaryRoi)
+            ValidateNormalizedRoi(name, "blob.secondaryRoi", secondaryRoi);
 
         ValidateLighting(recipe);
     }
@@ -306,14 +323,10 @@ public sealed class RecipeLoader(string folder)
     }
 
     /// <summary>
-    /// 无向角：最小外接矩形，或「无示教基准线的分割+精修直线拟合」。与偏心工具同时用会差 180°。
-    /// LineFit 一旦配了可靠签名（明暗差过门）的示教基准线，即可消 180°、输出有向角，不再算无向。
+    /// 无向角：最小外接矩形。LineFit 默认自动头尾分辨，与偏心工具兼容。
     /// </summary>
     public static bool HasUndirectedAngle(RecipeConfig recipe) =>
-        recipe.AngleMode == AngleMode.MaskMinAreaRect ||
-        (recipe.AngleMode == AngleMode.MaskTemplate &&
-         recipe.Template.RefineMethod == SegmentRefineMethod.LineFit &&
-         !(recipe.Template.RefineLine is { } line && line.HasReliableSignature));
+        recipe.AngleMode == AngleMode.MaskMinAreaRect;
 
     private static void ValidateAssetPins(RecipeConfig recipe)
     {
@@ -382,6 +395,26 @@ public sealed class RecipeLoader(string folder)
             }
         }
         return errors;
+    }
+
+    /// <summary>读取列表元数据（跳过 templateImageBase64，不写入缓存、不触发 AfterMaterialize）。</summary>
+    public RecipeListMetadata PeekListMetadata(string name)
+    {
+        if (!IsValidRecipeName(name))
+            return RecipeListMetadata.ParseFailed(name, "配方名无效");
+
+        var path = Path.Combine(folder, name + ".json");
+        if (!File.Exists(path))
+            return RecipeListMetadata.ParseFailed(name, "配方不存在");
+
+        try
+        {
+            return RecipeListMetadataReader.Read(path, name);
+        }
+        catch (Exception ex)
+        {
+            return RecipeListMetadata.ParseFailed(name, ex.Message);
+        }
     }
 
     /// <summary>列出配方目录中的全部配方名（仅合法名，供 UI 选择）。</summary>

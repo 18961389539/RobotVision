@@ -12,7 +12,7 @@ using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using RobotVision.Infrastructure.Lighting;
 
 namespace RobotVision.IntegrationTests;

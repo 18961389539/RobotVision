@@ -21,6 +21,7 @@ public sealed class FileCamera : ICamera
     private readonly int _intervalMs;
     private readonly object _lock = new();
     private int _index;
+    private int _lastIndex = -1;
     private string? _lastFile;
 
     public string Id { get; }
@@ -81,9 +82,27 @@ public sealed class FileCamera : ICamera
             }
             file = _files[_index++];
             _lastFile = file;
+            _lastIndex = _index - 1;
         }
 
         return new CameraFrame(LoadOwnedImage(file), DateTime.UtcNow);
+    }
+
+    /// <summary>最近一次 <see cref="Grab"/> / <see cref="RepeatLast"/> 的回放位置（1-based）。尚未取图则为 null。</summary>
+    public FilePlaybackCursor? LastPlayback
+    {
+        get
+        {
+            lock (_lock)
+            {
+                if (_lastIndex < 0 || string.IsNullOrEmpty(_lastFile))
+                    return null;
+                return new FilePlaybackCursor(
+                    _lastIndex + 1,
+                    _files.Length,
+                    Path.GetFileName(_lastFile) ?? _lastFile);
+            }
+        }
     }
 
     /// <summary>再读上次 <see cref="Grab"/> 的文件，不推进下标。示教/框选要沿用当前画面。</summary>

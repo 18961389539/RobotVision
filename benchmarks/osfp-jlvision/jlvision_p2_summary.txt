@@ -1,0 +1,12 @@
+﻿B min=0.45 g=0.9 lv=0 up=False found 10/14 flip=2 σ=57.95° P90=22.1ms
+B min=0.40 g=0.7 lv=0 up=True found 9/14 flip=0 σ=1.70° P90=27.5ms
+B min=0.40 g=0.9 lv=0 up=True found 9/14 flip=0 σ=1.61° P90=16.9ms
+B min=0.50 g=0.7 lv=0 up=True found 7/14 flip=0 σ=1.74° P90=20.2ms
+B min=0.50 g=0.9 lv=0 up=True found 7/14 flip=0 σ=1.62° P90=26.1ms
+B min=0.60 g=0.7 lv=0 up=True found 7/14 flip=0 σ=1.74° P90=16.0ms
+B min=0.60 g=0.9 lv=0 up=True found 7/14 flip=0 σ=1.62° P90=17.1ms
+B min=0.75 g=0.7 lv=0 up=True found 6/14 flip=0 σ=1.85° P90=18.8ms
+B min=0.75 g=0.9 lv=0 up=True found 5/14 flip=0 σ=0.03° P90=15.8ms
+E min=0.55 found 13/14 flip=0 σ=2.28° P90=74.7ms
+E min=0.75 found 11/14 flip=0 σ=2.30° P90=56.7ms
+E min=0.85 found 10/14 flip=0 σ=2.40° P90=55.7ms

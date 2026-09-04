@@ -135,7 +135,17 @@ public sealed class SerialLightController : ILightController
             ReadTimeout = _timeoutMs,
             WriteTimeout = _timeoutMs,
         };
-        port.Open();
+        try
+        {
+            port.Open();
+        }
+        catch
+        {
+            // 打开失败必须立即释放刚创建的端口对象，否则每次发送都会泄漏 COM 句柄与内部事件句柄。
+            port.Dispose();
+            throw;
+        }
+
         _port = port;
     }
 }

@@ -1,7 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -29,6 +29,30 @@ public sealed class MaskShapeMatchTests
     }
 
     [Theory]
+    [InlineData(-37)]
+    [InlineData(-20)]
+    [InlineData(-8.7)]
+    public void FollowsRotation_NegativeAngles(double deg)
+    {
+        using var teachImg = Paint(0);
+        var teachContour = Contour(0);
+        var model = Teach(teachImg, teachContour);
+        Assert.NotNull(model);
+
+        using var img = Paint(deg);
+        var contour = Contour(deg);
+        var attempt = MaskShapeMatch.TryRefine(img, contour, model, refineRangeDeg: 8, noFlip: true);
+        Assert.True(attempt.Pose is not null,
+            $"转 {deg}° 未过门 命中 {MaskShapeMatch.LastDebug.HitRate:0.00} 均距 {MaskShapeMatch.LastDebug.MeanDist:0.00}");
+        var r = attempt.Pose!;
+        var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - deg));
+        var gate = deg is -37 or -20 ? 0.25 : 1.0;
+        Assert.True(err < gate,
+            $"转 {deg}°：得 {r.AngleDeg:0.00}，误差 {err:0.00}°(门 {gate})");
+        AssertNearPart(r.Center, contour);
+    }
+
+    [Theory]
     [InlineData(37)]
     [InlineData(180)]
     public void FollowsRotation(double deg)
@@ -46,7 +70,7 @@ public sealed class MaskShapeMatchTests
             $"极性 {MaskShapeMatch.LastDebug.PolarTeach:0.0}/{MaskShapeMatch.LastDebug.Polar0:0.0}/{MaskShapeMatch.LastDebug.Polar180:0.0}");
         var r = attempt.Pose!;
         var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - deg));
-        Assert.True(err < 8.0,
+        Assert.True(err < 1.0,
             $"转 {deg}°：得 {r.AngleDeg:0.00}，误差 {err:0.00}° 命中 {r.HitRate:0.00} 均距 {r.MeanDistPx:0.00} 方向一致 {MaskShapeMatch.LastDebug.DirAgree:0.00} " +
             $"极性 {MaskShapeMatch.LastDebug.PolarTeach:0.0}/{MaskShapeMatch.LastDebug.Polar0:0.0}/{MaskShapeMatch.LastDebug.Polar180:0.0}");
         AssertNearPart(r.Center, contour);
@@ -60,8 +84,6 @@ public sealed class MaskShapeMatchTests
         // 极性证据门回归:中小角度旋转使 polar0≈polar180 同号(探针落插值模糊区),
         // 旧逻辑 1e-6 噪声差误走翻转支 → 输出差 ~174°(曾实测 8.7°/20° 事故)。
         // 门控后应信任主窗,不得翻转到 deg+180 附近。
-        // 注:-20° 同类事故源于 MinAreaRect warp 180° 补角表示歧义(主窗内容物理
-        // 翻转),非极性门可解,roadmap #9 极值角相位已登记。
         using var teachImg = Paint(0);
         var model = Teach(teachImg, Contour(0));
         Assert.NotNull(model);
@@ -98,6 +120,55 @@ public sealed class MaskShapeMatchTests
         AssertNearPart(r.Center, contour);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(20)]
+    [InlineData(-8.7)]
+    [InlineData(-37)]
+    public void IgnoresOrthogonalBar_InUprightCropMargin(double sceneDeg)
+    {
+        // 正交干扰：与长边成 90° 的亮条落在转正窗 margin 内（不在分割轮廓内）。
+        // 有向 Chamfer 须靠方向 bin 区分平行/正交边，不得把角拉向 90°。
+        using var teachImg = Paint(0);
+        var model = Teach(teachImg, Contour(0));
+        Assert.NotNull(model);
+
+        using var img = Paint(sceneDeg);
+        PaintOrthogonalBarInMargin(img, sceneDeg, barValue: 210);
+        var contour = Contour(sceneDeg);
+        var attempt = MaskShapeMatch.TryRefine(img, contour, model, refineRangeDeg: 8, noFlip: true);
+        Assert.True(attempt.Pose is not null,
+            $"deg={sceneDeg}° 未过门 命中 {MaskShapeMatch.LastDebug.HitRate:0.00} 均距 {MaskShapeMatch.LastDebug.MeanDist:0.00} 方向一致 {MaskShapeMatch.LastDebug.DirAgree:0.00}");
+        var r = attempt.Pose!;
+        var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - sceneDeg));
+        Assert.True(err < 1.0,
+            $"deg={sceneDeg}° 正交条干扰：得 {r.AngleDeg:0.00}° 误差 {err:0.00}° 方向一致 {MaskShapeMatch.LastDebug.DirAgree:0.00}");
+        AssertNearPart(r.Center, contour);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-20)]
+    public void IgnoresParallelBar_InUprightCropMargin(double sceneDeg)
+    {
+        // 平行干扰：与长边同向的亮条落在 margin 内；无向 Chamfer 易被平行边吸走。
+        using var teachImg = Paint(0);
+        var model = Teach(teachImg, Contour(0));
+        Assert.NotNull(model);
+
+        using var img = Paint(sceneDeg);
+        PaintParallelBarInMargin(img, sceneDeg, barValue: 210);
+        var contour = Contour(sceneDeg);
+        var attempt = MaskShapeMatch.TryRefine(img, contour, model, refineRangeDeg: 8, noFlip: true);
+        Assert.True(attempt.Pose is not null,
+            $"deg={sceneDeg}° 未过门 命中 {MaskShapeMatch.LastDebug.HitRate:0.00} 均距 {MaskShapeMatch.LastDebug.MeanDist:0.00}");
+        var r = attempt.Pose!;
+        var err = Math.Abs(AngleGeometry.NormalizeSignedDeg(r.AngleDeg - sceneDeg));
+        Assert.True(err < 1.0,
+            $"deg={sceneDeg}° 平行条干扰：得 {r.AngleDeg:0.00}° 误差 {err:0.00}°");
+        AssertNearPart(r.Center, contour);
+    }
+
     [Fact]
     public void EmptyTeach_ReturnsNull()
     {
@@ -116,8 +187,8 @@ public sealed class MaskShapeMatchTests
         var bins = model.DirBins;
         Assert.NotNull(bins);
         Assert.Equal(model.PointCount, bins.Length);
-        var valid = bins.Count(b => b < 16);
-        var distinct = bins.Where(b => b < 16).Distinct().Count();
+        var valid = bins.Count(b => b != 0xFF);
+        var distinct = bins.Where(b => b != 0xFF).Distinct().Count();
         Assert.True(valid > model.PointCount * 0.5,
             $"示教方向有效点仅 {valid}/{model.PointCount}");
         Assert.True(distinct >= 2,
@@ -152,10 +223,10 @@ public sealed class MaskShapeMatchTests
 
     private static MaskShapeMatch.ShapeModel Teach(Mat img, Point2f[] contour)
     {
-        var crop = MaskTemplateMatcher.UprightCrop(img, contour, 0);
+        var crop = MaskTemplateMatcher.UprightCrop(img, contour, MaskShapeMatch.CropMarginRatio);
         try
         {
-            var model = MaskShapeMatch.BuildTeach(crop.Upright);
+            var model = MaskShapeMatch.BuildTeach(crop, contour);
             Assert.True(model is { PointCount: >= 24 }, $"示教点数 {model?.PointCount}");
             return model!;
         }
@@ -196,6 +267,29 @@ public sealed class MaskShapeMatchTests
         Cv2.Circle(img, c2, 6, new Scalar(40), -1);
     }
 
+    /// <summary>在转正窗 margin 内画与长边正交的竖条（不在分割轮廓上）。</summary>
+    private static void PaintOrthogonalBarInMargin(Mat img, double sceneDeg, byte barValue)
+    {
+        var cx = W / 2.0;
+        var cy = H / 2.0;
+        // 竖条中心略偏右，与横条长边正交，落在 margin 环带内
+        var barCx = cx + 88;
+        var barCy = cy;
+        var hw = 9.0;
+        var hh = 58.0;
+        Cv2.FillConvexPoly(img, RectCorners(barCx, barCy, hw, hh, sceneDeg + 90, cx, cy), new Scalar(barValue));
+        Cv2.GaussianBlur(img, img, new Size(3, 3), 0.4);
+    }
+
+    /// <summary>在转正窗 margin 内画与长边平行的横条（不在分割轮廓上）。</summary>
+    private static void PaintParallelBarInMargin(Mat img, double sceneDeg, byte barValue)
+    {
+        var cx = W / 2.0;
+        var cy = H / 2.0 + 42;
+        Cv2.FillConvexPoly(img, RectCorners(cx, cy, 52, 9, sceneDeg, cx, cy), new Scalar(barValue));
+        Cv2.GaussianBlur(img, img, new Size(3, 3), 0.4);
+    }
+
     private static Point RotatePoint(double x, double y, double deg, double ox, double oy)
     {
         var rad = deg * Math.PI / 180.0;
@@ -214,5 +308,49 @@ public sealed class MaskShapeMatchTests
         var c = RotatePoint(cx + hw, cy + hh, deg, ox, oy);
         var d = RotatePoint(cx - hw, cy + hh, deg, ox, oy);
         return [a, b, c, d];
+    }
+
+    [Fact]
+    public void AlignToTeachOrigin_WithoutModel_UsesHousingCenter()
+    {
+        var contour = new[]
+        {
+            new Point2f(100, 40),
+            new Point2f(300, 40),
+            new Point2f(300, 120),
+            new Point2f(100, 120),
+        };
+        var c = MaskShapeMatch.AlignToTeachOrigin(contour, 0, model: null);
+        Assert.InRange(c.X, 198, 202);
+        Assert.InRange(c.Y, 78, 82);
+    }
+
+    [Fact]
+    public void AlignToTeachAngle_FusesLineFitWhenNearWarp()
+    {
+        var contour = DenseRect(200, 80, 100, 40, deg: 0.2);
+        var a = MaskShapeMatch.AlignToTeachAngle(contour, candidateDeg: 0.85);
+        Assert.InRange(a, -1.5, 1.5);
+    }
+
+    private static Point2f[] DenseRect(double cx, double cy, double hw, double hh, double deg)
+    {
+        var rad = deg * Math.PI / 180.0;
+        var cos = Math.Cos(rad);
+        var sin = Math.Sin(rad);
+        Point2f Map(double x, double y) => new(
+            (float)(cx + (x - cx) * cos - (y - cy) * sin),
+            (float)(cy + (x - cx) * sin + (y - cy) * cos));
+        var pts = new List<Point2f>();
+        for (var i = 0; i <= 20; i++)
+        {
+            var t = i / 20.0;
+            pts.Add(Map(cx - hw + 2 * hw * t, cy - hh));
+            pts.Add(Map(cx - hw + 2 * hw * t, cy + hh));
+            pts.Add(Map(cx - hw, cy - hh + 2 * hh * t));
+            pts.Add(Map(cx + hw, cy - hh + 2 * hh * t));
+        }
+
+        return [.. pts];
     }
 }

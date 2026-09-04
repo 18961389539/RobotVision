@@ -1,4 +1,6 @@
+using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
@@ -13,6 +15,7 @@ public sealed partial class RecipeTemplatePresenter : ObservableObject
 {
     private readonly IRecipeWorkspace _host;
     private readonly IMaskTemplateTeachService _maskTeach;
+    private readonly PageAsyncSession _pageSession;
     private readonly Func<bool> _hasUnsavedChanges;
 
     private string _templatePreviewKey = "\0";
@@ -21,10 +24,12 @@ public sealed partial class RecipeTemplatePresenter : ObservableObject
     internal RecipeTemplatePresenter(
         IRecipeWorkspace host,
         IMaskTemplateTeachService maskTeach,
+        PageAsyncSession pageSession,
         Func<bool> hasUnsavedChanges)
     {
         _host = host;
         _maskTeach = maskTeach;
+        _pageSession = pageSession;
         _hasUnsavedChanges = hasUnsavedChanges;
     }
 
@@ -47,7 +52,14 @@ public sealed partial class RecipeTemplatePresenter : ObservableObject
         TemplateOptions.NeedsTaughtImage(Editor.Template.RefineMethod);
 
     public bool ShowRefineRange =>
-        Editor.Template.RefineMethod is SegmentRefineMethod.Template or SegmentRefineMethod.ShapeMatch;
+        Editor.Template.RefineMethod is SegmentRefineMethod.Template
+            or SegmentRefineMethod.ShapeMatch
+            or SegmentRefineMethod.Sift;
+
+    public bool ShowMatchThreshold =>
+        Editor.Template.RefineMethod is SegmentRefineMethod.Template
+            or SegmentRefineMethod.ShapeMatch
+            or SegmentRefineMethod.Sift;
 
     public bool HasTemplate => !string.IsNullOrEmpty(Editor.Template.TemplateImageBase64);
 
@@ -77,7 +89,11 @@ public sealed partial class RecipeTemplatePresenter : ObservableObject
             {
                 case SegmentRefineMethod.Template:
                     parts.Add($"阈值 {t.MatchThreshold:0.00}");
-                    parts.Add($"±{t.RefineRangeDeg:0}°");
+                    parts.Add($"角度 {TemplateOptions.FormatRefineAngleWindow(t)}");
+                    if (t.MaxSecondPeakRatio < 1)
+                        parts.Add($"二峰≤{t.MaxSecondPeakRatio:0.00}");
+                    if (t.NoFlipConstraint)
+                        parts.Add("不翻转");
                     if (t.UseEdgeMatch)
                         parts.Add("边缘定角");
                     if (!t.UseUprightCrop)
@@ -85,10 +101,28 @@ public sealed partial class RecipeTemplatePresenter : ObservableObject
                     break;
                 case SegmentRefineMethod.ShapeMatch:
                     parts.Add($"阈值 {t.MatchThreshold:0.00}");
-                    parts.Add($"±{t.RefineRangeDeg:0}°");
+                    parts.Add($"角度 {TemplateOptions.FormatRefineAngleWindow(t)}");
+                    parts.Add($"层数 {t.ShapeMatchNumLevels}");
+                    if (t.NoFlipConstraint)
+                        parts.Add("不翻转");
                     break;
                 case SegmentRefineMethod.Sift:
                     parts.Add($"阈值 {t.MatchThreshold:0.00}");
+                    parts.Add($"角度 {TemplateOptions.FormatRefineAngleWindow(t)}");
+                    if (t.NoFlipConstraint)
+                        parts.Add("不翻转");
+                    break;
+                case SegmentRefineMethod.LineFit:
+                    if (t.LineFitSubpixel)
+                        parts.Add("亚像素");
+                    if (t.RefineLine is not null)
+                        parts.Add("有基准线");
+                    break;
+                case SegmentRefineMethod.CaliperTab:
+                    parts.Add("卡尺抓边");
+                    break;
+                case SegmentRefineMethod.CentroidHoleLine:
+                    parts.Add("质心-孔槽");
                     break;
             }
             AppendPolaritySummary(parts, t);
@@ -122,18 +156,25 @@ public sealed partial class RecipeTemplatePresenter : ObservableObject
     {
         get
         {
-            var edge = Editor.Template.HousingEdgePolarity switch
-            {
-                HousingEdgePolarity.BrightToDark => "亮场",
-                HousingEdgePolarity.DarkToBright => "暗场",
-                _ => "",
-            };
-            var tab = Editor.Template.TabPolarity switch
-            {
-                TabPolarityLock.PlusShortAxis => "凸起在+短轴",
-                TabPolarityLock.MinusShortAxis => "凸起在−短轴",
-                _ => "",
-            };
+            if (!IsMaskTemplateMode)
+                return "";
+            var method = Editor.Template.RefineMethod;
+            var edge = TemplateOptions.UsesHousingEdgePolarity(method)
+                ? Editor.Template.HousingEdgePolarity switch
+                {
+                    HousingEdgePolarity.BrightToDark => "亮场",
+                    HousingEdgePolarity.DarkToBright => "暗场",
+                    _ => "",
+                }
+                : "";
+            var tab = TemplateOptions.UsesTabPolarity(method)
+                ? Editor.Template.TabPolarity switch
+                {
+                    TabPolarityLock.PlusShortAxis => "凸起在+短轴",
+                    TabPolarityLock.MinusShortAxis => "凸起在−短轴",
+                    _ => "",
+                }
+                : "";
             if (edge.Length == 0 && tab.Length == 0)
                 return "";
             var parts = new List<string>();
@@ -164,30 +205,69 @@ public sealed partial class RecipeTemplatePresenter : ObservableObject
     public void Refresh()
     {
         var b64 = Editor.Template.TemplateImageBase64 ?? "";
-        var diagKey = b64 + "|" + Editor.Template.RefineMethod;
+        var method = Editor.Template.RefineMethod;
+        var diagKey = b64 + "|" + method;
         if (b64 == _templatePreviewKey)
         {
             OnPropertyChanged(nameof(TemplateStatusText));
             OnPropertyChanged(nameof(RefineDetailsSummary));
             if (diagKey == _templateDiagnosticsKey)
                 return;
-            RefreshTeachDiagnostics(b64);
-            _templateDiagnosticsKey = diagKey;
+            ScheduleTeachDiagnostics(b64, method, diagKey);
             return;
         }
 
         _templatePreviewKey = b64;
         _templateDiagnosticsKey = diagKey;
         TemplatePreview = null;
-        if (b64.Length > 0)
-        {
-            var preview = _maskTeach.TryDecodePreview(b64);
-            TemplatePreview = preview is null ? null : ImageConverter.ToBitmapSource(preview);
-        }
-
-        RefreshTeachDiagnostics(b64);
         OnPropertyChanged(nameof(TemplateStatusText));
         OnPropertyChanged(nameof(RefineDetailsSummary));
+
+        if (b64.Length == 0)
+        {
+            TeachDiagnosticsHint = "";
+            return;
+        }
+
+        var generation = _pageSession.CaptureGeneration();
+        var token = _pageSession.Token;
+        _pageSession.Track(Task.Run(() =>
+        {
+            token.ThrowIfCancellationRequested();
+            var preview = _maskTeach.TryDecodePreview(b64);
+            var diag = _maskTeach.GetTeachDiagnostics(b64, method);
+            return (preview, diag);
+        }, token).ContinueWith(t =>
+        {
+            if (!_pageSession.IsCurrent(generation) || t.IsCanceled || t.IsFaulted)
+                return;
+
+            var (preview, diag) = t.Result;
+            TemplatePreview = preview is null ? null : ImageConverter.ToBitmapSource(preview);
+            TeachDiagnosticsHint = diag;
+            OnPropertyChanged(nameof(TemplateStatusText));
+            OnPropertyChanged(nameof(RefineDetailsSummary));
+            OnPropertyChanged(nameof(TeachDiagnosticsHint));
+        }, token, TaskContinuationOptions.None, TaskScheduler.FromCurrentSynchronizationContext()));
+    }
+
+    private void ScheduleTeachDiagnostics(string b64, SegmentRefineMethod method, string diagKey)
+    {
+        _templateDiagnosticsKey = diagKey;
+        var generation = _pageSession.CaptureGeneration();
+        var token = _pageSession.Token;
+        _pageSession.Track(Task.Run(() =>
+        {
+            token.ThrowIfCancellationRequested();
+            return _maskTeach.GetTeachDiagnostics(b64, method);
+        }, token).ContinueWith(t =>
+        {
+            if (!_pageSession.IsCurrent(generation) || t.IsCanceled || t.IsFaulted)
+                return;
+
+            TeachDiagnosticsHint = t.Result;
+            OnPropertyChanged(nameof(TeachDiagnosticsHint));
+        }, token, TaskContinuationOptions.None, TaskScheduler.FromCurrentSynchronizationContext()));
     }
 
     public void NotifyEditorBindings()
@@ -197,6 +277,7 @@ public sealed partial class RecipeTemplatePresenter : ObservableObject
         OnPropertyChanged(nameof(UsesFeatureTeachRoi));
         OnPropertyChanged(nameof(NeedsTaughtTemplate));
         OnPropertyChanged(nameof(ShowRefineRange));
+        OnPropertyChanged(nameof(ShowMatchThreshold));
         OnPropertyChanged(nameof(HasTemplate));
         OnPropertyChanged(nameof(RefineDetailsSummary));
         OnPropertyChanged(nameof(TeachPeakHint));
@@ -205,17 +286,6 @@ public sealed partial class RecipeTemplatePresenter : ObservableObject
         OnPropertyChanged(nameof(FeatureGrabOriginHint));
         OnPropertyChanged(nameof(TeachGeometryHint));
         OnPropertyChanged(nameof(TemplateStatusText));
-    }
-
-    private void RefreshTeachDiagnostics(string b64)
-    {
-        if (b64.Length == 0)
-        {
-            TeachDiagnosticsHint = "";
-            return;
-        }
-
-        TeachDiagnosticsHint = _maskTeach.GetTeachDiagnostics(b64, Editor.Template.RefineMethod);
     }
 
     private static void AppendPolaritySummary(List<string> parts, TemplateOptions t)

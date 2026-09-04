@@ -46,6 +46,16 @@ public class AngleGeometryTests
     }
 
     [Fact]
+    public void CanonWarpDeg_MapsToMinus90To90()
+    {
+        Assert.Equal(-37, AngleGeometry.CanonWarpDeg(143), 1e-9);
+        Assert.Equal(-8.7, AngleGeometry.CanonWarpDeg(171.3), 1e-9);
+        Assert.Equal(37, AngleGeometry.CanonWarpDeg(37), 1e-9);
+        Assert.Equal(-20, AngleGeometry.CanonWarpDeg(-20), 1e-9);
+        Assert.Equal(-90, AngleGeometry.CanonWarpDeg(90), 1e-9);
+    }
+
+    [Fact]
     public void NormalizeDeg_MapsTo0To180()
     {
         Assert.Equal(150, AngleGeometry.NormalizeDeg(-30), 1e-9);
@@ -73,6 +83,14 @@ public class AngleGeometryTests
         var fused = AngleGeometry.FuseDirected(geo, tpl);
         Assert.True(Math.Abs(AngleGeometry.NormalizeSignedDeg(fused - expected)) < 0.01,
             $"geo={geo} tpl={tpl} → {fused}，期望 {expected}");
+    }
+
+    [Theory]
+    [InlineData(162, -18, 0)]
+    [InlineData(22, 112, -90)]
+    public void SignedDeltaHalfDeg_AvoidsLongAxisFlip(double to, double from, double expected)
+    {
+        Assert.Equal(expected, AngleGeometry.SignedDeltaHalfDeg(to, from), 1e-9);
     }
 
     [Fact]

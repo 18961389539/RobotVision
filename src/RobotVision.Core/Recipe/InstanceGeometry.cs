@@ -59,4 +59,14 @@ public static class InstanceGeometry
 
         return Math.Abs(sum) * 0.5;
     }
+
+    /// <summary>由示教面积/轴比推导矩形长边、短边（px）。</summary>
+    public static (double LongLenPx, double ShortLenPx) DeriveRectangleSides(double areaPx, double aspect)
+    {
+        if (areaPx <= 1 || aspect <= 1e-3)
+            return (0, 0);
+        var longLen = Math.Sqrt(areaPx * aspect);
+        var shortLen = Math.Sqrt(areaPx / aspect);
+        return (longLen, shortLen);
+    }
 }

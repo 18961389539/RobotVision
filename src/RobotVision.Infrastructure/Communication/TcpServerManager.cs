@@ -533,45 +533,7 @@ public sealed partial class TcpServerManager : IDisposable
                     var line = raw.Trim();
                     if (line.Length == 0)
                         continue;
-
-                    var startedAt = DateTime.Now;
-                    var bytesIn = Encoding.ASCII.GetByteCount(line) + 1;
-                    session.NoteIncoming(line);
-                    TcpServerManagerLog.ClientLineReceived(_log, id, line);
-                    RaiseRequestStarted(new TcpRequestRecord(
-                        startedAt, session.Id, session.Remote, line, "",
-                        false, 0, bytesIn, 0));
-
-                    var stopwatch = Stopwatch.StartNew();
-                    var reply = await ProcessRequestAsync(line, ct).ConfigureAwait(false);
-                    stopwatch.Stop();
-
-                    if (PlcAlwaysOkMode && reply.StartsWith("ERR", StringComparison.Ordinal))
-                    {
-                        var coerced = CoerceAlwaysOkReply(
-                            reply, line, stopwatch.Elapsed.TotalMilliseconds,
-                            PlcDebugDefaultX, PlcDebugDefaultY, PlcDebugDefaultRz);
-                        TcpServerManagerLog.PlcDebugModeCoercedReply(_log, reply, coerced, line);
-                        reply = coerced;
-                    }
-
-                    // 统计与事件在写出应答前完成：客户端收到应答时记录必然已可见
-                    var bytesOut = Encoding.ASCII.GetByteCount(reply) + 1;
-                    session.RecordRequest(line, bytesIn, bytesOut);
-                    Interlocked.Increment(ref _totalRequests);
-                    var record = new TcpRequestRecord(
-                        startedAt, session.Id, session.Remote, line, reply,
-                        !reply.StartsWith("ERR", StringComparison.Ordinal),
-                        stopwatch.Elapsed.TotalMilliseconds, bytesIn, bytesOut);
-                    RememberRequest(record);
-                    RaiseRequestProcessed(record);
-
-                    // 写侧超时：客户端不读（TCP 窗口满）时不无限挂起，超时断开释放连接
-                    using (var writeCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
-                    {
-                        writeCts.CancelAfter(TimeoutMs);
-                        await writer.WriteLineAsync(reply.AsMemory(), writeCts.Token).ConfigureAwait(false);
-                    }
+                    await ProcessLineAsync(id, session, writer, line, ct).ConfigureAwait(false);
                 }
 
                 if (peerClosed)
@@ -598,6 +560,49 @@ public sealed partial class TcpServerManager : IDisposable
             TcpServerManagerLog.ClientDisconnected(_log, id, _clients.Count);
             if (removed is not null)
                 RaiseClientEvent(ClientDisconnected, removed);
+        }
+    }
+
+    /// <summary>处理一行请求：记录入站 → 分发 → PLC 调试改写 → 记统计与事件 → 写出应答（写侧超时防挂起）。</summary>
+    private async Task ProcessLineAsync(long id, TcpSession session, StreamWriter writer, string line, CancellationToken ct)
+    {
+        var startedAt = DateTime.Now;
+        var bytesIn = Encoding.ASCII.GetByteCount(line) + 1;
+        session.NoteIncoming(line);
+        TcpServerManagerLog.ClientLineReceived(_log, id, line);
+        RaiseRequestStarted(new TcpRequestRecord(
+            startedAt, session.Id, session.Remote, line, "",
+            false, 0, bytesIn, 0));
+
+        var stopwatch = Stopwatch.StartNew();
+        var reply = await ProcessRequestAsync(line, ct).ConfigureAwait(false);
+        stopwatch.Stop();
+
+        if (PlcAlwaysOkMode && reply.StartsWith("ERR", StringComparison.Ordinal))
+        {
+            var coerced = CoerceAlwaysOkReply(
+                reply, line, stopwatch.Elapsed.TotalMilliseconds,
+                PlcDebugDefaultX, PlcDebugDefaultY, PlcDebugDefaultRz);
+            TcpServerManagerLog.PlcDebugModeCoercedReply(_log, reply, coerced, line);
+            reply = coerced;
+        }
+
+        // 统计与事件在写出应答前完成：客户端收到应答时记录必然已可见
+        var bytesOut = Encoding.ASCII.GetByteCount(reply) + 1;
+        session.RecordRequest(line, bytesIn, bytesOut);
+        Interlocked.Increment(ref _totalRequests);
+        var record = new TcpRequestRecord(
+            startedAt, session.Id, session.Remote, line, reply,
+            !reply.StartsWith("ERR", StringComparison.Ordinal),
+            stopwatch.Elapsed.TotalMilliseconds, bytesIn, bytesOut);
+        RememberRequest(record);
+        RaiseRequestProcessed(record);
+
+        // 写侧超时：客户端不读（TCP 窗口满）时不无限挂起，超时断开释放连接
+        using (var writeCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            writeCts.CancelAfter(TimeoutMs);
+            await writer.WriteLineAsync(reply.AsMemory(), writeCts.Token).ConfigureAwait(false);
         }
     }
 

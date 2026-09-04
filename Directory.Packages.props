@@ -68,5 +68,8 @@
     <PackageVersion Include="FlaUI.Core" Version="4.0.0" />
     <PackageVersion Include="FlaUI.UIA3" Version="4.0.0" />
     <PackageVersion Include="Xunit.SkippableFact" Version="1.4.13" />
+
+    <!-- JLVisionLib 发布混淆（仅 Release 目标使用） -->
+    <PackageVersion Include="Obfuscar" Version="2.2.49" />
   </ItemGroup>
 </Project>

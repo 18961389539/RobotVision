@@ -1,7 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Models;
 using RobotVision.Core.Inference;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.JlVision;
 
 namespace RobotVision.Teach;
 
@@ -19,7 +19,7 @@ public static class FeatureRoiAdvisor
     /// 等价于 <see cref="Rank"/> 的最高分项。
     /// </summary>
     public static Roi? Suggest(
-        UprightCropResult crop,
+        JlUprightCrop crop,
         int fullImageWidth,
         int fullImageHeight,
         IReadOnlyList<Point2f> contour,
@@ -35,7 +35,7 @@ public static class FeatureRoiAdvisor
     /// 不搜 8×8 / 16×16 这种绝对像素档。
     /// </summary>
     public static IReadOnlyList<FeatureRoiCandidate> Rank(
-        UprightCropResult crop,
+        JlUprightCrop crop,
         int fullImageWidth,
         int fullImageHeight,
         IReadOnlyList<Point2f> contour,
@@ -169,7 +169,7 @@ public static class FeatureRoiAdvisor
 
     /// <summary>把分割轮廓映到转正图，取轴对齐外接矩形（与 mask 外接框同口径）。</summary>
     internal static Rect MaskBoundsInUpright(
-        UprightCropResult crop,
+        JlUprightCrop crop,
         IReadOnlyList<Point2f> contour,
         int uprightWidth,
         int uprightHeight)
@@ -180,7 +180,7 @@ public static class FeatureRoiAdvisor
         var maxY = double.NegativeInfinity;
         foreach (var p in contour)
         {
-            var u = MaskTemplateMatcher.MapSourceToUpright(crop, new Point2d(p.X, p.Y));
+            var u = JlTemplateIo.MapSourceToUpright(crop, new Point2d(p.X, p.Y));
             minX = Math.Min(minX, u.X);
             minY = Math.Min(minY, u.Y);
             maxX = Math.Max(maxX, u.X);
@@ -195,15 +195,15 @@ public static class FeatureRoiAdvisor
     }
 
     private static Roi? MapWindow(
-        UprightCropResult crop, Rect win, int fullImageWidth, int fullImageHeight,
+        JlUprightCrop crop, Rect win, int fullImageWidth, int fullImageHeight,
         double originX, double originY)
     {
         var corners = new[]
         {
-            MaskTemplateMatcher.MapUprightToSource(crop, new Point2d(win.X, win.Y)),
-            MaskTemplateMatcher.MapUprightToSource(crop, new Point2d(win.X + win.Width, win.Y)),
-            MaskTemplateMatcher.MapUprightToSource(crop, new Point2d(win.X + win.Width, win.Y + win.Height)),
-            MaskTemplateMatcher.MapUprightToSource(crop, new Point2d(win.X, win.Y + win.Height)),
+            JlTemplateIo.MapUprightToSource(crop, new Point2d(win.X, win.Y)),
+            JlTemplateIo.MapUprightToSource(crop, new Point2d(win.X + win.Width, win.Y)),
+            JlTemplateIo.MapUprightToSource(crop, new Point2d(win.X + win.Width, win.Y + win.Height)),
+            JlTemplateIo.MapUprightToSource(crop, new Point2d(win.X, win.Y + win.Height)),
         };
         var minX = corners.Min(p => p.X) + originX;
         var minY = corners.Min(p => p.Y) + originY;

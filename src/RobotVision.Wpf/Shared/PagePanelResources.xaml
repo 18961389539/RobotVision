@@ -4,5 +4,6 @@
     <vm:StringToVisibilityConverter x:Key="NonEmptyToVisibilityConverter" />
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="/RobotVision.Wpf;component/Shared/OverlayPanelResources.xaml" />
+        <ResourceDictionary Source="/RobotVision.Wpf;component/Shared/CockpitTabResources.xaml" />
     </ResourceDictionary.MergedDictionaries>
 </ResourceDictionary>

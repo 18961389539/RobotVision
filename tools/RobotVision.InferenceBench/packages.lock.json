@@ -79,6 +79,9 @@
         "resolved": "9.0.0",
         "contentHash": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=="
       },
+      "jlvisionlib": {
+        "type": "Project"
+      },
       "robotvision.core": {
         "type": "Project"
       },
@@ -101,15 +104,16 @@
           "OpenCvSharp4": "[4.10.0.20240615, )",
           "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )",
-          "RobotVision.Vision": "[1.0.0, )",
+          "RobotVision.JlVision": "[1.0.0, )",
           "System.IO.Ports": "[8.0.0, )",
           "YoloDotNet": "[4.2.0, )",
           "YoloDotNet.ExecutionProvider.OpenVino": "[1.1.0, )"
         }
       },
-      "robotvision.vision": {
+      "robotvision.jlvision": {
         "type": "Project",
         "dependencies": {
+          "JLVisionLib": "[1.0.0, )",
           "OpenCvSharp4": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )"
         }

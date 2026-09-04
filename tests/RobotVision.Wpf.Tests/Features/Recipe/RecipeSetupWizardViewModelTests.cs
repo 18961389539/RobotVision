@@ -9,7 +9,7 @@ using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Communication;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using RobotVision.Infrastructure.Lighting;
 using RobotVision.Teach;
 using RobotVision.WpfHost.Features.Monitor;
@@ -73,6 +73,62 @@ public sealed class ShellViewModelTests
 
             snapshot.Should().Contain("客户端");
         });
+    }
+
+    [Fact]
+    public void ReportBackgroundFailure_SetsNotice_OnUiThread()
+    {
+        TestInfra.RunSta(() =>
+        {
+            using var shell = new ShellViewModel(_tcp, _vision);
+            shell.Notice.Should().BeNull();
+
+            shell.ReportBackgroundFailure("3 个配方加载失败，详见「配方管理」页与日志");
+
+            shell.Notice.Should().Be("3 个配方加载失败，详见「配方管理」页与日志");
+        });
+    }
+
+    [Fact]
+    public void ReportBackgroundFailure_IgnoresNullOrWhitespace()
+    {
+        TestInfra.RunSta(() =>
+        {
+            using var shell = new ShellViewModel(_tcp, _vision);
+
+            shell.ReportBackgroundFailure("   ");
+            shell.Notice.Should().BeNull("空白提示被忽略");
+
+            shell.ReportBackgroundFailure("有内容");
+            shell.ReportBackgroundFailure("");
+            shell.Notice.Should().Be("有内容", "空串不应覆盖已存在的提示");
+        });
+    }
+
+    [Fact]
+    public void ReportBackgroundFailure_IsThreadSafe_FromNonUiThread()
+    {
+        // 复刻产线路径：调用发生在后台线程（启动块 ConfigureAwait(false) 之后），应 marshal 回 UI 线程。
+        var shell = TestInfra.RunSta(() => new ShellViewModel(_tcp, _vision));
+        try
+        {
+            var worker = new System.Threading.Thread(() => shell.ReportBackgroundFailure("后台服务启动失败"))
+            {
+                IsBackground = true,
+            };
+            worker.Start();
+            worker.Join();
+
+            TestInfra.RunSta(() =>
+            {
+                TestInfra.PumpDispatcherFor(TimeSpan.FromMilliseconds(150));
+                shell.Notice.Should().Be("后台服务启动失败");
+            });
+        }
+        finally
+        {
+            TestInfra.RunSta(shell.Dispose);
+        }
     }
 }
 
@@ -277,6 +333,38 @@ public sealed class RecipeSetupWizardViewModelTests : IDisposable
                 closed.Should().BeTrue();
                 wizard.Applied.Should().BeTrue();
                 host.Message.Should().Contain("配置工作台");
+            });
+        }
+        finally { host.Dispose(); }
+    }
+
+    [Fact]
+    public async Task Apply_WritesExpectedCountZero_AndFlushesPendingEdits()
+    {
+        var host = CreateHost();
+        var analysis = new RecordingRecipeSetupAnalysis { NextResult = SampleAnalysisResult() };
+        try
+        {
+            await RunOnUiAsync(async () =>
+            {
+                using var wizard = CreateWizard(host, analysis);
+                PrepareHostForWizard(host);
+                wizard.Step = SetupWizardStep.Analyze;
+                await wizard.AnalyzeCommand.ExecuteAsync(null);
+
+                host.Editor.AngleMode = AngleMode.DualCenterLine;
+                host.Editor.Models = ["a.onnx", "extra.onnx"];
+                host.Editor.Template.ExpectedCount = 3;
+                wizard.ExpectedCount = 0;
+                var hostFlushed = false;
+                host.FlushPendingEdits = () => hostFlushed = true;
+                wizard.FlushPendingEdits = () => wizard.ExpectedCount = 0;
+
+                wizard.ApplyCommand.Execute(null);
+
+                hostFlushed.Should().BeTrue();
+                host.Editor.Template.ExpectedCount.Should().Be(0);
+                host.Editor.Models.Should().ContainSingle().Which.Should().Be("a.onnx");
             });
         }
         finally { host.Dispose(); }

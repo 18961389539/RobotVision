@@ -156,6 +156,9 @@ public sealed class CameraManager : IDisposable
     public void PrepareForShutdown(TimeSpan timeout, ILogger? logger = null) =>
         DrainGates(timeout, markShuttingDown: true, logger ?? _logger);
 
+    // 与相机适配器内部的 _grabLock 是两层不同作用域的串行化：本门闩按 Id 串行整个"取图操作"
+    // （TRIGGER/预览/示教互斥），适配器锁保护 SDK 句柄内部调用（GrabOne/Open/Close 非线程安全）。
+    // 二者不可互相替代，任一层被当作"冗余"删掉都会引入并发访问 SDK 竞态。
     private CameraFrame GrabCore(string id, Func<CameraFrame> grab, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

@@ -1,7 +1,7 @@
 using OpenCvSharp;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.JlVision;
 
 namespace RobotVision.Teach;
 
@@ -35,26 +35,48 @@ public sealed record SegmentRefineAdvice(
 /// </summary>
 public static class SegmentRefineAdvisor
 {
-    public static SegmentRefineAdvice Analyze(
-        Mat bgr,
-        IReadOnlyList<Point2f> contour,
-        Mat? upright = null,
-        byte[]? bitPackedMask = null,
-        int maskWidth = 0,
-        int maskHeight = 0,
-        TemplateOptions? template = null,
-        Mat? templateImage = null,
-        int fullImageWidth = 0,
-        int fullImageHeight = 0,
-        double originX = 0,
-        double originY = 0,
-        double instanceConfidence = 0,
-        double boxConfidence = DetectionThresholdAdvisor.DefaultBoxConfidence,
-        double pixelConfidence = DetectionThresholdAdvisor.DefaultPixelConfidence,
-        TaskConstraints? task = null,
-        SegmentRefineBakeOff.TeachCache? teachCache = null,
-        RecipePrior? prior = null)
+    /// <summary>
+    /// <see cref="Analyze"/> 的输入上下文：把原先 17 个平铺参数收敛成一个对象。
+    /// <see cref="Bgr"/>/<see cref="Contour"/> 必填，其余按旧默认值可省。字段命名与旧参数一一对应。
+    /// </summary>
+    public sealed record TeachAnalyzeRequest(Mat Bgr, IReadOnlyList<Point2f> Contour)
     {
+        public Mat? Upright { get; init; }
+        public byte[]? BitPackedMask { get; init; }
+        public int MaskWidth { get; init; }
+        public int MaskHeight { get; init; }
+        public TemplateOptions? Template { get; init; }
+        public Mat? TemplateImage { get; init; }
+        public int FullImageWidth { get; init; }
+        public int FullImageHeight { get; init; }
+        public double OriginX { get; init; }
+        public double OriginY { get; init; }
+        public double InstanceConfidence { get; init; }
+        public double BoxConfidence { get; init; } = DetectionThresholdAdvisor.DefaultBoxConfidence;
+        public double PixelConfidence { get; init; } = DetectionThresholdAdvisor.DefaultPixelConfidence;
+        public TaskConstraints? Task { get; init; }
+        public SegmentRefineBakeOff.TeachCache? TeachCache { get; init; }
+        public RecipePrior? Prior { get; init; }
+    }
+
+    /// <summary>简写重载：仅给图与轮廓（其余走默认），便于单帧快速分析。</summary>
+    public static SegmentRefineAdvice Analyze(Mat bgr, IReadOnlyList<Point2f> contour) =>
+        Analyze(new TeachAnalyzeRequest(bgr, contour));
+
+    public static SegmentRefineAdvice Analyze(TeachAnalyzeRequest req)
+    {
+        var (bgr, contour) = (req.Bgr, req.Contour);
+        var upright = req.Upright;
+        var (bitPackedMask, maskWidth, maskHeight) = (req.BitPackedMask, req.MaskWidth, req.MaskHeight);
+        var (template, templateImage) = (req.Template, req.TemplateImage);
+        var (fullImageWidth, fullImageHeight) = (req.FullImageWidth, req.FullImageHeight);
+        var (originX, originY) = (req.OriginX, req.OriginY);
+        var instanceConfidence = req.InstanceConfidence;
+        var (boxConfidence, pixelConfidence) = (req.BoxConfidence, req.PixelConfidence);
+        var teachCache = req.TeachCache;
+        var prior = req.Prior;
+        TaskConstraints? task = req.Task;
+
         var scene = ScenePlaybook.Describe(bgr, contour, bitPackedMask, maskWidth, maskHeight);
         var aspect = scene.Aspect;
         var protrusion = scene.ProtrusionPx;
@@ -66,12 +88,12 @@ public static class SegmentRefineAdvisor
 
         Mat? ownedUpright = null;
         var view = upright;
-        UprightCropResult? crop = null;
+        JlUprightCrop? crop = null;
         if (view is null || view.Empty())
         {
             try
             {
-                crop = MaskTemplateMatcher.UprightCrop(bgr, contour, 0.05);
+                crop = JlTemplateIo.UprightCrop(bgr, contour, 0.05);
                 ownedUpright = crop.Upright;
                 view = ownedUpright;
             }
@@ -85,13 +107,14 @@ public static class SegmentRefineAdvisor
         {
             var entropy = scene.TextureEntropy;
             var separability = scene.Separability;
-            var canOrient = scene.Separability >= 0.08 || holeOk || protrusion > 0.08 * Math.Max(8, 1);
+            var canOrient = scene.Separability >= TeachThresholds.SeparabilityOrientable || holeOk
+                || protrusion > TeachThresholds.ProtrusionShortLenRatio * Math.Max(8, scene.ShortLenPx);
 
             var candidates = SegmentRefineBakeOff.Run(
                 bgr, contour, bitPackedMask, maskWidth, maskHeight, templateImage, template, teachCache);
             var playbook = ScenePlaybook.Recommend(task, scene, candidates, prior);
             var method = ScenePlaybook.RefineMethodOf(playbook.Primary)
-                         ?? PickHeuristic(holeOk, protrusion, Math.Max(8, 1), separability, aspect, entropy).Method;
+                         ?? PickHeuristic(holeOk, protrusion, scene.ShortLenPx, separability, aspect, entropy).Method;
             var edge = playbook.Primary.EdgeMatch && method == SegmentRefineMethod.Template;
             var raced = ScenePlaybook.PickWinnerForTask(candidates, task, scene, prior);
 
@@ -113,7 +136,7 @@ public static class SegmentRefineAdvisor
             {
                 try
                 {
-                    var tmp = MaskTemplateMatcher.UprightCrop(bgr, contour, 0.05);
+                    var tmp = JlTemplateIo.UprightCrop(bgr, contour, 0.05);
                     using (tmp.Upright)
                     {
                         featureRoi = FeatureRoiAdvisor.Suggest(
@@ -125,35 +148,27 @@ public static class SegmentRefineAdvisor
                 }
             }
 
-            var why = $"{playbook.Summary}{FormatRace(candidates)}";
+            var why = playbook.Summary
+                + TeachNarrator.RaceTable(candidates
+                    .Select(c => TeachNarrator.RaceRow(MethodLabel(c.Method), c.Ok, c.Score))
+                    .ToList());
             if (raced is not null && playbook.Primary.Refine == raced.Method)
-                why += $" 采用实测胜出：{MethodLabel(method)}。{raced.Note}";
+                why += TeachNarrator.MeasuredWin(MethodLabel(method), raced.Note);
 
             if (method == SegmentRefineMethod.Template && !canOrient)
-                why += featureRoi is not null
-                    ? " 已建议特征框（对 180° 最不对称的块）。"
-                    : " 当前 0°/180° 分差偏小，示教时请框选凸起或齿脚。";
+                why += TeachNarrator.TemplateNoOrientation(featureRoi is not null);
 
             if (suggestedTh > 0)
-            {
-                why += $" 示教峰 NCC {teachPeak:0.00}，建议匹配阈值 {suggestedTh:0.00}";
-                if (peakSharp < 0.08)
-                    why += $"（主峰较钝 锐度 {peakSharp:0.00}，已抬高匹配门）";
-                why += "。";
-            }
+                why += TeachNarrator.TeachPeak(teachPeak, suggestedTh, peakSharp);
 
             if (Math.Abs(sugBox - boxConfidence) > 0.02)
-                why += $" 检测置信度建议 {sugBox:0.00}（实例 {instanceConfidence:0.00}，当前门过紧）。";
+                why += TeachNarrator.BoxConfidence(sugBox, instanceConfidence);
             if (Math.Abs(sugPix - pixelConfidence) > 0.02)
-                why += $" 掩码像素置信度建议 {sugPix:0.00}。";
+                why += TeachNarrator.PixelConfidence(sugPix);
             if (edgePolarity != HousingEdgePolarity.Auto)
-                why += edgePolarity == HousingEdgePolarity.DarkToBright
-                    ? " 已锁定暗场边缘。"
-                    : " 已锁定亮场边缘。";
+                why += TeachNarrator.EdgeLocked(edgePolarity);
             if (tabPolarity != TabPolarityLock.Auto)
-                why += tabPolarity == TabPolarityLock.PlusShortAxis
-                    ? " 示教凸起在 +短轴（运行每帧实测）。"
-                    : " 示教凸起在 −短轴（运行每帧实测）。";
+                why += TeachNarrator.TabLocked(tabPolarity);
 
             return new SegmentRefineAdvice(
                 method, edge, canOrient, aspect, entropy, separability, holeArea, protrusion, why)
@@ -193,9 +208,12 @@ public static class SegmentRefineAdvisor
         var method = ScenePlaybook.RefineMethodOf(playbook.Primary) ?? seed.Recommended;
         var edge = method == SegmentRefineMethod.Template && playbook.Primary.EdgeMatch;
 
-        var why = $"回放 {detected}/{total} 检出。{FormatRace(aggregated)}";
+        var why = $"回放 {detected}/{total} 检出。"
+            + TeachNarrator.RaceTable(aggregated
+                .Select(c => TeachNarrator.RaceRow(MethodLabel(c.Method), c.Ok, c.Score))
+                .ToList());
         if (raced is not null && playbook.Primary.Refine == raced.Method)
-            why += $" 采用回放胜出：{MethodLabel(method)}。{raced.Note}";
+            why += TeachNarrator.ReplayWin(MethodLabel(method), raced.Note);
         else
             why += $" {playbook.Summary}";
 
@@ -208,15 +226,8 @@ public static class SegmentRefineAdvisor
         };
     }
 
-    public static string MethodLabel(SegmentRefineMethod method) => method switch
-    {
-        SegmentRefineMethod.LineFit => "直线拟合",
-        SegmentRefineMethod.CentroidHoleLine => "质心-内标连线",
-        SegmentRefineMethod.CaliperTab => "卡尺长边+凸起极性",
-        SegmentRefineMethod.Sift => "SIFT特征匹配",
-        SegmentRefineMethod.ShapeMatch => "形状匹配",
-        _ => "模板匹配",
-    };
+    /// <summary>精修方法中文短名（转发到 <see cref="TeachNarrator.MethodLabel"/> 单一来源）。</summary>
+    public static string MethodLabel(SegmentRefineMethod method) => TeachNarrator.MethodLabel(method);
 
     /// <summary>配方页短提醒：不含 playbook 长文，完整赛马在配方向导。</summary>
     public static string FormatBriefAdvice(SegmentRefineAdvice advice, SegmentRefineMethod currentMethod)
@@ -250,7 +261,7 @@ public static class SegmentRefineAdvisor
         foreach (var c in advice.Candidates)
         {
             if (c.Method == method && !c.Skipped)
-                return $"{c.Score:0.00}";
+                return FormattableString.Invariant($"{c.Score:0.00}");
         }
 
         return "—";
@@ -264,15 +275,15 @@ public static class SegmentRefineAdvisor
         if (holeOk)
             return new(SegmentRefineMethod.CentroidHoleLine, false,
                 "掩码内有稳定孔/槽，推荐质心-内标连线（有头尾，免示教）。");
-        if (protrusion > 0.08 * Math.Max(8, shortLen))
+        if (protrusion > TeachThresholds.ProtrusionShortLenRatio * Math.Max(8, shortLen))
             return new(SegmentRefineMethod.CaliperTab, false,
                 "短轴一侧有外伸，推荐卡尺长边+凸起极性（免示教，有方向）。");
-        if (separability >= 0.08)
+        if (separability >= TeachThresholds.SeparabilityOrientable)
         {
-            var edge = entropy is >= 4.0 and <= 6.5;
+            var edge = entropy is >= TeachThresholds.EdgeMatchEntropyLo and <= TeachThresholds.EdgeMatchEntropyHi;
             return new(SegmentRefineMethod.Template, edge, edge
-                ? $"0°/180° 可分（分差 {separability:0.00}），推荐模板匹配并打开边缘图定角。"
-                : $"0°/180° 可分（分差 {separability:0.00}），推荐模板匹配（需示教）。");
+                ? FormattableString.Invariant($"0°/180° 可分（分差 {separability:0.00}），推荐模板匹配并打开边缘图定角。")
+                : FormattableString.Invariant($"0°/180° 可分（分差 {separability:0.00}），推荐模板匹配（需示教）。"));
         }
         if (aspect >= 1.7 && entropy < 4.2)
             return new(SegmentRefineMethod.LineFit, false,
@@ -284,15 +295,6 @@ public static class SegmentRefineAdvisor
             "轴比接近 1 且无可分头尾，只能直线拟合给无向角。");
     }
 
-    private static string FormatRace(IReadOnlyList<SegmentRefineCandidate> candidates)
-    {
-        if (candidates.Count == 0)
-            return "";
-        var parts = candidates.Select(c =>
-            $"{MethodLabel(c.Method)} {(c.Ok ? $"✓{c.Score:0.00}" : "—")}");
-        return " 赛马：" + string.Join(" · ", parts);
-    }
-
     private static (double Score, double Sharpness) MeasureTeachPeak(
         Mat? upright, Mat? templateImage, TemplateOptions? options)
     {
@@ -301,13 +303,18 @@ public static class SegmentRefineAdvisor
         var range = Math.Clamp(options?.RefineRangeDeg ?? 5, 1, 45);
         try
         {
-            var match = options?.UseEdgeMatch == true
-                ? MaskTemplateMatcher.MatchBestHybrid(upright, templateImage, range, 0.01)
-                : MaskTemplateMatcher.MatchBest(upright, templateImage, range, 0.01);
-            var sharp = MaskTemplateMatcher.LastDebug.PeakSharpness;
-            if (sharp <= 0)
-                sharp = 1;
-            return (match?.Score ?? 0, sharp);
+            using var grayTpl = JlImageConvert.ToGray(templateImage);
+            using var model = JlNccRefine.CreateModel(grayTpl);
+            using var scene = JlImageConvert.FromGrayMat(upright);
+            var box = new[]
+            {
+                new Point2f(0, 0),
+                new Point2f(upright.Width, 0),
+                new Point2f(upright.Width, upright.Height),
+                new Point2f(0, upright.Height),
+            };
+            var hit = JlNccRefine.TryRefine(scene, box, model, range, 0.01, JlFindOptions.ProductDefault);
+            return (hit.Found ? hit.Score : 0, 1);
         }
         catch (Exception)
         {

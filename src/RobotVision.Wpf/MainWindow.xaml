@@ -27,7 +27,7 @@
     <DockPanel>
         <ui:TitleBar DockPanel.Dock="Top" Title="RobotVision 视觉调试" />
 
-        <!-- 全局状态栏：所有页面可"-->
+        <!-- 全局状态栏：所有页面可） -->
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource ApplicationBackgroundBrush}"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
@@ -40,7 +40,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <!-- TCP 服务状态圆点：● 运行 / ○ 未启动"-->
+                <!-- TCP 服务状态圆点：● 运行 / ○ 未启动） -->
                 <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center">
                     <Ellipse.Style>
                         <Style TargetType="Ellipse">
@@ -57,6 +57,13 @@
                 </Ellipse>
                 <TextBlock Grid.Column="1" Text="{Binding TcpStatus}" Margin="6,0,0,0"
                            VerticalAlignment="Center" />
+                <!-- 后台/启动期故障提示：仅当 ShellViewModel.Notice 非空时显示，不被 1s 轮询覆盖 -->
+                <TextBlock Grid.Column="2" Text="{Binding Notice}" Margin="16,0,0,0"
+                           VerticalAlignment="Center" HorizontalAlignment="Left"
+                           TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                           ToolTip="{Binding Notice}"
+                           Visibility="{Binding Notice, Converter={StaticResource StringToVisibilityConverter}}" />
                 <TextBlock Grid.Column="3" Text="TCP: 配方名/序列号 / PING" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
             </Grid>

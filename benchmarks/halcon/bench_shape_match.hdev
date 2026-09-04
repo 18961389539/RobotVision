@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="24.05.0.0">
+<procedure name="main">
+<interface/>
+<body>
+<c>* RobotVision HALCON shape_match side-by-side bench (segmented upright window)</c>
+<c>* Mirrors ShapeMatchBenchSynth matrix: teach 0°, live -37…180°.</c>
+<c>* Adjust paths before running.</c>
+<l>FixtureDir := 'E:/RobotVision/benchmarks/halcon/fixtures/shape_match'</l>
+<l>ResultDir := 'E:/RobotVision/benchmarks/halcon/results'</l>
+<l>ResultPath := ResultDir + '/shape_match_halcon_results.csv'</l>
+<l>run_bench_shape_match (FixtureDir, ResultPath, 0)</l>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+
+<procedure name="run_bench_shape_match">
+<interface>
+<param name="FixtureDir" base_type="string"/>
+<param name="ResultPath" base_type="string"/>
+<param name="AppendMode" base_type="integer"/>
+</interface>
+<body>
+<l>if (AppendMode = 0)</l>
+<l>    open_file (FileHandle, ResultPath, 'output')</l>
+<l>    fwrite_string (FileHandle, 'true_deg,engine,ok,angle_deg,angle_err_deg,score,center_x,center_y')</l>
+<l>    fnew_line (FileHandle)</l>
+<l>else</l>
+<l>    open_file (FileHandle, ResultPath, 'append')</l>
+<l>endif</l>
+<l>TeachPng := FixtureDir + '/teach_0.png'</l>
+<l>read_image (TeachImg, TeachPng)</l>
+<l>create_shape_model (TeachImg, 'auto', rad(-45), rad(90), 'auto', 'auto', 'use_polarity', 'auto', ModelId)</l>
+<l>Angles := [-37, -20, -8.7, 0, 8.7, 20, 37, 180]</l>
+<l>for I := 0 to |Angles| - 1 by 1</l>
+<l>    TrueDeg := Angles[I]</l>
+<l>    LivePng := FixtureDir + '/live_' + TrueDeg + '.png'</l>
+<l>    read_image (LiveImg, LivePng)</l>
+<l>    find_shape_model (LiveImg, ModelId, rad(-45), rad(90), 0.5, 1, 0.5, 'least_squares', 0, 0.9, Row, Column, Angle, Score)</l>
+<l>    if (|Score| &gt; 0)</l>
+<l>        AngleDeg := deg(Angle)</l>
+<l>        Err := abs(AngleDeg - TrueDeg)</l>
+<l>        if (Err &gt; 180)</l>
+<l>            Err := 360 - Err</l>
+<l>        endif</l>
+<l>        fwrite_string (FileHandle, TrueDeg + ',halcon,1,' + AngleDeg + ',' + Err + ',' + Score[0] + ',' + Row[0] + ',' + Column[0])</l>
+<l>    else</l>
+<l>        fwrite_string (FileHandle, TrueDeg + ',halcon,0,,,,,')</l>
+<l>    endif</l>
+<l>    fnew_line (FileHandle)</l>
+<l>endfor</l>
+<l>clear_shape_model (ModelId)</l>
+<l>close_file (FileHandle)</l>
+</body>
+</procedure>
+</hdevelop>

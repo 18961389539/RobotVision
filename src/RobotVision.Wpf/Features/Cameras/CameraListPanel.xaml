@@ -11,25 +11,16 @@
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </UserControl.Resources>
-        <!-- 左：相机列表浮动面板（可折叠，与右侧参数栏同构） -->
-        <Border Width="220" HorizontalAlignment="Left" VerticalAlignment="Top"
-                MaxHeight="640" Margin="12" Panel.ZIndex="20"
-                Background="#F01E2836"
+        <Border Width="200" Margin="0,0,8,0" VerticalAlignment="Stretch"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                BorderThickness="1" CornerRadius="8"
+                BorderThickness="1" CornerRadius="6"
                 Visibility="{Binding IsListPanelVisible,
                     Converter={StaticResource BoolToVisibilityConverter}}">
-            <Border.Resources>
-                <ResourceDictionary>
-                    <ResourceDictionary.MergedDictionaries>
-                        <ResourceDictionary Source="/RobotVision.Wpf;component/Shared/OverlayPanelResources.xaml" />
-                    </ResourceDictionary.MergedDictionaries>
-                </ResourceDictionary>
-            </Border.Resources>
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" MaxHeight="440" />
+                    <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 

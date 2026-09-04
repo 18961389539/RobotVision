@@ -53,7 +53,7 @@ public sealed class DualBlobCenterLineStrategyFactory : IAngleStrategyFactory
 {
     public AngleMode Mode => AngleMode.DualBlobCenterLine;
 
-    public string Label => "双BLOB连线（主BLOB定位+次BLOB定向，无需模型）";
+    public string Label => "双BLOB连线（BLOB1 在 ROI1 定位 + BLOB2 在 ROI2 定向，无需模型）";
 
     public IAngleStrategy Create(ModelManager models, ILogger? logger = null) =>
         new DualBlobCenterLineStrategy();

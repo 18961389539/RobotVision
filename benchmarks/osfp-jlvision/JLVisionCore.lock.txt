@@ -1,0 +1,1 @@
+﻿file=JLVisionCore.dll size=73670144 fileVersion=1.0.0.0 productVersion=1.0.0.0 lastWriteUtc=2026-09-03T09:03:34Z

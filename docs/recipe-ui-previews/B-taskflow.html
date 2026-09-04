@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>配方页预览 B · 任务流工作台</title>
+  <style>
+    :root {
+      --bg: #0b1118; --panel: #151c26; --panel-2: #1b2430; --line: #2a3544;
+      --text: #e8eef6; --muted: #8b97a8; --accent: #3d8bff; --accent-dim: #1a3a6a;
+      --warn: #e8a33d; --ok: #3ddc97; --danger: #f97171; --image: #070b10;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 "Segoe UI", "Microsoft YaHei", sans-serif; }
+    a { color: var(--accent); text-decoration: none; }
+    button, select, input { font: inherit; color: var(--text); }
+    button { cursor: pointer; border: 1px solid var(--line); background: var(--panel-2); border-radius: 4px; padding: 7px 12px; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.ghost { background: transparent; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    input, select { background: #0f1620; border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; width: 100%; }
+    .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    .banner { display: flex; gap: 16px; align-items: center; padding: 8px 14px; background: #111820; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+    .banner strong { color: var(--text); }
+    .wrap { display: grid; grid-template-columns: 220px minmax(320px, 1fr) minmax(360px, 1.15fr); min-height: 0; }
+    .col { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--line); }
+    .col:last-child { border-right: 0; background: var(--image); }
+    .hd { padding: 10px 12px; font-weight: 600; font-size: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); }
+    .rec { padding: 9px 12px; cursor: pointer; border-left: 3px solid transparent; }
+    .rec.on { background: #1c2633; border-left-color: var(--accent); }
+    .rec .sum { font-size: 11px; color: var(--muted); }
+    .steps { display: flex; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+    .step { flex: 1; min-width: 72px; text-align: center; padding: 8px 4px; border-radius: 4px; border: 1px solid var(--line); background: transparent; font-size: 11px; }
+    .step.on { background: var(--accent-dim); border-color: var(--accent); font-weight: 600; }
+    .step.done { color: var(--ok); }
+    .body { padding: 14px 16px; overflow: auto; flex: 1; }
+    h3 { margin: 0 0 8px; font-size: 16px; }
+    p.lead { margin: 0 0 14px; color: var(--muted); }
+    .cards { display: grid; gap: 8px; }
+    .card { border: 1px solid var(--line); background: var(--panel-2); border-radius: 6px; padding: 10px 12px; cursor: pointer; }
+    .card.on { border-color: var(--accent); background: var(--accent-dim); }
+    .card b { display: block; margin-bottom: 4px; }
+    .card span { font-size: 12px; color: var(--muted); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .field span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .nav { padding: 10px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+    .nav .spacer { flex: 1; }
+    .stage { position: relative; flex: 1; min-height: 0; }
+    svg { width: 100%; height: 100%; display: block; }
+    .cap { position: absolute; left: 10px; top: 10px; background: #0008; padding: 6px 10px; border-radius: 4px; font-size: 12px; }
+    .cap b { color: var(--warn); }
+    .tbar { position: absolute; right: 10px; top: 10px; display: flex; gap: 4px; }
+    .okline { color: var(--ok); font-size: 12px; margin-top: 10px; }
+    .chk { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; }
+    .chk input { width: auto; }
+    label.chk { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="banner">
+      <strong>预览 B · 任务流工作台</strong>
+      <span>配置工作台不再是第二套窗口。建配方、改配方走同一条：任务 → 取景 → 推荐 → 示教 → 上线。已有配方默认停在「示教 / 上线」。</span>
+      <span style="margin-left:auto"><a href="A-cockpit.html">A 驾驶舱</a> · <a href="C-ide.html">C 三栏编辑器</a></span>
+    </div>
+    <div class="wrap">
+      <aside class="col">
+        <div class="hd">配方 <button class="ghost" id="newBtn">新建草稿</button></div>
+        <div id="list"></div>
+        <div style="margin-top:auto;padding:10px 12px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)">
+          草稿未保存不上产线。复制会清序列号。
+        </div>
+      </aside>
+      <section class="col">
+        <div class="steps" id="steps"></div>
+        <div class="body" id="panel"></div>
+        <div class="nav">
+          <button id="back">上一步</button>
+          <span class="spacer"></span>
+          <button class="ghost" id="skip">跳到上线（已有配方）</button>
+          <button class="primary" id="next">下一步</button>
+        </div>
+      </section>
+      <section class="col">
+        <div class="hd" id="imgHd">画面 · 随当前步骤换用途</div>
+        <div class="stage">
+          <div class="cap" id="cap">步骤 2 以后在此取图 / 框选 / 看叠加</div>
+          <div class="tbar" id="tbar"></div>
+          <svg viewBox="0 0 640 400">
+            <rect width="640" height="400" fill="#0c1218"/>
+            <g id="scene">
+              <rect x="200" y="118" width="230" height="150" rx="10" fill="#3a4554" stroke="#9aa7b8" stroke-width="2"/>
+              <rect x="286" y="90" width="58" height="28" rx="4" fill="#2e3845" stroke="#c9b48a" stroke-width="2"/>
+            </g>
+            <g id="ov" opacity="0">
+              <rect x="178" y="84" width="274" height="210" fill="none" stroke="#3ddc97" stroke-width="2"/>
+              <rect x="280" y="84" width="70" height="42" fill="none" stroke="#e8a33d" stroke-width="2"/>
+              <circle cx="320" cy="175" r="4" fill="#d4b45a"/>
+            </g>
+          </svg>
+        </div>
+      </section>
+    </div>
+  </div>
+  <script>
+    const STEPS = ["任务", "取景", "推荐", "示教", "上线"];
+    const recipes = [
+      { id: "A01", sum: "已示教 · 未保存不上产线" },
+      { id: "B02", sum: "最小外接矩形 · st1" },
+      { id: "草稿", sum: "新建，尚未保存" },
+    ];
+    let step = 0, current = "A01", chosen = "mask";
+    const list = document.getElementById("list");
+    const stepsEl = document.getElementById("steps");
+    const panel = document.getElementById("panel");
+    const next = document.getElementById("next");
+    const back = document.getElementById("back");
+
+    function renderList() {
+      list.innerHTML = recipes.map(r =>
+        `<div class="rec ${r.id===current?"on":""}" data-id="${r.id}"><b>${r.id}</b><div class="sum">${r.sum}</div></div>`
+      ).join("");
+    }
+    list.onclick = e => {
+      const n = e.target.closest(".rec");
+      if (!n) return;
+      current = n.dataset.id;
+      step = current === "草稿" ? 0 : 3;
+      renderList(); render();
+    };
+    document.getElementById("newBtn").onclick = () => { current = "草稿"; step = 0; renderList(); render(); };
+
+    function renderSteps() {
+      stepsEl.innerHTML = STEPS.map((s,i) =>
+        `<button class="step ${i===step?"on":""} ${i<step?"done":""}" data-i="${i}">${i+1} ${s}</button>`
+      ).join("");
+    }
+    stepsEl.onclick = e => {
+      const b = e.target.closest(".step");
+      if (b) { step = +b.dataset.i; render(); }
+    };
+
+    const pages = [
+      () => `<h3>这件要怎么测？</h3>
+        <p class="lead">先定任务约束，再取图。不要一上来填 40 个字段。</p>
+        <div class="cards">
+          <div class="card ${chosen==="mask"?"on":""}" data-c="mask"><b>要头尾 / 有向角</b><span>分割+精修（模板 / SIFT / 形状 / 卡尺）</span></div>
+          <div class="card ${chosen==="dual"?"on":""}" data-c="dual"><b>两个特征点连线</b><span>双模型 A→B，天然消 180°</span></div>
+          <div class="card ${chosen==="blob"?"on":""}" data-c="blob"><b>不用模型，黑白团块</b><span>双 BLOB 质心连线</span></div>
+        </div>
+        <div class="grid" style="margin-top:14px">
+          <div class="field"><span>期望件数（0=不检查）</span><input value="1"></div>
+          <div class="field"><span>相机</span><select><option>cam_gige</option></select></div>
+        </div>
+        <label class="chk"><input type="checkbox" checked> 允许示教（现场能拍一张标准件）</label>`,
+      () => `<h3>取景与检测区</h3>
+        <p class="lead">右侧是参考帧。框只决定「在哪找」，不是抓取原点。</p>
+        <button type="button" id="grab">取一帧</button>
+        <button type="button" id="drawRoi">框选检测区</button>
+        <p class="okline" id="grabMsg">尚未取图</p>
+        <label class="chk"><input type="checkbox"> 取图前开灯</label>`,
+      () => `<h3>推荐（写入编辑器，不保存）</h3>
+        <p class="lead">赛马只在资格方法里比。点选用后仍可在示教步改。</p>
+        <div class="cards">
+          <div class="card on"><b>模板匹配 · 主推荐</b><span>纹理足够 · 可判头尾 · 需示教图</span></div>
+          <div class="card"><b>卡尺+凸起 · 备选</b><span>免示教模板 · 壳体边清晰时更稳</span></div>
+        </div>
+        <p class="okline">将写入角度模式 = 分割+精修，精修 = 模板匹配。</p>`,
+      () => `<h3>示教并试一次</h3>
+        <p class="lead">示教图进当前编辑器。试触发走同一份，不写产量。</p>
+        <button type="button" id="teach">示教模板</button>
+        <button type="button" id="feat">框选特征（可选）</button>
+        <p class="okline">已示教 186×142px · 峰 NCC 0.88 → 建议阈值 0.75</p>
+        <p class="lead" style="margin-top:12px">金十字是匹配峰，不是壳体中心。切方法后请重新对示教。</p>`,
+      () => `<h3>保存才上产线</h3>
+        <p class="lead">PLC 用名称或序列号。未保存的试触发不会进 TRIGGER。</p>
+        <div class="grid">
+          <div class="field"><span>名称</span><input value="${current==="草稿"?"A04":current}"></div>
+          <div class="field"><span>序列号（0=仅名称）</span><input value="${current==="A01"?"12":"0"}"></div>
+        </div>
+        <div class="field" style="margin-top:10px"><span>工位</span><select><option>st1</option></select></div>
+        <p class="okline">哈希未钉扎。需要 1017 防拷错文件时，保存前钉死。</p>`
+    ];
+
+    function render() {
+      renderSteps();
+      panel.innerHTML = pages[step]();
+      back.disabled = step === 0;
+      next.textContent = step === 4 ? "保存并上线" : step === 3 ? "试触发，再上线" : "下一步";
+      const caps = [
+        "先选任务，不必看图",
+        "参考帧：框检测区",
+        "分析叠加（只读）",
+        "示教 / 试触发结果",
+        "最后一眼确认再保存"
+      ];
+      document.getElementById("cap").innerHTML = caps[step];
+      document.getElementById("ov").setAttribute("opacity", step >= 3 ? "1" : "0");
+      document.getElementById("tbar").innerHTML = step === 1
+        ? `<button id="g2">取图</button><button>框选</button>`
+        : step === 3 ? `<button id="test2">测试触发</button>` : "";
+      document.getElementById("imgHd").textContent = "画面 · " + STEPS[step];
+
+      panel.querySelectorAll(".card[data-c]").forEach(c => c.onclick = () => { chosen = c.dataset.c; render(); });
+      const grab = document.getElementById("grab");
+      if (grab) grab.onclick = () => document.getElementById("grabMsg").textContent = "已取参考帧 · cam_gige";
+      const teach = document.getElementById("teach");
+      if (teach) teach.onclick = () => { document.getElementById("ov").setAttribute("opacity","1"); document.getElementById("cap").innerHTML = "<b>示教完成</b> · 未保存"; };
+    }
+
+    next.onclick = () => {
+      if (step === 3) {
+        document.getElementById("ov").setAttribute("opacity","1");
+        document.getElementById("cap").innerHTML = "<b>测试完成（编辑器）</b> · 1 件";
+        step = 4; render(); return;
+      }
+      if (step === 4) {
+        document.getElementById("cap").innerHTML = "<b>已保存</b> · PLC 可用";
+        next.textContent = "已保存";
+        return;
+      }
+      step++; render();
+    };
+    back.onclick = () => { if (step) step--; render(); };
+    document.getElementById("skip").onclick = () => { step = 4; render(); };
+
+    renderList();
+    render();
+  </script>
+</body>
+</html>

@@ -37,6 +37,21 @@ public sealed class RecipeEditorValidatorTests
     }
 
     [Fact]
+    public void TryValidateForTrigger_DualBlob_SecondaryRoiWithoutPrimary_ReturnsError()
+    {
+        var recipe = new RecipeConfig
+        {
+            Name = "A",
+            CameraId = "cam",
+            AngleMode = AngleMode.DualBlobCenterLine,
+            Models = [],
+            Blob = { SecondaryRoi = new Roi(0.55, 0.2, 0.4, 0.6) },
+        };
+
+        RecipeEditorValidator.TryValidateForTrigger(recipe).Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
     public void TryValidateForSave_DualCenterLineOneModel_ReturnsError()
     {
         var dir = new TestInfra.TempDir("rv_val");

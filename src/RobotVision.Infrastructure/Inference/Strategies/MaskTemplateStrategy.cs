@@ -4,157 +4,126 @@ using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.JlVision;
 using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Inference;
 
 namespace RobotVision.Infrastructure.Inference.Strategies;
 
 /// <summary>
-/// 模式四：分割给粗框，精修给亚像素角与头尾。
-/// 模板匹配：NCC 匹配峰定 XY（映回原图），转正窗（可关）定有向角，不跑卡尺。卡尺只在 RefineMethod=CaliperTab 时使用。
+/// 模式四：分割给粗框，精修给亚像素角与头尾。精修全部走 JLVision。
 /// 精修不过门默认不输出无向粗角（Usable=false → TRIGGER 1019）；AllowCoarseFallback 恢复旧行为。
-/// 精修方法走 <see cref="SegmentRefineRuntimeRegistry"/>，新增方法不再改本循环。
 /// </summary>
-public sealed class MaskTemplateStrategy(ModelManager models, MaskTemplateRotationCache? rotations = null) : IAngleStrategy
+public sealed class MaskTemplateStrategy(ModelManager models) : IAngleStrategy
 {
-    private readonly MaskTemplateRotationCache _rotations = rotations ?? MaskTemplateRotationCache.Shared;
     private const double MinMaskAreaPx = 400;
     private readonly SegmentRefineRuntimeRegistry _refine = SegmentRefineRuntimeRegistry.Default;
 
     [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
-        Justification = "Rotation/SIFT packs are cache-owned; released in finally.")]
+        Justification = "ROI Mat 在 finally 释放。")]
     public List<PixelPose> Compute(VisionImage undistorted, RecipeConfig recipe, CancellationToken ct = default)
     {
         var method = recipe.Template.RefineMethod;
-        var useRefineTemplate = method == SegmentRefineMethod.Template;
-        var useSift = method == SegmentRefineMethod.Sift;
-        var useShapeMatch = method == SegmentRefineMethod.ShapeMatch;
-        if ((useRefineTemplate || useSift || useShapeMatch) && string.IsNullOrEmpty(recipe.Template.TemplateImageBase64))
+        var needsTemplate = method is SegmentRefineMethod.Template
+            or SegmentRefineMethod.Sift
+            or SegmentRefineMethod.ShapeMatch;
+        if (needsTemplate && string.IsNullOrEmpty(recipe.Template.TemplateImageBase64))
             throw new VisionException(VisionErrorCode.InvalidRecipeConfig,
-                "分割+精修（模板匹配 / SIFT / 形状匹配）未示教模板（配方页「示教模板」自动生成，或改用直线拟合 / 卡尺+凸起）");
+                "分割+精修（模板匹配 / 形状匹配）未示教模板（配方页「示教模板」自动生成，或改用直线拟合 / 卡尺）");
 
-        MaskTemplateRotationPack? pack = null;
-        MaskSiftRefine.TeachModel? siftTeach = null;
-        MaskShapeMatch.ShapeModel? shapeModel = null;
-        Mat? template = null;
-        var ownedTemplate = false;
+        if (method is SegmentRefineMethod.ShapeMatch or SegmentRefineMethod.Sift)
+            JlShapeTeachCache.Warm(recipe);
+        if (method == SegmentRefineMethod.Template)
+            JlNccTeachCache.Warm(recipe);
+
+        using var roiImage = RoiHelper.CropToVisionImage(undistorted, recipe.Roi, out var ox, out var oy);
+        var input = roiImage ?? undistorted;
+        using var full = VisionImageCv.AsMat(undistorted);
+        Mat? roiOwned = recipe.Roi is null ? null : RoiHelper.Crop(full, recipe.Roi, out _, out _);
+        var roiView = roiOwned ?? full;
         try
         {
-            pack = useRefineTemplate ? _rotations.GetOrCreate(recipe) : null;
-            template = pack?.Gray.Source;
-            if (useRefineTemplate && template is null)
+            var session = models.Open(recipe.Models[0], InferenceTask.Segmentation);
+            var results = InferenceStageClock.MeasureSegment(() =>
+                session.Run(y =>
+                    y.RunSegmentation(input, recipe.Confidence, recipe.Segmentation.PixelConfidence, recipe.Iou), ct));
+
+            var runtime = _refine.Get(method);
+            return InferenceStageClock.MeasureRefine(() =>
             {
-                template = MaskTemplateMatcher.DecodeTemplatePng(recipe.Template.TemplateImageBase64);
-                ownedTemplate = true;
-            }
-
-            siftTeach = useSift ? MaskSiftRefine.GetOrCreate(recipe) : null;
-            shapeModel = useShapeMatch ? MaskShapeMatch.GetOrCreate(recipe) : null;
-
-            using var roiImage = RoiHelper.CropToVisionImage(undistorted, recipe.Roi, out var ox, out var oy);
-            var input = roiImage ?? undistorted;
-            using var full = VisionImageCv.AsMat(undistorted);
-            Mat? roiOwned = recipe.Roi is null ? null : RoiHelper.Crop(full, recipe.Roi, out _, out _);
-            var roiView = roiOwned ?? full;
-            try
-            {
-                var session = models.Open(recipe.Models[0], InferenceTask.Segmentation);
-                var results = InferenceStageClock.MeasureSegment(() =>
-                    session.Run(y =>
-                        y.RunSegmentation(input, recipe.Confidence, recipe.Segmentation.PixelConfidence, recipe.Iou), ct));
-
-                var runtime = _refine.Get(method);
-                return InferenceStageClock.MeasureRefine(() =>
+                var poses = new List<PixelPose>();
+                foreach (var segmentation in results)
                 {
-                    var poses = new List<PixelPose>();
-                    foreach (var segmentation in results)
+                    var box = segmentation.Box;
+                    if ((double)box.Width * box.Height < MinMaskAreaPx)
+                        continue;
+
+                    var contour = segmentation.ContourLocal;
+                    if (contour.Count < 4)
+                        continue;
+                    var points = new Point2f[contour.Count];
+                    for (var i = 0; i < contour.Count; i++)
+                        points[i] = new Point2f((float)(contour[i].X + box.Left), (float)(contour[i].Y + box.Top));
+
+                    var hit = runtime.Refine(new SegmentRefineRequest
                     {
-                        var box = segmentation.Box;
-                        if ((double)box.Width * box.Height < MinMaskAreaPx)
-                            continue;
+                        RoiView = roiView,
+                        Points = points,
+                        Recipe = recipe,
+                        SegmentConfidence = segmentation.Confidence,
+                        BitPackedMask = segmentation.BitPackedMask,
+                        MaskWidth = box.Width,
+                        MaskHeight = box.Height,
+                        BoxLeft = box.Left,
+                        BoxTop = box.Top,
+                    });
 
-                        var contour = segmentation.ContourLocal;
-                        if (contour.Count < 4)
-                            continue;
-                        var points = new Point2f[contour.Count];
-                        for (var i = 0; i < contour.Count; i++)
-                            points[i] = new Point2f((float)(contour[i].X + box.Left), (float)(contour[i].Y + box.Top));
-
-                        var hit = runtime.Refine(new SegmentRefineRequest
-                        {
-                            RoiView = roiView,
-                            Points = points,
-                            Recipe = recipe,
-                            SegmentConfidence = segmentation.Confidence,
-                            BitPackedMask = segmentation.BitPackedMask,
-                            MaskWidth = box.Width,
-                            MaskHeight = box.Height,
-                            Pack = pack,
-                            Template = template,
-                            SiftTeach = siftTeach,
-                            ShapeModel = shapeModel,
-                            BoxLeft = box.Left,
-                            BoxTop = box.Top,
-                        });
-
-                        var pose = hit.Pose;
-                        var usable = pose.Usable;
-                        if (usable && (useSift || useShapeMatch) && pose.Score < recipe.Template.MatchThreshold)
+                    var pose = hit.Pose;
+                    var usable = pose.Usable;
+                    if (usable)
+                    {
+                        var area = Cv2.ContourArea(points);
+                        var aspect = JlHousing.Aspect(JlHousing.FitObb(points));
+                        if (!InstanceGeometry.Accepts(recipe.Template, area, aspect))
                             usable = false;
-                        if (usable)
-                        {
-                            var area = Cv2.ContourArea(points);
-                            var aspect = MaskHousing.Aspect(MaskHousing.FitObb(points));
-                            if (!InstanceGeometry.Accepts(recipe.Template, area, aspect))
-                                usable = false;
-                        }
-
-                        poses.Add(new PixelPose(pose.Cx + ox, pose.Cy + oy, pose.AngleDeg, pose.Score)
-                        {
-                            SegmentScore = pose.SegmentScore ?? segmentation.Confidence,
-                            Usable = usable,
-                            Overlay = new PoseOverlay
-                            {
-                                Contour = points.Select(p => new PixelPoint(p.X + ox, p.Y + oy)).ToArray(),
-                                Boxes = [new PixelRect(box.Left + ox, box.Top + oy, box.Width, box.Height)],
-                                Baseline = hit.TabMarker is null
-                                    ? null
-                                    : [new PixelPoint(hit.TabMarker[0].X + ox, hit.TabMarker[0].Y + oy),
-                                       new PixelPoint(hit.TabMarker[1].X + ox, hit.TabMarker[1].Y + oy)],
-                                DebugLines = ShiftLines(hit.DebugLines, ox, oy),
-                                DebugDots = ShiftDots(hit.DebugDots, ox, oy),
-                                MatchWindow = ShiftPoints(hit.MatchWindow, ox, oy),
-                                RefineQualityNote = hit.QualityNote,
-                                Label = segmentation.Label,
-                                BitPackedMask = segmentation.BitPackedMask is { Length: > 0 } packed
-                                    ? packed
-                                    : null,
-                                MaskWidth = box.Width,
-                                MaskHeight = box.Height,
-                            },
-                        });
                     }
 
-                    PixelPoseOutput.EnforceExpectedCount(poses, recipe.Template.ExpectedCount);
-                    return poses
-                        .OrderByDescending(p => p.Usable)
-                        .ThenByDescending(p => p.Score)
-                        .ToList();
-                });
-            }
-            finally
-            {
-                roiOwned?.Dispose();
-            }
+                    poses.Add(new PixelPose(pose.Cx + ox, pose.Cy + oy, pose.AngleDeg, pose.Score)
+                    {
+                        SegmentScore = pose.SegmentScore ?? segmentation.Confidence,
+                        Usable = usable,
+                        Overlay = new PoseOverlay
+                        {
+                            Contour = points.Select(p => new PixelPoint(p.X + ox, p.Y + oy)).ToArray(),
+                            Boxes = [new PixelRect(box.Left + ox, box.Top + oy, box.Width, box.Height)],
+                            Baseline = hit.TabMarker is null
+                                ? null
+                                : [new PixelPoint(hit.TabMarker[0].X + ox, hit.TabMarker[0].Y + oy),
+                                   new PixelPoint(hit.TabMarker[1].X + ox, hit.TabMarker[1].Y + oy)],
+                            DebugLines = ShiftLines(hit.DebugLines, ox, oy),
+                            DebugDots = ShiftDots(hit.DebugDots, ox, oy),
+                            MatchWindow = ShiftPoints(hit.MatchWindow, ox, oy),
+                            RefineQualityNote = hit.QualityNote,
+                            Label = segmentation.Label,
+                            BitPackedMask = segmentation.BitPackedMask is { Length: > 0 } packed
+                                ? packed
+                                : null,
+                            MaskWidth = box.Width,
+                            MaskHeight = box.Height,
+                        },
+                    });
+                }
+
+                PixelPoseOutput.EnforceExpectedCount(poses, recipe.Template.ExpectedCount);
+                return poses
+                    .OrderByDescending(p => p.Usable)
+                    .ThenByDescending(p => p.Score)
+                    .ToList();
+            });
         }
         finally
         {
-            if (ownedTemplate)
-                template?.Dispose();
-            _rotations.Release(pack);
-            MaskSiftRefine.Release(siftTeach);
-            MaskShapeMatch.Release(shapeModel);
+            roiOwned?.Dispose();
         }
     }
 

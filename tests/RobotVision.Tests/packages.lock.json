@@ -384,6 +384,9 @@
           "xunit.extensibility.core": "[2.9.2]"
         }
       },
+      "jlvisionlib": {
+        "type": "Project"
+      },
       "robotvision.calibtool": {
         "type": "Project",
         "dependencies": {
@@ -403,8 +406,8 @@
           "Microsoft.Extensions.Logging": "[10.0.11, )",
           "Microsoft.Extensions.Logging.Console": "[10.0.11, )",
           "RobotVision.Infrastructure": "[1.0.0, )",
+          "RobotVision.JlVision": "[1.0.0, )",
           "RobotVision.Teach": "[1.0.0, )",
-          "RobotVision.Vision": "[1.0.0, )",
           "Serilog": "[4.0.2, )",
           "Serilog.Extensions.Logging": "[8.0.0, )",
           "Serilog.Sinks.File": "[6.0.0, )"
@@ -429,10 +432,18 @@
           "OpenCvSharp4": "[4.10.0.20240615, )",
           "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )",
-          "RobotVision.Vision": "[1.0.0, )",
+          "RobotVision.JlVision": "[1.0.0, )",
           "System.IO.Ports": "[8.0.0, )",
           "YoloDotNet": "[4.2.0, )",
           "YoloDotNet.ExecutionProvider.OpenVino": "[1.1.0, )"
+        }
+      },
+      "robotvision.jlvision": {
+        "type": "Project",
+        "dependencies": {
+          "JLVisionLib": "[1.0.0, )",
+          "OpenCvSharp4": "[4.10.0.20240615, )",
+          "RobotVision.Core": "[1.0.0, )"
         }
       },
       "robotvision.teach": {
@@ -442,7 +453,7 @@
           "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
           "RobotVision.Core": "[1.0.0, )",
           "RobotVision.Infrastructure": "[1.0.0, )",
-          "RobotVision.Vision": "[1.0.0, )"
+          "RobotVision.JlVision": "[1.0.0, )"
         }
       },
       "robotvision.vision": {

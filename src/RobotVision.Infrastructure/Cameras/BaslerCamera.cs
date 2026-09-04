@@ -21,9 +21,9 @@ namespace RobotVision.Infrastructure.Cameras;
 /// - 懒连接：构造只校验 pylon 运行库（不枚举/打开设备）。<c>new Camera()</c> 在无设备时会抛异常，
 ///   因此推迟到首次 <see cref="ConnectCore"/>——启动时相机未上电/网络未就绪不阻断注册，
 ///   首次取图自动连接；
-/// - 单帧采集用 <c>GrabOne</c>（内部 Start(1)+RetrieveResult+Stop）。pylon 约定
-///   GrabOne 前置条件是「采集已停止」，因此连接阶段不得调用 <c>StreamGrabber.Start()</c>，
-///   否则取图必失败，重连也会再次 Start 而无法自愈；
+/// - 单帧采集用 <c>Start</c>+短超时 <c>RetrieveResult</c> 轮询（等价 GrabOne，但每
+///   <see cref="CameraGrabWait.PollMs"/> ms 可响应取消）。pylon 约定取图前采集须已停止，
+///   因此连接阶段不得 <c>StreamGrabber.Start()</c>，否则取图必失败，重连也无法自愈；
 /// - 自动重连：单帧采集失败（连接中断类）后同请求内重连一次
 ///   （Close→Open→重发参数→再 GrabOne），仍失败才返回 1003；
 /// - 软件取图：连接时把 TriggerMode 置 Off、关闭 ExposureAuto/GainAuto，避免相机 UserSet
@@ -66,7 +66,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     {
         // 从 VS 启动时未必带上 pylon Viewer 快捷方式里的 PATH/GENTL；
         // 原生库必须在首次 CameraFinder 调用前能被找到。
-        try { EnsurePylonNativePath(); }
+        try { PylonRuntimeBootstrap.EnsureNativePath(); }
         catch { /* 无 pylon 的机器保持空枚举，不阻断进程启动 */ }
     }
 
@@ -129,7 +129,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             for (var attempt = 0; attempt < 2; attempt++)
             {
                 var needConnect = _camera is null || !_connected || attempt > 0;
-                if (needConnect && !ConnectCore())
+                if (needConnect && !ConnectCore(ct))
                 {
                     if (attempt == 0)
                         continue;
@@ -138,7 +138,11 @@ public sealed class BaslerCamera : ICamera, IExposureControl
 
                 try
                 {
-                    return TryGrabWithUnderrunFallback();
+                    return TryGrabWithUnderrunFallback(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (TimeoutException ex)
                 {
@@ -180,11 +184,12 @@ public sealed class BaslerCamera : ICamera, IExposureControl
     }
 
     /// <summary>创建设备对象（若需要）、打开、下发软件取图与光度参数。成功返回 true；失败记日志并置未连接。</summary>
-    private bool ConnectCore()
+    private bool ConnectCore(CancellationToken ct = default)
     {
         try
         {
-            _camera ??= CreateDevice();
+            ct.ThrowIfCancellationRequested();
+            _camera ??= CreateDevice(ct);
             SafeStopGrabbing();
             if (_camera.IsOpen)
                 _camera.Close();
@@ -210,6 +215,10 @@ public sealed class BaslerCamera : ICamera, IExposureControl
             if (_log is { } log) BaslerCameraLog.Connected(log, Id, _serialNumber, _friendlyName);
             return true;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _lastFailureReason = ex.Message;
@@ -219,7 +228,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         }
     }
 
-    private Camera CreateDevice()
+    private Camera CreateDevice(CancellationToken ct)
     {
         var forcedIp = TryForceGigEIpIntoNicSubnet();
 
@@ -227,7 +236,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         if (devices.Count == 0)
         {
             // FORCEIP 后 pylon 发现有时慢一拍；空列表时再等一次，避免误报 No matching camera found
-            Thread.Sleep(1000);
+            CameraGrabWait.WaitUnlessCanceled(1000, ct);
             devices = TryEnumeratePylon();
         }
         var specified = !string.IsNullOrWhiteSpace(_deviceId);
@@ -422,45 +431,71 @@ public sealed class BaslerCamera : ICamera, IExposureControl
         TrySetInteger(PLCamera.GevSCPD, 1015);
     }
 
-    private CameraFrame TryGrabWithUnderrunFallback()
+    private CameraFrame TryGrabWithUnderrunFallback(CancellationToken ct)
     {
         try
         {
-            return GrabOneFrame();
+            return GrabOneFrame(ct);
         }
         catch (VisionException vex) when (IsGrabUnderrun(vex) && TryApplyReducedResolutionFallback())
         {
-            return GrabOneFrame();
+            return GrabOneFrame(ct);
         }
     }
 
     [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
         Justification = "VisionImage ownership transfers to CameraFrame.")]
-    private CameraFrame GrabOneFrame()
+    private CameraFrame GrabOneFrame(CancellationToken ct)
     {
+        var grabber = _camera!.StreamGrabber
+            ?? throw new VisionException(VisionErrorCode.CameraGrabFailed, $"Basler 相机 {Id} 采集口未就绪");
         var grabWatch = Stopwatch.StartNew();
-        // StreamGrabber 在 pylon 中标注可空;相机已打开且开始采集时必非 null,这里用 ! 断言
-        var result = _camera!.StreamGrabber!.GrabOne(_grabTimeoutMs, TimeoutHandling.ThrowException);
-        var acquireMs = grabWatch.Elapsed.TotalMilliseconds;
-        using (result)
+        var deadline = Environment.TickCount64 + _grabTimeoutMs;
+
+        // 连接阶段已保证采集停止。这里 Start+短超时 Retrieve，避免 GrabOne 把整段
+        // grabTimeout 锁死在 SDK 内、取消令牌形同虚设。
+        SafeStopGrabbing();
+        grabber.Start();
+        try
         {
-            if (result is null || !result.GrabSucceeded)
-                throw new VisionException(VisionErrorCode.CameraGrabFailed,
-                    $"Basler 相机 {Id} 采集失败: {result?.ErrorDescription ?? "无采集结果"} (code={result?.ErrorCode})");
-            Mat? mat = ToMat(result);
-            try
+            while (true)
             {
-                var image = VisionImageCv.Adopt(mat);
-                mat = null;
-                return new CameraFrame(image, DateTime.UtcNow, acquireMs,
-                    grabWatch.Elapsed.TotalMilliseconds - acquireMs);
-            }
-            finally
-            {
-                mat?.Dispose();
+                ct.ThrowIfCancellationRequested();
+                var slice = CameraGrabWait.NextSliceMs(deadline, CameraGrabWait.PollMs, Environment.TickCount64);
+                if (slice <= 0)
+                    throw new TimeoutException($"等待采集结果超时（{_grabTimeoutMs}ms）");
+
+                using var result = grabber.RetrieveResult(slice, TimeoutHandling.Return);
+                if (result is null || IsRetrievePollTimeout(result))
+                    continue;
+                if (!result.GrabSucceeded)
+                    throw new VisionException(VisionErrorCode.CameraGrabFailed,
+                        $"Basler 相机 {Id} 采集失败: {result.ErrorDescription} (code={result.ErrorCode})");
+
+                var acquireMs = grabWatch.Elapsed.TotalMilliseconds;
+                Mat? mat = ToMat(result);
+                try
+                {
+                    var image = VisionImageCv.Adopt(mat);
+                    mat = null;
+                    return new CameraFrame(image, DateTime.UtcNow, acquireMs,
+                        grabWatch.Elapsed.TotalMilliseconds - acquireMs);
+                }
+                finally
+                {
+                    mat?.Dispose();
+                }
             }
         }
+        finally
+        {
+            SafeStopGrabbing();
+        }
     }
+
+    /// <summary>短超时 Retrieve 未等到帧：空结果或 ErrorCode=0。真实失败（underrun 等）走采集失败。</summary>
+    private static bool IsRetrievePollTimeout(IGrabResult result) =>
+        !result.GrabSucceeded && result.ErrorCode == 0;
 
     private bool TryApplyReducedResolutionFallback()
     {
@@ -589,68 +624,6 @@ public sealed class BaslerCamera : ICamera, IExposureControl
 
         return null;
     }
-
-    private static void EnsurePylonNativePath()
-    {
-        var runtime = FindPylonRuntimeDir();
-        if (runtime is null)
-            return;
-
-        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        if (path.IndexOf(runtime, StringComparison.OrdinalIgnoreCase) < 0)
-            Environment.SetEnvironmentVariable("PATH", runtime + Path.PathSeparator + path);
-
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GENICAM_GENTL64_PATH")))
-            Environment.SetEnvironmentVariable("GENICAM_GENTL64_PATH", runtime);
-    }
-
-    private static string? FindPylonRuntimeDir()
-    {
-        foreach (var candidate in new[]
-        {
-            Environment.GetEnvironmentVariable("PYLON_ROOT"),
-            @"D:\Program Files\Basler\pylon\Runtime\x64",
-            @"C:\Program Files\Basler\pylon\Runtime\x64",
-            @"D:\Program Files\Basler\pylon",
-            @"C:\Program Files\Basler\pylon",
-        })
-        {
-            var resolved = ResolveRuntimeDir(candidate);
-            if (resolved is not null)
-                return resolved;
-        }
-
-        // 注册表仅 Windows 可用:非 Windows 直接跳过(CA1416 平台守卫)
-        if (!OperatingSystem.IsWindows())
-            return null;
-        try
-        {
-            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Basler\pylon");
-            return ResolveRuntimeDir(key?.GetValue("InstallationFolder") as string);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string? ResolveRuntimeDir(string? candidate)
-    {
-        if (string.IsNullOrWhiteSpace(candidate))
-            return null;
-
-        var dir = candidate.TrimEnd('\\', '/');
-        if (IsPylonRuntimeDir(dir))
-            return dir;
-
-        var x64 = Path.Combine(dir, "Runtime", "x64");
-        return IsPylonRuntimeDir(x64) ? x64 : null;
-    }
-
-    private static bool IsPylonRuntimeDir(string dir) =>
-        Directory.Exists(dir) &&
-        (File.Exists(Path.Combine(dir, "ProducerGEV.cti")) ||
-         File.Exists(Path.Combine(dir, "PylonC_v10.dll")));
 
     // ---- IExposureControl（供 UI 调光；未连接时返回 null/false） ----
 

@@ -14,7 +14,7 @@ namespace RobotVision.WpfHost.Features.Recipe;
 /// <summary>
 /// 配方向导：任务约束 → 取图分类 → 按场景推荐角度模式/精修。写入编辑器，不自动保存、不改 TRIGGER。
 /// </summary>
-internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDisposable
+internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
     private readonly IRecipeWorkspace _host;
     private readonly ICameraRuntime _cameras;
@@ -114,6 +114,8 @@ internal sealed partial class RecipeSetupWizardViewModel : ObservableObject, IDi
     public event Action? RequestClose;
 
     public bool Applied { get; private set; }
+
+    public Action? FlushPendingEdits { get; set; }
 
     public RecipeRoiEditor Roi => _roi;
     public RecipeTestSession Test => _test;

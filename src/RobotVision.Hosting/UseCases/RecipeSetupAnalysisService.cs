@@ -6,7 +6,7 @@ using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.JlVision;
 using RobotVision.Teach;
 
 namespace RobotVision.Hosting;
@@ -46,7 +46,7 @@ public sealed class RecipeSetupAnalysisService(
         var editor = request.Editor;
         Mat? templateMat = null;
         if (!string.IsNullOrEmpty(editor.Template.TemplateImageBase64))
-            templateMat = MaskTemplateMatcher.DecodeTemplatePng(editor.Template.TemplateImageBase64);
+            templateMat = JlTemplateIo.DecodePng(editor.Template.TemplateImageBase64);
         using var templateScope = templateMat;
         using var teachCache = SegmentRefineBakeOff.TeachCache.TryCreate(templateMat);
 
@@ -255,27 +255,28 @@ public sealed class RecipeSetupAnalysisService(
 
         Mat? ownedTemplate = null;
         if (templateMat is null && !string.IsNullOrEmpty(editor.Template.TemplateImageBase64))
-            ownedTemplate = MaskTemplateMatcher.DecodeTemplatePng(editor.Template.TemplateImageBase64);
+            ownedTemplate = JlTemplateIo.DecodePng(editor.Template.TemplateImageBase64);
         using var ownedTemplateScope = ownedTemplate;
         var template = templateMat ?? ownedTemplate;
 
-        var advice = SegmentRefineAdvisor.Analyze(
-            roiMat, points,
-            bitPackedMask: seg.BitPackedMask,
-            maskWidth: box.Width,
-            maskHeight: box.Height,
-            template: editor.Template,
-            templateImage: template,
-            fullImageWidth: image.Width,
-            fullImageHeight: image.Height,
-            originX: ox,
-            originY: oy,
-            instanceConfidence: seg.Confidence,
-            boxConfidence: editor.Confidence,
-            pixelConfidence: editor.Segmentation.PixelConfidence,
-            task: request.Constraints,
-            teachCache: teachCache,
-            prior: prior);
+        var advice = SegmentRefineAdvisor.Analyze(new SegmentRefineAdvisor.TeachAnalyzeRequest(roiMat, points)
+        {
+            BitPackedMask = seg.BitPackedMask,
+            MaskWidth = box.Width,
+            MaskHeight = box.Height,
+            Template = editor.Template,
+            TemplateImage = template,
+            FullImageWidth = image.Width,
+            FullImageHeight = image.Height,
+            OriginX = ox,
+            OriginY = oy,
+            InstanceConfidence = seg.Confidence,
+            BoxConfidence = editor.Confidence,
+            PixelConfidence = editor.Segmentation.PixelConfidence,
+            Task = request.Constraints,
+            TeachCache = teachCache,
+            Prior = prior,
+        });
         var scene = advice.Scene;
         var bakeoff = advice.Candidates;
         var edge = advice.EdgePolarity;
@@ -284,7 +285,7 @@ public sealed class RecipeSetupAnalysisService(
         Roi? feature = advice.SuggestedFeatureRoi;
         try
         {
-            var crop = MaskTemplateMatcher.UprightCrop(roiMat, points, 0.05);
+            var crop = JlTemplateIo.UprightCrop(roiMat, points, 0.05);
             using (crop.Upright)
             {
                 ranks = FeatureRoiAdvisor.Rank(
@@ -297,7 +298,7 @@ public sealed class RecipeSetupAnalysisService(
         }
 
         var previewBase = keepPreview
-            ? RenderPreviewBase(image, editor.Roi, roiMat, points, ox, oy, valid, editor.Template)
+            ? RenderPreviewBase(image, editor.Roi, roiMat, points, ox, oy, valid)
             : null;
         var msg = countUnstable
             ? $"已分类并赛马。本帧检出 {valid.Count} 件，期望 {expected}，场景按置信最高的一颗。"
@@ -334,8 +335,7 @@ public sealed class RecipeSetupAnalysisService(
         IReadOnlyList<Point2f>? champion = null,
         double ox = 0,
         double oy = 0,
-        List<InstanceSegmentation>? instances = null,
-        TemplateOptions? template = null)
+        List<InstanceSegmentation>? instances = null)
     {
         using var mat = VisionImageMat.AsMat(image);
         var drawn = mat.Clone();
@@ -365,12 +365,6 @@ public sealed class RecipeSetupAnalysisService(
             Cv2.Polylines(drawn, [pts], true, Scalar.Lime, 2, LineTypes.AntiAlias);
         }
 
-        if (roiMat is not null && champion is { Count: >= 4 })
-        {
-            var caliper = MaskCaliperTab.TryRefine(roiMat, champion, CaliperRefineOptions.From(template));
-            DrawCaliperViz(drawn, caliper.Viz, ox, oy);
-        }
-
         if (detection is { } det)
             DrawNormalizedRoi(drawn, det, Scalar.Lime);
         return BgraImageBuffer.FromBgrMat(drawn);
@@ -383,25 +377,6 @@ public sealed class RecipeSetupAnalysisService(
         var w = Math.Max(1, (int)Math.Round(roi.Width * image.Width));
         var h = Math.Max(1, (int)Math.Round(roi.Height * image.Height));
         Cv2.Rectangle(image, new Rect(x, y, w, h), color, 2, LineTypes.AntiAlias);
-    }
-
-    private static void DrawCaliperViz(Mat drawn, MaskCaliperTab.CaliperViz viz, double ox, double oy)
-    {
-        Point Map(Point2d p) =>
-            new((int)Math.Round(p.X + ox), (int)Math.Round(p.Y + oy));
-
-        foreach (var bar in viz.SearchBars)
-            Cv2.Line(drawn, Map(bar.A), Map(bar.B), Scalar.Cyan, 1, LineTypes.AntiAlias);
-        foreach (var bar in viz.InvalidBars)
-            Cv2.Line(drawn, Map(bar.A), Map(bar.B), Scalar.Gray, 1, LineTypes.AntiAlias);
-        if (viz.FittedMinus is { } minus)
-            Cv2.Line(drawn, Map(minus.A), Map(minus.B), Scalar.Magenta, 2, LineTypes.AntiAlias);
-        if (viz.FittedPlus is { } plus)
-            Cv2.Line(drawn, Map(plus.A), Map(plus.B), Scalar.Magenta, 2, LineTypes.AntiAlias);
-        foreach (var p in viz.Inliers)
-            Cv2.Circle(drawn, Map(p), 3, Scalar.Cyan, -1, LineTypes.AntiAlias);
-        foreach (var p in viz.Rejected)
-            Cv2.Circle(drawn, Map(p), 3, Scalar.IndianRed, -1, LineTypes.AntiAlias);
     }
 
     private VisionImage MaybeUndistort(

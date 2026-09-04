@@ -34,7 +34,7 @@ public sealed class RecipeModelSlotsTests
     }
 
     [Fact]
-    public void TryCommitUiModels_SingleModelMode_BlocksExtraSlots()
+    public void TryCommitUiModels_SingleModelMode_TrimsExtraSlots()
     {
         var editor = new RecipeConfig
         {
@@ -42,9 +42,45 @@ public sealed class RecipeModelSlotsTests
             Models = ["a.onnx", "b.onnx"],
         };
 
-        var error = RecipeModelSlots.TryCommitUiModels(editor, "a.onnx", "");
-        error.Should().Contain("只需 1 个模型");
+        RecipeModelSlots.TryCommitUiModels(editor, "a.onnx", "").Should().BeNull();
+        editor.Models.Should().Equal("a.onnx");
+    }
+
+    [Fact]
+    public void TrimToSingleModelSlot_LeavesDualCenterLineAlone()
+    {
+        var editor = new RecipeConfig
+        {
+            AngleMode = AngleMode.DualCenterLine,
+            Models = ["a.onnx", "b.onnx"],
+        };
+
+        RecipeModelSlots.TrimToSingleModelSlot(editor).Should().BeFalse();
         editor.Models.Should().Equal("a.onnx", "b.onnx");
+    }
+
+    [Fact]
+    public void RecipeEditorModeCleanup_DualToMaskTemplate_TrimsAndClearsTeachImage()
+    {
+        var editor = new RecipeConfig
+        {
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["a.onnx", "b.onnx"],
+            Template =
+            {
+                RefineMethod = SegmentRefineMethod.LineFit,
+                TemplateImageBase64 = "abc==",
+                HousingEdgePolarity = HousingEdgePolarity.BrightToDark,
+            },
+        };
+
+        var note = RecipeEditorModeCleanup.Apply(editor);
+
+        editor.Models.Should().Equal("a.onnx");
+        editor.Template.TemplateImageBase64.Should().BeEmpty();
+        editor.Template.HousingEdgePolarity.Should().Be(HousingEdgePolarity.Auto);
+        note.Should().Contain("次模型");
+        note.Should().Contain("示教模板图");
     }
 
     [Fact]

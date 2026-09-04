@@ -1,6 +1,6 @@
 using OpenCvSharp;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -70,6 +70,31 @@ public sealed class MaskHousingTests
         Assert.Equal(3, MaskHousing.AdaptiveRefineRange(5, slender));
         var square = new HousingFrame(new Point2f(0, 0), 0, 80, 70);
         Assert.Equal(8, MaskHousing.AdaptiveRefineRange(8, square));
+    }
+
+    [Fact]
+    public void Fit_NegativeSlenderBar_CanonWarpInMinus90To90()
+    {
+        using var mask = new Mat(H, W, MatType.CV_8UC1, Scalar.All(0));
+        var cx = W / 2.0;
+        var cy = H / 2.0;
+        var rad = -37.0 * Math.PI / 180.0;
+        var cos = Math.Cos(rad);
+        var sin = Math.Sin(rad);
+        Point2f Rot(double x, double y) => new(
+            (float)(cx + x * cos - y * sin),
+            (float)(cy + x * sin + y * cos));
+        Point2f[] contour =
+        [
+            Rot(-110, -28), Rot(110, -28), Rot(110, 28), Rot(-110, 28),
+        ];
+        Cv2.FillConvexPoly(mask, contour.Select(p => new Point((int)p.X, (int)p.Y)).ToArray(), Scalar.All(255));
+        Cv2.FindContours(mask, out var found, out _, RetrievalModes.External, ContourApproximationModes.ApproxNone);
+        var pts = found.OrderByDescending(c => Cv2.ContourArea(c)).First()
+            .Select(p => new Point2f(p.X, p.Y)).ToArray();
+        var housing = MaskHousing.Fit(pts);
+        Assert.InRange(housing.WarpAngleDeg, -42, -32);
+        Assert.True(housing.WarpAngleDeg > -90 && housing.WarpAngleDeg < 90);
     }
 
     private static Point2f[] BodyAndTabContour(bool tabOnPlusShort)

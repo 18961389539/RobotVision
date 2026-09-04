@@ -4,14 +4,21 @@ using RobotVision.Teach;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
-/// <summary>配方列表项摘要（从磁盘读取并格式化标签）。</summary>
+/// <summary>配方列表项摘要（轻量元数据 + 校验，不读 templateImageBase64）。</summary>
 internal static class RecipeListItemDescriber
 {
     internal static RecipeListItem Describe(RecipeLoader loader, string name)
     {
+        var meta = loader.PeekListMetadata(name);
+        if (!meta.ParseSucceeded)
+            return new RecipeListItem(name, meta.ParseError ?? "解析失败", false);
+
         try
         {
-            var r = loader.Get(name);
+            var r = meta.ToValidationStub();
+            RecipeLoader.Validate(r);
+            loader.ValidateReferences(r);
+
             var mode = r.AngleMode switch
             {
                 AngleMode.MaskMinAreaRect => "分割",
@@ -36,17 +43,16 @@ internal static class RecipeListItemDescriber
                 tags.Add($"工位:{r.StationId}");
             if (r.Roi is not null)
                 tags.Add("ROI");
-            if (r.Template.Roi is not null &&
+            if (meta.HasFeatureRoi &&
                 TemplateOptions.UsesFeatureTeachRoi(r.Template.RefineMethod))
                 tags.Add("特征框");
-            if (r.Lighting is not null)
-                tags.Add($"光:{r.LightControllerId}");
-            if (!r.OutputOffset.IsZero)
+            if (meta.HasLighting)
+                tags.Add($"光:{meta.LightControllerId}");
+            if (meta.HasOutputOffset)
                 tags.Add("补偿");
-            if (r.ModelSha256.Any(h => !string.IsNullOrWhiteSpace(h)) ||
-                !string.IsNullOrWhiteSpace(r.StationSha256))
+            if (meta.HasModelPin || meta.HasStationPin)
                 tags.Add("钉扎");
-            return new RecipeListItem(name, string.Join(" · ", tags), true, r.Enabled, r.Description);
+            return new RecipeListItem(name, string.Join(" · ", tags), true, meta.Enabled, meta.Description);
         }
         catch (Exception ex)
         {

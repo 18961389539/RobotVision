@@ -20,7 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RobotVision.Infrastructure\RobotVision.Infrastructure.csproj" />
-    <ProjectReference Include="..\RobotVision.Vision\RobotVision.Vision.csproj" />
+    <ProjectReference Include="..\RobotVision.JlVision\RobotVision.JlVision.csproj" />
     <ProjectReference Include="..\RobotVision.Teach\RobotVision.Teach.csproj" />
   </ItemGroup>
 

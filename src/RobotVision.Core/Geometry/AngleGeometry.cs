@@ -20,6 +20,17 @@ public static class AngleGeometry
         return (center, NormalizeSignedDeg(deg));
     }
 
+    /// <summary>
+    /// 转正 warp 角规范到 [-90,90)：消除 MinAreaRect 补角表示导致的 ±180° 内容翻转。
+    /// Canon(w) = ((w+90) mod 180) - 90；与 <see cref="NormalizeDeg"/> 不同，保留有符号长轴朝向。
+    /// </summary>
+    public static double CanonWarpDeg(double deg)
+    {
+        if (!double.IsFinite(deg))
+            return deg;
+        return ((deg + 90.0) % 180.0 + 180.0) % 180.0 - 90.0;
+    }
+
     /// <summary>归一化到 [0,180)：无方向语义的角度（最小外接矩形）。
     /// 取模对 NaN/±Infinity 得 NaN（无异常、不会死循环），语义上即"非有限值不入归一化区间"，
     /// 属可接受的防御行为。</summary>
@@ -62,6 +73,20 @@ public static class AngleGeometry
     {
         var d = Math.Abs(NormalizeDeg(a) - NormalizeDeg(b));
         return d > 90.0 ? 180.0 - d : d;
+    }
+
+    /// <summary>
+    /// 两无向角 [0,180) 的最小有符号差，落在 (-90,90]。
+    /// 用于 rectangle2 迭代时避免 ±180° 长轴翻转。
+    /// </summary>
+    public static double SignedDeltaHalfDeg(double toDeg, double fromDeg)
+    {
+        var d = NormalizeDeg(toDeg) - NormalizeDeg(fromDeg);
+        if (d > 90.0)
+            d -= 180.0;
+        if (d < -90.0)
+            d += 180.0;
+        return d;
     }
 
     /// <summary>

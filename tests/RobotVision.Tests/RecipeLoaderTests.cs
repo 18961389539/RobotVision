@@ -505,4 +505,58 @@ public sealed class RecipeLoaderTests : IDisposable
         Assert.True(loader.Delete("HOOK2"));
         Assert.Equal(["HOOK2"], deleted);
     }
+
+    [Fact]
+    public void PeekListMetadata_ReadsPascalCaseSavedRecipe()
+    {
+        var loader = new RecipeLoader(_folder);
+        loader.Save(new RecipeConfig
+        {
+            Name = "Product",
+            CameraId = "产品回放",
+            StationId = "Product",
+            AngleMode = AngleMode.MaskTemplate,
+            Models = ["OSFP-SEG.onnx"],
+            Template = new TemplateOptions
+            {
+                RefineMethod = SegmentRefineMethod.Template,
+                TemplateImageBase64 = "abc",
+            },
+        });
+
+        var json = File.ReadAllText(Path.Combine(_folder, "Product.json"));
+        Assert.Contains("\"CameraId\"", json, StringComparison.Ordinal);
+
+        var meta = loader.PeekListMetadata("Product");
+        Assert.True(meta.ParseSucceeded);
+        Assert.Equal("产品回放", meta.CameraId);
+        Assert.Equal("Product", meta.StationId);
+        Assert.Equal(AngleMode.MaskTemplate, meta.AngleMode);
+        Assert.Equal(SegmentRefineMethod.Template, meta.RefineMethod);
+        Assert.Equal("OSFP-SEG.onnx", meta.PrimaryModel);
+        Assert.True(meta.HasTemplateImage);
+
+        RecipeLoader.Validate(meta.ToValidationStub());
+    }
+
+    [Fact]
+    public void PeekListMetadata_ReadsCamelCaseRecipe()
+    {
+        File.WriteAllText(Path.Combine(_folder, "Product.json"), """
+            {
+              "cameraId": "产品回放",
+              "stationId": "Product",
+              "angleMode": "MaskTemplate",
+              "models": ["OSFP-SEG.onnx"],
+              "template": { "refineMethod": "Template", "templateImageBase64": "abc" }
+            }
+            """);
+
+        var meta = new RecipeLoader(_folder).PeekListMetadata("Product");
+        Assert.True(meta.ParseSucceeded);
+        Assert.Equal("产品回放", meta.CameraId);
+        Assert.Equal("Product", meta.StationId);
+        Assert.True(meta.HasTemplateImage);
+        RecipeLoader.Validate(meta.ToValidationStub());
+    }
 }

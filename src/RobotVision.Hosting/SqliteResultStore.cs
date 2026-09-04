@@ -133,21 +133,42 @@ public sealed class SqliteResultStore : IDisposable
         }
     }
 
-    public IReadOnlyList<ResultDbRow> Query(ResultDbQuery? query = null)
+    /// <summary>持锁 + 释放/无库守卫 + 打开连接 + 建命令 + 施加筛选（WHERE 1=1 起）；命中守卫则返回 <paramref name="empty"/>。</summary>
+    private T Query<T>(ResultDbQuery query, T empty, Func<SqliteCommand, StringBuilder, T> run)
     {
-        query ??= new ResultDbQuery();
         lock (_sync)
         {
-            if (_disposed)
-                return [];
-            if (_conn is null && !File.Exists(DatabasePath))
-                return [];
+            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
+                return empty;
             EnsureOpen();
             using var cmd = _conn!.CreateCommand();
             var where = new StringBuilder("WHERE 1=1");
             ApplyFilters(cmd, query, where);
-            var limit = Math.Clamp(query.Limit <= 0 ? 500 : query.Limit, 1, 10_000);
-            var offset = Math.Max(0, query.Offset);
+            return run(cmd, where);
+        }
+    }
+
+    /// <summary>同 <see cref="Query{T}"/> 但不施加结果筛选条件（供 DISTINCT / 删除等用）。</summary>
+    private T Exec<T>(T empty, Func<SqliteCommand, T> run)
+    {
+        lock (_sync)
+        {
+            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
+                return empty;
+            EnsureOpen();
+            using var cmd = _conn!.CreateCommand();
+            return run(cmd);
+        }
+    }
+
+    public IReadOnlyList<ResultDbRow> Query(ResultDbQuery? query = null)
+    {
+        query ??= new ResultDbQuery();
+        var q = query;
+        return Query(q, (IReadOnlyList<ResultDbRow>)[], (cmd, where) =>
+        {
+            var limit = Math.Clamp(q.Limit <= 0 ? 500 : q.Limit, 1, 10_000);
+            var offset = Math.Max(0, q.Offset);
             cmd.CommandText =
                 $"""
                  SELECT id, t, recipe, station, camera, x, y, angle, confidence,
@@ -162,39 +183,26 @@ public sealed class SqliteResultStore : IDisposable
             while (reader.Read())
                 rows.Add(ReadRow(reader));
             return rows;
-        }
+        });
     }
 
     public long Count(ResultDbQuery? query = null)
     {
         query ??= new ResultDbQuery();
-        lock (_sync)
+        return Query(query, 0L, (cmd, where) =>
         {
-            if (_disposed)
-                return 0;
-            if (_conn is null && !File.Exists(DatabasePath))
-                return 0;
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             cmd.CommandText = $"SELECT COUNT(*) FROM results {where};";
             var value = cmd.ExecuteScalar();
             return value is long n ? n : Convert.ToInt64(value, CultureInfo.InvariantCulture);
-        }
+        });
     }
 
     public ResultDbSummary Summarize(ResultDbQuery? query = null)
     {
         query ??= new ResultDbQuery();
-        lock (_sync)
+        var empty = new ResultDbSummary(0, 0, 0, null, null, null, null);
+        return Query(query, empty, (cmd, where) =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return new ResultDbSummary(0, 0, 0, null, null, null, null);
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             cmd.CommandText =
                 $"""
                  SELECT
@@ -206,7 +214,7 @@ public sealed class SqliteResultStore : IDisposable
                  """;
             using var reader = cmd.ExecuteReader();
             if (!reader.Read())
-                return new ResultDbSummary(0, 0, 0, null, null, null, null);
+                return empty;
             var total = reader.IsDBNull(0) ? 0 : reader.GetInt64(0);
             var ok = reader.IsDBNull(1) ? 0 : Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture);
             return new ResultDbSummary(
@@ -215,7 +223,7 @@ public sealed class SqliteResultStore : IDisposable
                 ReadNullableDouble(reader, 3),
                 ReadNullableDouble(reader, 4),
                 ReadNullableDouble(reader, 5));
-        }
+        });
     }
 
     /// <summary>库中出现过的配方名（分析页下拉）。无库文件时不创建空库。</summary>
@@ -231,14 +239,8 @@ public sealed class SqliteResultStore : IDisposable
     public IReadOnlyList<double> QueryAngles(ResultDbQuery? query = null)
     {
         query ??= new ResultDbQuery();
-        lock (_sync)
+        return Query(query, (IReadOnlyList<double>)[], (cmd, where) =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return [];
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             where.Append(" AND angle IS NOT NULL");
             cmd.CommandText = $"SELECT angle FROM results {where} LIMIT 10000;";
             using var reader = cmd.ExecuteReader();
@@ -246,42 +248,30 @@ public sealed class SqliteResultStore : IDisposable
             while (reader.Read())
                 values.Add(reader.GetDouble(0));
             return values;
-        }
+        });
     }
 
     /// <summary>筛选范围内耗时样本（上限 10000），供耗时直方图。</summary>
     public IReadOnlyList<double> QueryElapsedMs(ResultDbQuery? query = null)
     {
         query ??= new ResultDbQuery();
-        lock (_sync)
+        return Query(query, (IReadOnlyList<double>)[], (cmd, where) =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return [];
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             cmd.CommandText = $"SELECT elapsed_ms FROM results {where} LIMIT 10000;";
             using var reader = cmd.ExecuteReader();
             var values = new List<double>();
             while (reader.Read())
                 values.Add(reader.GetDouble(0));
             return values;
-        }
+        });
     }
 
     /// <summary>筛选范围内有 XY 的点（上限 4000），供散点图。</summary>
     public IReadOnlyList<ResultXyPoint> QueryXy(ResultDbQuery? query = null)
     {
         query ??= new ResultDbQuery();
-        lock (_sync)
+        return Query(query, (IReadOnlyList<ResultXyPoint>)[], (cmd, where) =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return [];
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             where.Append(" AND x IS NOT NULL AND y IS NOT NULL");
             cmd.CommandText = $"SELECT x, y, code FROM results {where} LIMIT 4000;";
             using var reader = cmd.ExecuteReader();
@@ -289,21 +279,15 @@ public sealed class SqliteResultStore : IDisposable
             while (reader.Read())
                 points.Add(new ResultXyPoint(reader.GetDouble(0), reader.GetDouble(1), reader.GetInt32(2)));
             return points;
-        }
+        });
     }
 
     /// <summary>合格行的机器人输出（已含 OutputOffset），供首件补偿建议。</summary>
     public IReadOnlyList<RobotPose> QueryOkRobotPoses(ResultDbQuery? query = null)
     {
         query = (query ?? new ResultDbQuery()) with { OkOnly = true };
-        lock (_sync)
+        return Query(query, (IReadOnlyList<RobotPose>)[], (cmd, where) =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return [];
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             where.Append(" AND x IS NOT NULL AND y IS NOT NULL AND angle IS NOT NULL");
             var limit = query.Limit is > 0 and <= 10_000 ? query.Limit : 2000;
             cmd.CommandText = $"SELECT x, y, angle FROM results {where} LIMIT {limit};";
@@ -312,21 +296,15 @@ public sealed class SqliteResultStore : IDisposable
             while (reader.Read())
                 poses.Add(new RobotPose(reader.GetDouble(0), reader.GetDouble(1), reader.GetDouble(2)));
             return poses;
-        }
+        });
     }
 
     /// <summary>筛选范围内按错误码计数（分析页失败分布）。</summary>
     public IReadOnlyList<ResultCodeCount> CountByCode(ResultDbQuery? query = null)
     {
         query ??= new ResultDbQuery();
-        lock (_sync)
+        return Query(query, (IReadOnlyList<ResultCodeCount>)[], (cmd, where) =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return [];
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             cmd.CommandText =
                 $"""
                  SELECT code, COUNT(*) AS n FROM results
@@ -340,21 +318,15 @@ public sealed class SqliteResultStore : IDisposable
             while (reader.Read())
                 rows.Add(new ResultCodeCount(reader.GetInt32(0), Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture)));
             return rows;
-        }
+        });
     }
 
     /// <summary>筛选范围内位姿/耗时 min/max/σ（总体标准差，NULL 不计入）。</summary>
     public ResultPoseSpread QuerySpread(ResultDbQuery? query = null)
     {
         query ??= new ResultDbQuery();
-        lock (_sync)
+        return Query(query, EmptySpread(), (cmd, where) =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return EmptySpread();
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             cmd.CommandText =
                 $"""
                  SELECT
@@ -383,21 +355,15 @@ public sealed class SqliteResultStore : IDisposable
                 ReadNullableDouble(reader, 12), ReadNullableDouble(reader, 13),
                 ResultAnalysis.PopulationStd(avgMs, ReadNullableDouble(reader, 15)),
                 ReadNullableDouble(reader, 16));
-        }
+        });
     }
 
     /// <summary>按配方聚合合格率，条数多的在前。</summary>
     public IReadOnlyList<ResultRecipeStat> SummarizeByRecipe(ResultDbQuery? query = null)
     {
         query ??= new ResultDbQuery();
-        lock (_sync)
+        return Query(query, (IReadOnlyList<ResultRecipeStat>)[], (cmd, where) =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return [];
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             cmd.CommandText =
                 $"""
                  SELECT recipe,
@@ -423,7 +389,7 @@ public sealed class SqliteResultStore : IDisposable
                     ReadNullableDouble(reader, 4)));
             }
             return rows;
-        }
+        });
     }
 
     /// <summary>按小时或按日聚合趋势。grain=hour|day，最新 90 桶再按时间正序。</summary>
@@ -431,14 +397,8 @@ public sealed class SqliteResultStore : IDisposable
     {
         query ??= new ResultDbQuery();
         var fmt = grain.Equals("hour", StringComparison.OrdinalIgnoreCase) ? "%Y-%m-%d %H:00" : "%Y-%m-%d";
-        lock (_sync)
+        return Query(query, (IReadOnlyList<ResultTrendBucket>)[], (cmd, where) =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return [];
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
-            var where = new StringBuilder("WHERE 1=1");
-            ApplyFilters(cmd, query, where);
             cmd.CommandText =
                 $"""
                  SELECT strftime('{fmt}', t_unix / 1000, 'unixepoch', 'localtime') AS bucket,
@@ -461,25 +421,17 @@ public sealed class SqliteResultStore : IDisposable
             }
             rows.Reverse();
             return rows;
-        }
+        });
     }
 
     /// <summary>删除早于 cutoff 的行。返回删除条数。</summary>
-    public int DeleteOlderThan(DateTimeOffset cutoff)
-    {
-        lock (_sync)
+    public int DeleteOlderThan(DateTimeOffset cutoff) =>
+        Exec(0, cmd =>
         {
-            if (_disposed)
-                return 0;
-            if (_conn is null && !File.Exists(DatabasePath))
-                return 0;
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
             cmd.CommandText = "DELETE FROM results WHERE t_unix < $cutoff;";
             cmd.Parameters.AddWithValue("$cutoff", cutoff.ToUnixTimeMilliseconds());
             return cmd.ExecuteNonQuery();
-        }
-    }
+        });
 
     public void Dispose()
     {
@@ -617,14 +569,9 @@ public sealed class SqliteResultStore : IDisposable
         }
     }
 
-    private List<string> ListDistinct(string column, int limit)
-    {
-        lock (_sync)
+    private List<string> ListDistinct(string column, int limit) =>
+        Exec([], cmd =>
         {
-            if (_disposed || (_conn is null && !File.Exists(DatabasePath)))
-                return [];
-            EnsureOpen();
-            using var cmd = _conn!.CreateCommand();
             cmd.CommandText =
                 $"""
                  SELECT DISTINCT {column} FROM results
@@ -637,8 +584,7 @@ public sealed class SqliteResultStore : IDisposable
             while (reader.Read())
                 names.Add(reader.GetString(0));
             return names;
-        }
-    }
+        });
 
     private static ResultPoseSpread EmptySpread() =>
         new(null, null, null, null, null, null, null, null, null, null, null, null, null);

@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="精修参数"
-        Width="560" Height="640"
-        MinWidth="480" MinHeight="480"
+        Width="620" Height="720"
+        MinWidth="520" MinHeight="520"
         WindowStartupLocation="CenterOwner"
         ExtendsContentIntoTitleBar="True">
     <Window.Resources>
@@ -83,62 +83,128 @@
                 <!-- 模板匹配 -->
                 <StackPanel Margin="0,0,0,16"
                             Visibility="{Binding ShowTemplatePanel, Converter={StaticResource BoolToVisibilityConverter}}">
-                    <ui:TextBlock FontTypography="BodyStrong" Text="模板匹配" Margin="0,0,0,8" />
+                    <ui:TextBlock FontTypography="BodyStrong" Text="模板匹配（灰度 NCC）" Margin="0,0,0,8" />
                     <WrapPanel>
-                        <StackPanel Width="130" Margin="0,0,12,8">
-                            <TextBlock Text="匹配阈值" FontSize="11" Margin="0,0,0,4" />
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="匹配阈值" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="NCC 分数低于该值判定精修失败。" />
                             <ui:NumberBox Value="{Binding Template.MatchThreshold}"
                                           Minimum="0" Maximum="1" SmallChange="0.05"
+                                          SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged" />
+                        </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="角度下限 (°)" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="相对分割粗角的搜索起点。例如 -5 表示向负方向搜 5°。" />
+                            <ui:NumberBox Value="{Binding Template.RefineAngleLoDeg}"
+                                          Minimum="-45" Maximum="45" SmallChange="1"
+                                          SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged"
+                                          ToolTip="相对粗角。可与上限非对称，例如 -3。" />
+                        </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="角度上限 (°)" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="相对分割粗角的搜索终点。例如 8 表示向正方向搜 8°。须大于下限。" />
+                            <ui:NumberBox Value="{Binding Template.RefineAngleHiDeg}"
+                                          Minimum="-45" Maximum="45" SmallChange="1"
+                                          SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged"
+                                          ToolTip="相对粗角。须大于下限。" />
+                        </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="第二峰歧义门" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="同支次峰/主峰大于该值则判歧义。1 = 关闭。建议 0.90~0.98。" />
+                            <ui:NumberBox Value="{Binding Template.MaxSecondPeakRatio}"
+                                          Minimum="0.5" Maximum="1" SmallChange="0.02"
                                           SpinButtonPlacementMode="Compact" />
                         </StackPanel>
-                        <StackPanel Width="130" Margin="0,0,12,8"
-                                    Visibility="{Binding ShowRefineRange, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <TextBlock Text="精修范围(°)" FontSize="11" Margin="0,0,0,4" />
-                            <ui:NumberBox Value="{Binding Template.RefineRangeDeg}"
-                                          Minimum="1" Maximum="45" SmallChange="1"
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="示教峰 NCC" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="示教时记下的峰值；可手改。0 = 未记。" />
+                            <ui:NumberBox Value="{Binding Template.TeachPeakScore}"
+                                          Minimum="0" Maximum="1" SmallChange="0.01"
                                           SpinButtonPlacementMode="Compact"
                                           ValueChanged="OnRangeOrNoFlipChanged" />
                         </StackPanel>
                     </WrapPanel>
-                    <CheckBox Content="转正裁剪窗" FontSize="11" Margin="0,4,0,4"
-                              IsChecked="{Binding Template.UseUprightCrop}" />
+                    <TextBlock Text="{Binding SuggestedMatchThresholdHint}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <CheckBox Content="转正裁剪窗" FontSize="11" Margin="0,0,0,4"
+                              IsChecked="{Binding Template.UseUprightCrop}"
+                              ToolTip="旧路径：先转正再匹配。当前 JLVision NCC 在分割框内局部搜，此项仍写入配方。" />
                     <CheckBox Content="边缘图定角（更准）" FontSize="11" Margin="0,0,0,4"
-                              IsChecked="{Binding Template.UseEdgeMatch}" />
-                    <CheckBox Content="目标永不翻转 180°（省一半计算，杜绝误判 180°）" FontSize="11"
+                              IsChecked="{Binding Template.UseEdgeMatch}"
+                              ToolTip="旧路径：边缘图定角 + 灰度定头尾。当前 JLVision 为灰度 NCC，此项仍写入配方。" />
+                    <CheckBox Content="目标永不翻转 180°（只搜 0° 支）" FontSize="11"
                               Margin="0,0,0,4"
                               IsChecked="{Binding Template.NoFlipConstraint}"
                               Checked="OnRangeOrNoFlipChanged" Unchecked="OnRangeOrNoFlipChanged"
-                              ToolTip="仅当工位分向限定、产品角度不会落在翻转支时勾选；会跳过 180° 分支搜索与翻转重试。" />
+                              ToolTip="仅当工位分向限定、产品角度不会落在翻转支时勾选；会跳过 180° 分支搜索。" />
                     <TextBlock Text="{Binding RefineRangeHint}" FontSize="11" TextWrapping="Wrap"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4" />
-                    <TextBlock Text="{Binding TeachPeakHint}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock Text="{Binding AdaptiveRangeHint}" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding LastRefineQualityHint}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
+                               Visibility="{Binding HasRefineQualityHint, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </StackPanel>
 
                 <!-- 形状匹配 -->
                 <StackPanel Margin="0,0,0,16"
                             Visibility="{Binding ShowShapePanel, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ui:TextBlock FontTypography="BodyStrong" Text="形状匹配" Margin="0,0,0,8" />
-                    <WrapPanel Margin="0,0,0,8">
-                        <StackPanel Width="130" Margin="0,0,12,8">
-                            <TextBlock Text="匹配阈值" FontSize="11" Margin="0,0,0,4" />
+                    <WrapPanel Margin="0,0,0,4">
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="匹配阈值" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="FindShapeModel 最低分数。低于该值回退几何抓边。" />
                             <ui:NumberBox Value="{Binding Template.MatchThreshold}"
                                           Minimum="0" Maximum="1" SmallChange="0.05"
                                           SpinButtonPlacementMode="Compact" />
                         </StackPanel>
-                        <StackPanel Width="130" Margin="0,0,12,8"
-                                    Visibility="{Binding ShowRefineRange, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <TextBlock Text="精修范围(°)" FontSize="11" Margin="0,0,0,4" />
-                            <ui:NumberBox Value="{Binding Template.RefineRangeDeg}"
-                                          Minimum="1" Maximum="45" SmallChange="1"
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="角度下限 (°)" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="相对分割粗角的搜索起点。" />
+                            <ui:NumberBox Value="{Binding Template.RefineAngleLoDeg}"
+                                          Minimum="-45" Maximum="45" SmallChange="1"
                                           SpinButtonPlacementMode="Compact"
                                           ValueChanged="OnRangeOrNoFlipChanged" />
                         </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="角度上限 (°)" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="相对分割粗角的搜索终点。须大于下限。" />
+                            <ui:NumberBox Value="{Binding Template.RefineAngleHiDeg}"
+                                          Minimum="-45" Maximum="45" SmallChange="1"
+                                          SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged" />
+                        </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="金字塔层数" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="FindShapeModel NumLevels。1=全分辨率，2=默认，更大更快更粗。" />
+                            <ui:NumberBox Value="{Binding Template.ShapeMatchNumLevels}"
+                                          Minimum="1" Maximum="5" SmallChange="1"
+                                          SpinButtonPlacementMode="Compact" />
+                        </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="最小对比度" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="建模型 MinContrast。0 = 自适应；>0 抑制弱边缘噪声。改后需重新示教或重新加载配方。" />
+                            <ui:NumberBox Value="{Binding Template.ShapeMatchMinContrast}"
+                                          Minimum="0" Maximum="255" SmallChange="1"
+                                          SpinButtonPlacementMode="Compact" />
+                        </StackPanel>
                     </WrapPanel>
+                    <TextBlock Text="极性 Metric" FontSize="11" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding ShapeMetricOptions}" DisplayMemberPath="Label"
+                              SelectedValuePath="Value" SelectedValue="{Binding Template.ShapeMatchMetric}"
+                              Margin="0,0,0,8"
+                              ToolTip="建形状模型时的极性。改后下次示教/加载生效。" />
+                    <CheckBox Content="目标永不翻转 180°（只搜 0° 支）" FontSize="11" Margin="0,0,0,8"
+                              IsChecked="{Binding Template.NoFlipConstraint}"
+                              Checked="OnRangeOrNoFlipChanged" Unchecked="OnRangeOrNoFlipChanged" />
                     <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                               Text="固定使用转正裁剪（与模板「转正裁剪窗」无关）。试触发/监控会叠青色命中点、红色未命中点。" />
+                               Text="固定在分割框内搜索（不整图搜）。试触发/监控会叠青色命中点、红色未命中点。" />
                     <TextBlock Text="{Binding RefineRangeHint}" FontSize="11" TextWrapping="Wrap"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"
-                               Visibility="{Binding ShowRefineRange, Converter={StaticResource BoolToVisibilityConverter}}" />
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,4,0,0" />
+                    <TextBlock Text="{Binding AdaptiveRangeHint}" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,4,0,0" />
                     <TextBlock Text="{Binding RefineMethodScoreHint}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
                                Foreground="{DynamicResource SystemFillColorCautionBrush}"
                                Visibility="{Binding HasRefineMethodScoreHint, Converter={StaticResource BoolToVisibilityConverter}}" />
@@ -146,18 +212,48 @@
                                Visibility="{Binding HasRefineQualityHint, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </StackPanel>
 
-                <!-- SIFT -->
+                <!-- SIFT（生产走形状模型） -->
                 <StackPanel Margin="0,0,0,16"
                             Visibility="{Binding ShowSiftPanel, Converter={StaticResource BoolToVisibilityConverter}}">
-                    <ui:TextBlock FontTypography="BodyStrong" Text="SIFT 特征匹配" Margin="0,0,0,8" />
-                    <StackPanel Width="130" Margin="0,0,0,8">
-                        <TextBlock Text="匹配阈值" FontSize="11" Margin="0,0,0,4" />
-                        <ui:NumberBox Value="{Binding Template.MatchThreshold}"
-                                      Minimum="0" Maximum="1" SmallChange="0.05"
-                                      SpinButtonPlacementMode="Compact" />
-                    </StackPanel>
-                    <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                               Text="必须示教整颗目标，不能框局部特征。试触发/监控会叠特征内点（青）与外点（红）。" />
+                    <ui:TextBlock FontTypography="BodyStrong" Text="SIFT → 形状匹配" Margin="0,0,0,8" />
+                    <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               Text="生产路径用示教图建形状模型（不再跑 OpenCV SIFT）。必须示教整颗目标，不能框局部特征。" />
+                    <WrapPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="匹配阈值" FontSize="11" Margin="0,0,0,4" />
+                            <ui:NumberBox Value="{Binding Template.MatchThreshold}"
+                                          Minimum="0" Maximum="1" SmallChange="0.05"
+                                          SpinButtonPlacementMode="Compact" />
+                        </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="角度下限 (°)" FontSize="11" Margin="0,0,0,4" />
+                            <ui:NumberBox Value="{Binding Template.RefineAngleLoDeg}"
+                                          Minimum="-45" Maximum="45" SmallChange="1"
+                                          SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged" />
+                        </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="角度上限 (°)" FontSize="11" Margin="0,0,0,4" />
+                            <ui:NumberBox Value="{Binding Template.RefineAngleHiDeg}"
+                                          Minimum="-45" Maximum="45" SmallChange="1"
+                                          SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged" />
+                        </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="金字塔层数" FontSize="11" Margin="0,0,0,4" />
+                            <ui:NumberBox Value="{Binding Template.ShapeMatchNumLevels}"
+                                          Minimum="1" Maximum="5" SmallChange="1"
+                                          SpinButtonPlacementMode="Compact" />
+                        </StackPanel>
+                    </WrapPanel>
+                    <CheckBox Content="目标永不翻转 180°（只搜 0° 支）" FontSize="11" Margin="0,0,0,8"
+                              IsChecked="{Binding Template.NoFlipConstraint}"
+                              Checked="OnRangeOrNoFlipChanged" Unchecked="OnRangeOrNoFlipChanged" />
+                    <TextBlock Text="{Binding RefineRangeHint}" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="{Binding AdaptiveRangeHint}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                     <TextBlock Text="{Binding RefineMethodScoreHint}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
                                Foreground="{DynamicResource SystemFillColorCautionBrush}"
                                Visibility="{Binding HasRefineMethodScoreHint, Converter={StaticResource BoolToVisibilityConverter}}" />
@@ -170,7 +266,12 @@
                             Visibility="{Binding ShowCaliperPanel, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ui:TextBlock FontTypography="BodyStrong" Text="卡尺 + 凸起" Margin="0,0,0,8" />
                     <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                               Text="无需示教模板。试触发/监控会叠卡尺探针与抓边点。极性见上方。" />
+                               Text="无需示教模板。沿壳体两条长边布卡尺抓边，均角为精修角。探针数/搜索宽由壳体长宽自动定。极性见上方。" />
+                    <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               Text="凸起侧用于示教记录与头尾语义；当前 JLVision 卡尺按边缘极性抓边，每帧实测凸起侧别。" />
+                    <TextBlock Text="{Binding LastRefineQualityHint}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
+                               Visibility="{Binding HasRefineQualityHint, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </StackPanel>
 
                 <!-- 孔槽 -->
@@ -178,7 +279,9 @@
                             Visibility="{Binding ShowCentroidPanel, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ui:TextBlock FontTypography="BodyStrong" Text="质心-孔槽连线" Margin="0,0,0,8" />
                     <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                               Text="分割掩码须能检出孔或槽；角度由质心指向最大内标。无额外阈值项。" />
+                               Text="分割掩码须能检出孔或槽；XY 取掩码质心，角度由质心指向最大内标。件数门用上方「期望件数」。无匹配阈值。" />
+                    <TextBlock Text="{Binding LastRefineQualityHint}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
+                               Visibility="{Binding HasRefineQualityHint, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </StackPanel>
 
                 <!-- 直线拟合 -->
@@ -186,14 +289,31 @@
                             Visibility="{Binding ShowLineFitPanel, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ui:TextBlock FontTypography="BodyStrong" Text="直线拟合" Margin="0,0,0,8" />
                     <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="#FFE8A33D"
-                               Text="默认角度无方向 [0,180)，不能与偏心工具同用。弱纹理矩形件适用。可画「示教基准线」消 180°、输出有向角。" />
+                               Text="轮廓长轴拟合为角；失败则回退卡尺抓边（用上方壳体边缘极性）。默认开启亚像素选项写入配方。" />
+                    <CheckBox Content="亚像素卡尺重拟合" FontSize="11" Margin="0,6,0,6"
+                              IsChecked="{Binding Template.LineFitSubpixel}"
+                              ToolTip="以轮廓拟合角/中心为种子，在原图沿两条长边做亚像素卡尺取边重拟合；质量不过门自动回退轮廓拟合。" />
+                    <CheckBox Content="模糊边亚像素（弱纹理）" FontSize="11" Margin="0,0,0,6"
+                              IsChecked="{Binding Template.LineFitFuzzyMeasure}"
+                              IsEnabled="{Binding Template.LineFitSubpixel}"
+                              ToolTip="对标 HALCON fuzzy_measure_pos：剖面平滑 + 梯度模糊隶属度重心。需同时开启亚像素卡尺。" />
+                    <CheckBox Content="亚像素固定轮廓角（metrology）" FontSize="11" Margin="0,0,0,6"
+                              IsChecked="{Binding Template.LineFitFixAngleDuringSubpixel}"
+                              IsEnabled="{Binding Template.LineFitSubpixel}"
+                              ToolTip="亚像素仅量边长/中心，角锁定轮廓鲁棒拟合。关闭后允许长边对微调角度。" />
+                    <CheckBox Content="亚像素锁定示教长宽" FontSize="11" Margin="0,0,0,6"
+                              IsChecked="{Binding Template.LineFitConstrainTeachSize}"
+                              IsEnabled="{Binding Template.LineFitSubpixel}"
+                              ToolTip="由示教面积/轴比推导长边与短边并锁定；需有效示教几何。" />
                     <TextBlock Text="{Binding Roi.RefineLineStatusText}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,6" />
                     <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                               Text="示教：关闭本窗口后，在配方页用 ImageViewer 的「线」工具画一段——起点=尾、终点=头，落在零件两端明暗不同处（对称件判不了）。" />
+                               Text="可选：关闭本窗口后，在配方页用 ImageViewer「线」工具手动画基准线（起点=尾、终点=头），覆盖默认的自动头尾分辨。" />
                     <ui:Button Content="清除基准线" FontSize="11" Padding="10,4" HorizontalAlignment="Left"
                                Command="{Binding ClearRefineLineCommand}"
                                Visibility="{Binding Roi.HasRefineLine, Converter={StaticResource BoolToVisibilityConverter}}" />
+                    <TextBlock Text="{Binding LastRefineQualityHint}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
+                               Visibility="{Binding HasRefineQualityHint, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </StackPanel>
 
                 <!-- 特征框 -->
@@ -243,7 +363,23 @@
                 <StackPanel Margin="0,0,0,8">
                     <ui:TextBlock FontTypography="BodyStrong" Text="几何过门" Margin="0,0,0,6" />
                     <TextBlock Text="{Binding TeachGeometryHint}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8" />
-                    <WrapPanel Visibility="{Binding ShowGeometryGates, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <WrapPanel>
+                        <StackPanel Width="118" Margin="0,0,8,8">
+                            <TextBlock Text="示教面积 px²" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="0 = 不查面积门。示教模板后自动写入，可手改。" />
+                            <ui:NumberBox Value="{Binding Template.TeachAreaPx}" Minimum="0" Maximum="1e9"
+                                          SmallChange="10" SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged" />
+                        </StackPanel>
+                        <StackPanel Width="118" Margin="0,0,8,8">
+                            <TextBlock Text="示教轴比" FontSize="11" Margin="0,0,0,4"
+                                       ToolTip="长/短轴。0 = 不查轴比门。" />
+                            <ui:NumberBox Value="{Binding Template.TeachAspect}" Minimum="0" Maximum="20"
+                                          SmallChange="0.05" SpinButtonPlacementMode="Compact"
+                                          ValueChanged="OnRangeOrNoFlipChanged" />
+                        </StackPanel>
+                    </WrapPanel>
+                    <WrapPanel>
                         <StackPanel Width="118" Margin="0,0,8,8">
                             <TextBlock Text="面积下限倍" FontSize="11" Margin="0,0,0,4" />
                             <ui:NumberBox Value="{Binding Template.AreaRatioLo}" Minimum="0.1" Maximum="2"

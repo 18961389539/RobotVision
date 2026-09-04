@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\RobotVision.JlVision\RobotVision.JlVision.csproj" />
+    <ProjectReference Include="..\..\src\RobotVision.Infrastructure\RobotVision.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\RobotVision.Vision\RobotVision.Vision.csproj" />
+    <ProjectReference Include="..\..\src\RobotVision.Core\RobotVision.Core.csproj" />
+  </ItemGroup>
+
+</Project>

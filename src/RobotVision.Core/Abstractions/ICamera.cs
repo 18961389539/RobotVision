@@ -49,7 +49,8 @@ public interface ICamera : IDisposable
 
     /// <summary>
     /// 采集一帧。返回独立内存的 CameraFrame（含图像），调用方负责 Dispose。
-    /// 取消令牌触发时抛 OperationCanceledException（阻塞中的底层调用完成后才响应）。
+    /// 取消令牌在等待出帧期间生效（Basler 按短超时轮询 RetrieveResult；GigE 取消待收帧），
+    /// 抛 <see cref="OperationCanceledException"/>。进入推理后由管线调度器决定是否丢弃结果。
     /// </summary>
     CameraFrame Grab(CancellationToken ct = default);
 }

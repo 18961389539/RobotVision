@@ -1,6 +1,6 @@
 using OpenCvSharp;
 using RobotVision.Core.Geometry;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using Xunit;
 
 namespace RobotVision.Tests;
@@ -97,10 +97,10 @@ public sealed class PrecisionBaselineTests
 
     private static MaskShapeMatch.ShapeModel Teach(Mat img, Point2f[] contour)
     {
-        var crop = MaskTemplateMatcher.UprightCrop(img, contour, 0);
+        var crop = MaskTemplateMatcher.UprightCrop(img, contour, MaskShapeMatch.CropMarginRatio);
         try
         {
-            var model = MaskShapeMatch.BuildTeach(crop.Upright);
+            var model = MaskShapeMatch.BuildTeach(crop, contour);
             Assert.True(model is { PointCount: >= 24 }, $"示教点数 {model?.PointCount}");
             return model!;
         }

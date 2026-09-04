@@ -18,8 +18,8 @@ public enum AngleMode
     MaskTemplate,
 
     /// <summary>
-    /// 双BLOB连线（无需模型）：阈值分割+连通域分析，主 BLOB 质心定位 XY，
-    /// 主 BLOB 外扩窗口内最近次 BLOB 质心定向（主→次连线，主次有序天然消 180° 歧义）。
+    /// 双BLOB连线（无需模型）：阈值分割+连通域分析，BLOB1 只在 ROI1 内质心定位 XY，
+    /// BLOB2 只在 ROI2（或主包围盒外扩窗口）内搜索，主→次连线定向。
     /// </summary>
     DualBlobCenterLine,
 }
@@ -210,9 +210,54 @@ public sealed class TemplateOptions
     public static bool UsesFeatureTeachRoi(SegmentRefineMethod method) =>
         method is SegmentRefineMethod.Template or SegmentRefineMethod.ShapeMatch;
 
-    /// <summary>可选示教基准线（消 180°）：仅直线拟合使用。画了才输出有向角，没画保持无向旧行为。</summary>
+    /// <summary>可选示教基准线（消 180°）：仅直线拟合使用。未画时沿长轴自动采头尾明暗。</summary>
     public static bool UsesTaughtRefineLine(SegmentRefineMethod method) =>
         method is SegmentRefineMethod.LineFit;
+
+    /// <summary>壳体边缘极性：模板匹配（边缘定角）、卡尺抓边、直线拟合回退卡尺。</summary>
+    public static bool UsesHousingEdgePolarity(SegmentRefineMethod method) =>
+        method is SegmentRefineMethod.Template or SegmentRefineMethod.CaliperTab
+            or SegmentRefineMethod.LineFit;
+
+    /// <summary>凸起侧别：仅卡尺+凸起。</summary>
+    public static bool UsesTabPolarity(SegmentRefineMethod method) =>
+        method is SegmentRefineMethod.CaliperTab;
+
+    /// <summary>
+    /// 去掉当前角度/精修方法不会用到的字段，避免示教 PNG 跟到 Dual/BLOB，
+    /// 以及极性/特征框出现在不使用它们的方法上。
+    /// </summary>
+    public void ClearUnusedFields(AngleMode angleMode)
+    {
+        if (angleMode != AngleMode.MaskTemplate)
+        {
+            TemplateImageBase64 = "";
+            Roi = null;
+            RefineLine = null;
+            TeachPeakScore = 0;
+            HousingEdgePolarity = HousingEdgePolarity.Auto;
+            TabPolarity = TabPolarityLock.Auto;
+            return;
+        }
+
+        if (!NeedsTaughtImage(RefineMethod))
+        {
+            TemplateImageBase64 = "";
+            TeachPeakScore = 0;
+        }
+
+        if (!UsesFeatureTeachRoi(RefineMethod))
+            Roi = null;
+
+        if (!UsesTaughtRefineLine(RefineMethod))
+            RefineLine = null;
+
+        if (!UsesHousingEdgePolarity(RefineMethod))
+            HousingEdgePolarity = HousingEdgePolarity.Auto;
+
+        if (!UsesTabPolarity(RefineMethod))
+            TabPolarity = TabPolarityLock.Auto;
+    }
 
     /// <summary>宽高比达到该值（或倒数）视为过扁：模板/形状匹配十字会落在特征中心，齿列件可能跳齿。</summary>
     public const double FlatFeatureRoiAspect = 3;
@@ -236,16 +281,71 @@ public sealed class TemplateOptions
     /// <summary>
     /// LineFit 可选「示教基准线」：用户在 ImageViewer 上画的有向线段（起点 P1 = 尾，终点 P2 = 头），
     /// 比例坐标 ∈ [0,1]（推理图像帧）。仅 <see cref="SegmentRefineMethod.LineFit"/> 使用：
-    /// 给出后 LineFit 在原本无向精修角基础上，用「长轴两端明暗探针 vs 示教头尾签名」消 180° 歧义，
-    /// 输出有向角 [0,360)。<b>null = 与旧版完全一致（无向 [0,180)）</b>，存量配方行为不变。
+    /// 给出后 LineFit 在亚像素精修角基础上，用「长轴两端明暗探针 vs 示教头尾签名」消 180° 歧义，
+    /// 输出有向角 [0,360)。<b>null 时沿长轴自动采头尾明暗（较亮一端为头）。</b>
     /// </summary>
     public RefineLine? RefineLine { get; set; }
+
+    /// <summary>
+    /// LineFit 亚像素卡尺重拟合开关（默认开启）。以轮廓拟合角/中心为种子，
+    /// 在原图沿长边做亚像素卡尺取边重拟合，得到更高精度的角与中心；质量不过门自动回退轮廓拟合。
+    /// 仅对 <see cref="SegmentRefineMethod.LineFit"/> 生效。
+    /// </summary>
+    public bool LineFitSubpixel { get; set; } = true;
+
+    /// <summary>
+    /// LineFit 亚像素模糊边模式（对标 HALCON fuzzy_measure_pos）。弱纹理/柔过渡边缘更稳，默认 false（锐边峰）。
+    /// 仅当 <see cref="LineFitSubpixel"/> 为 true 时生效。
+    /// </summary>
+    public bool LineFitFuzzyMeasure { get; set; }
+
+    /// <summary>
+    /// LineFit 亚像素阶段固定轮廓角（对标 metrology 固定角 + measure_pairs 量边长/中心）。
+    /// 默认 true；关闭后允许亚像素从长边对微调角度（斜角弱纹理场景可能更准，但更易漂）。
+    /// 仅当 <see cref="LineFitSubpixel"/> 为 true 时生效。
+    /// </summary>
+    public bool LineFitFixAngleDuringSubpixel { get; set; } = true;
+
+    /// <summary>
+    /// 亚像素阶段锁定示教长宽（由 <see cref="TeachAreaPx"/> / <see cref="TeachAspect"/> 推导，对标 metrology 固定尺寸）。
+    /// 仅当 <see cref="LineFitSubpixel"/> 为 true 且示教几何有效时生效。
+    /// </summary>
+    public bool LineFitConstrainTeachSize { get; set; }
 
     /// <summary>模板匹配置信阈值 [0,1]：低于该值放弃精修，回退粗角度（[0,180) 无方向）。</summary>
     public double MatchThreshold { get; set; } = 0.6;
 
-    /// <summary>粗角度基础上的精修搜索范围（度，(0,45]）：默认 ±5°。</summary>
+    /// <summary>
+    /// 旧字段：对称半宽（度）。仅当 JSON 未写 <see cref="RefineAngleLoDeg"/> / <see cref="RefineAngleHiDeg"/> 时，
+    /// 由 <see cref="EnsureRefineAngleBounds"/> 展开为 ±该值。保存时与上下限同步为 max(|lo|,|hi|)。
+    /// </summary>
     public double RefineRangeDeg { get; set; } = 5;
+
+    private double _refineAngleLoDeg = -5;
+    private double _refineAngleHiDeg = 5;
+    private bool _refineAngleBoundsSpecified;
+
+    /// <summary>相对分割粗角的搜索下限（度，[-45,45]）。默认 -5。</summary>
+    public double RefineAngleLoDeg
+    {
+        get => _refineAngleLoDeg;
+        set
+        {
+            _refineAngleLoDeg = value;
+            _refineAngleBoundsSpecified = true;
+        }
+    }
+
+    /// <summary>相对分割粗角的搜索上限（度，[-45,45]）。默认 +5。须大于下限。</summary>
+    public double RefineAngleHiDeg
+    {
+        get => _refineAngleHiDeg;
+        set
+        {
+            _refineAngleHiDeg = value;
+            _refineAngleBoundsSpecified = true;
+        }
+    }
 
     /// <summary>
     /// true（默认）= 分割件先转正再在外扩窗内匹配；false = 不转正，在轴对齐包围盒内旋转模板搜索。
@@ -263,6 +363,15 @@ public sealed class TemplateOptions
     /// false（默认）= 允许任意姿态，保留 180° 头尾消歧。
     /// </summary>
     public bool NoFlipConstraint { get; set; }
+
+    /// <summary>形状匹配金字塔层数 [1,3]（HALCON NumLevels 对标）。</summary>
+    public int ShapeMatchNumLevels { get; set; } = 2;
+
+    /// <summary>形状匹配最小对比度 [0,255]；0=自适应 Canny。</summary>
+    public double ShapeMatchMinContrast { get; set; }
+
+    /// <summary>形状匹配 Metric 极性（HALCON Metric 对标）。</summary>
+    public ShapeMatchMetric ShapeMatchMetric { get; set; } = ShapeMatchMetric.UsePolarity;
 
     /// <summary>
     /// 运行时第二峰歧义门 (0,1]：最佳匹配峰同支次峰比值 ≤ 该值才接受。
@@ -322,13 +431,65 @@ public sealed class TemplateOptions
         return Math.Clamp(teachPeak * factor, 0.40, 0.92);
     }
 
-    /// <summary>精修范围语义提示：范围即实际角度窗 ±range°。NoFlip 仅 0 支（不搜 180°±range）。</summary>
+    /// <summary>
+    /// 旧配方只有 <see cref="RefineRangeDeg"/> 时展开为 ±range；已写上下限则只做夹取与 span 校正。
+    /// 加载 / 保存 / 精修前调用。
+    /// </summary>
+    public void EnsureRefineAngleBounds()
+    {
+        if (!_refineAngleBoundsSpecified)
+        {
+            var range = RefineRangeDeg is > 0 and <= 45 ? RefineRangeDeg : 5;
+            _refineAngleLoDeg = -range;
+            _refineAngleHiDeg = range;
+            _refineAngleBoundsSpecified = true;
+        }
+
+        _refineAngleLoDeg = Math.Clamp(_refineAngleLoDeg, -45, 45);
+        _refineAngleHiDeg = Math.Clamp(_refineAngleHiDeg, -45, 45);
+        if (_refineAngleLoDeg > _refineAngleHiDeg)
+            (_refineAngleLoDeg, _refineAngleHiDeg) = (_refineAngleHiDeg, _refineAngleLoDeg);
+        if (_refineAngleHiDeg - _refineAngleLoDeg < 1)
+        {
+            _refineAngleHiDeg = Math.Min(45, _refineAngleLoDeg + 1);
+            if (_refineAngleHiDeg - _refineAngleLoDeg < 1)
+                _refineAngleLoDeg = _refineAngleHiDeg - 1;
+        }
+
+        RefineRangeDeg = Math.Clamp(Math.Max(Math.Abs(_refineAngleLoDeg), Math.Abs(_refineAngleHiDeg)), 1, 45);
+    }
+
+    public RefineAngleWindow GetRefineAngleWindow()
+    {
+        EnsureRefineAngleBounds();
+        return new RefineAngleWindow(RefineAngleLoDeg, RefineAngleHiDeg);
+    }
+
+    public void SetSymmetricRefineRange(double rangeDeg)
+    {
+        var r = Math.Clamp(rangeDeg, 1, 45);
+        RefineRangeDeg = r;
+        _refineAngleLoDeg = -r;
+        _refineAngleHiDeg = r;
+        _refineAngleBoundsSpecified = true;
+    }
+
+    public static string FormatRefineAngleWindow(TemplateOptions t)
+    {
+        t.EnsureRefineAngleBounds();
+        if (Math.Abs(t.RefineAngleLoDeg + t.RefineAngleHiDeg) < 0.05)
+            return $"±{t.RefineAngleHiDeg:0}°";
+        return $"{t.RefineAngleLoDeg:0}~{t.RefineAngleHiDeg:0}°";
+    }
+
+    /// <summary>角度窗语义提示：相对粗角的 [下限, 上限]。NoFlip 仅 0 支（不搜 180° 翻转支）。</summary>
     public static string RefineRangeHintText(TemplateOptions t)
     {
-        var range = t.RefineRangeDeg;
+        t.EnsureRefineAngleBounds();
+        var win = FormatRefineAngleWindow(t);
         if (t.NoFlipConstraint)
-            return $"角度窗 = ±{range:0}°（仅 0 支，无 180° 翻转）。目标实际姿态差有多大，范围就设多大（如 ±40° 输入 40）。";
-        return $"角度窗 = ±{range:0}°（另搜 180°±{range:0} 翻转支）。仅当产物可反放（需判头尾）才保留两支；" +
+            return $"搜索 {win}（相对分割粗角，仅 0 支，无 180° 翻转）。下限/上限可非对称，例如 -3~+8。";
+        return $"搜索 {win}（相对分割粗角；另在 180° 支上用同一窗）。仅当产物可反放（需判头尾）才保留两支；" +
                "分向限定可勾选「目标永不翻转 180°」省一半计算并杜绝误判。";
     }
 
@@ -346,11 +507,21 @@ public sealed class TemplateOptions
         target.TemplateImageBase64 = includeTemplateImage ? TemplateImageBase64 : "";
         target.Roi = Roi;
         target.RefineLine = RefineLine;
+        target.LineFitSubpixel = LineFitSubpixel;
+        target.LineFitFuzzyMeasure = LineFitFuzzyMeasure;
+        target.LineFitFixAngleDuringSubpixel = LineFitFixAngleDuringSubpixel;
+        target.LineFitConstrainTeachSize = LineFitConstrainTeachSize;
         target.MatchThreshold = MatchThreshold;
         target.RefineRangeDeg = RefineRangeDeg;
+        target._refineAngleLoDeg = _refineAngleLoDeg;
+        target._refineAngleHiDeg = _refineAngleHiDeg;
+        target._refineAngleBoundsSpecified = _refineAngleBoundsSpecified;
         target.UseUprightCrop = UseUprightCrop;
         target.UseEdgeMatch = UseEdgeMatch;
         target.NoFlipConstraint = NoFlipConstraint;
+        target.ShapeMatchNumLevels = ShapeMatchNumLevels;
+        target.ShapeMatchMinContrast = ShapeMatchMinContrast;
+        target.ShapeMatchMetric = ShapeMatchMetric;
         target.MaxSecondPeakRatio = MaxSecondPeakRatio;
         target.AllowCoarseFallback = AllowCoarseFallback;
         target.TeachPeakScore = TeachPeakScore;
@@ -369,9 +540,10 @@ public sealed class TemplateOptions
 
 /// <summary>
 /// 双BLOB连线策略（DualBlobCenterLine）专属参数：阈值分割 + 连通域分析。
-/// 主 BLOB（面积在 [MinArea,MaxArea] 内）质心定位 XY；主包围盒按 CropExpandRatio 外扩
-/// 圈定次 BLOB 搜索窗口，窗口内面积合格且距主质心 [Min,Max]PairDistancePx 的最近
-/// 连通域为次 BLOB；角度 = 主质心→次质心连线。
+/// BLOB1（面积在 [MinArea,MaxArea] 内）只在配方 Roi（ROI1）内质心定位；
+/// 设了 <see cref="SecondaryRoi"/> 时 BLOB2 只在 ROI2 内检测；未设次区时
+/// 主包围盒按 CropExpandRatio 外扩圈定次 BLOB 搜索窗口。窗口/次区内面积合格
+/// 且距主质心 [Min,Max]PairDistancePx 的最近连通域为次 BLOB；角度 = 主质心→次质心连线。
 /// </summary>
 public sealed class BlobOptions
 {
@@ -396,7 +568,13 @@ public sealed class BlobOptions
     /// <summary>次 BLOB 面积上限（px²）。</summary>
     public int SecondaryMaxArea { get; set; } = 50000;
 
-    /// <summary>次 BLOB 搜索窗口外扩系数：主包围盒四边各外扩（边长×该值），(0,5]。</summary>
+    /// <summary>
+    /// ROI2：BLOB2 只在此区内检测（全图相对比例）。null = 仍用主包围盒按 <see cref="CropExpandRatio"/> 外扩窗口。
+    /// 与配方 <c>Roi</c>（ROI1，BLOB1 专用）互斥：两边各搜各的，不跨区。
+    /// </summary>
+    public Roi? SecondaryRoi { get; set; }
+
+    /// <summary>次 BLOB 搜索窗口外扩系数：主包围盒四边各外扩（边长×该值），(0,5]。未设 <see cref="SecondaryRoi"/> 时生效。</summary>
     public double CropExpandRatio { get; set; } = 1.0;
 
     /// <summary>主次质心最小间距（px）：防止把主 BLOB 边缘碎块配成次 BLOB。</summary>
@@ -417,6 +595,7 @@ public sealed class BlobOptions
         MaxArea = MaxArea,
         SecondaryMinArea = SecondaryMinArea,
         SecondaryMaxArea = SecondaryMaxArea,
+        SecondaryRoi = SecondaryRoi,
         CropExpandRatio = CropExpandRatio,
         MinPairDistancePx = MinPairDistancePx,
         MaxPairDistancePx = MaxPairDistancePx,

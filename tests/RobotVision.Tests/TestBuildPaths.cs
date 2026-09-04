@@ -16,6 +16,29 @@ internal static class TestBuildPaths
         return null;
     }
 
+    /// <summary>本机 RobotVisionData 根（captures/recipes/models），与 WPF 运行数据目录同构。</summary>
+    public static string? ResolveRobotVisionDataRoot()
+    {
+        var env = Environment.GetEnvironmentVariable("ROBOTVISION_DATA_DIR");
+        if (!string.IsNullOrWhiteSpace(env) && Directory.Exists(env))
+            return Path.GetFullPath(env);
+
+        foreach (var candidate in new[]
+                 {
+                     @"E:\RobotVisionData\RobotVisionData",
+                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                         "RobotVisionData"),
+                 })
+        {
+            if (Directory.Exists(candidate) &&
+                (Directory.Exists(Path.Combine(candidate, "captures")) ||
+                 Directory.Exists(Path.Combine(candidate, "recipes"))))
+                return Path.GetFullPath(candidate);
+        }
+
+        return null;
+    }
+
     public static string? ResolveWpfBin()
     {
         var root = FindRepoRoot();
@@ -89,6 +112,27 @@ internal static class TestBuildPaths
         }
 
         return root is not null ? Path.Combine(root, "models") : null;
+    }
+
+    public static string? ResolveRobotVisionDataRecipesDir()
+    {
+        var root = ResolveRobotVisionDataRoot();
+        if (root is null)
+            return null;
+        var dir = Path.Combine(root, "recipes");
+        return Directory.Exists(dir) ? dir : null;
+    }
+
+    public static string? ResolveRobotVisionDataModelsDir()
+    {
+        var root = ResolveRobotVisionDataRoot();
+        if (root is null)
+            return null;
+        var dir = Path.Combine(root, "models");
+        return Directory.Exists(dir) &&
+               Directory.EnumerateFiles(dir, "*.onnx").Any()
+            ? dir
+            : null;
     }
 
     public static string CombineWpf(params string[] relative)

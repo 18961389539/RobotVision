@@ -43,7 +43,7 @@
             </Grid>
         </ui:Card>
 
-        <!-- 方案 A：三类档�?TabControl + 卡片流（替代 DataGrid，天然深色） -->
+        <!-- 方案 A：三类档案 TabControl + 卡片流（替代 DataGrid，天然深色） -->
         <TabControl Grid.Row="1">
             <TabItem>
                 <TabItem.Header>

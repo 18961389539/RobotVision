@@ -8,7 +8,7 @@ using RobotVision.Infrastructure;
 using RobotVision.Infrastructure.Cameras;
 using RobotVision.Infrastructure.Inference;
 using RobotVision.Infrastructure.Inference.Strategies;
-using RobotVision.Vision.Inference.Strategies;
+using RobotVision.Vision;
 using RobotVision.Teach;
 using Xunit;
 using Xunit.Abstractions;
@@ -227,12 +227,21 @@ public sealed class ProductLiveAdvisorTests(ITestOutputHelper output)
         for (var i = 0; i < seg.ContourLocal.Count; i++)
             points[i] = new Point2f((float)(seg.ContourLocal[i].X + box.X), (float)(seg.ContourLocal[i].Y + box.Y));
 
-        return SegmentRefineAdvisor.Analyze(
-            roiMat, points, upright: null, seg.BitPackedMask, box.Width, box.Height,
-            recipe.Template, template, image.Width, image.Height, ox, oy,
-            instanceConfidence: seg.Confidence,
-            boxConfidence: recipe.Confidence,
-            pixelConfidence: recipe.Segmentation.PixelConfidence);
+        return SegmentRefineAdvisor.Analyze(new SegmentRefineAdvisor.TeachAnalyzeRequest(roiMat, points)
+        {
+            BitPackedMask = seg.BitPackedMask,
+            MaskWidth = box.Width,
+            MaskHeight = box.Height,
+            Template = recipe.Template,
+            TemplateImage = template,
+            FullImageWidth = image.Width,
+            FullImageHeight = image.Height,
+            OriginX = ox,
+            OriginY = oy,
+            InstanceConfidence = seg.Confidence,
+            BoxConfidence = recipe.Confidence,
+            PixelConfidence = recipe.Segmentation.PixelConfidence,
+        });
     }
 
     private static (string DeviceId, double? ExposureUs, double? Gain) ReadCamera(string path, string id)

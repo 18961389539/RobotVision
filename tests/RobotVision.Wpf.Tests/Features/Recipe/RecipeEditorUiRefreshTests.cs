@@ -17,6 +17,9 @@ public sealed class RecipeEditorUiRefreshTests
         names.Should().Contain(nameof(RecipeViewModel.ShowRoiImageViewer));
         names.Should().Contain(nameof(RecipeViewModel.VisibleRecipes));
         names.Should().Contain(nameof(RecipeViewModel.RecipeHealthHint));
+        names.Should().Contain(nameof(RecipeViewModel.EditorStationId));
+        names.Should().Contain(nameof(RecipeViewModel.EditorCameraId));
+        names.Should().Contain(nameof(RecipeViewModel.ShowBlobExpandWindow));
         names.Should().Contain(nameof(RecipeViewModel.FeatureGrabOriginHint));
         names.Should().OnlyHaveUniqueItems();
     }

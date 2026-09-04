@@ -1,0 +1,38 @@
+file,split,session,baseline_ok,notes
+20260828_153936771_Product_OK.png,teach,S1_1539,yes,early batch success
+20260828_153937914_Product_OK.png,teach,S1_1539,no,early batch refine fail
+20260828_153939015_Product_OK.png,holdout,S1_1539,no,
+20260828_153940139_Product_OK.png,teach,S1_1539,yes,
+20260828_153941260_Product_OK.png,teach,S1_1539,no,contour/angle outlier
+20260828_153942369_Product_OK.png,teach,S1_1539,yes,
+20260828_153943477_Product_OK.png,holdout,S1_1539,no,
+20260828_153944575_Product_OK.png,dev,S1_1539,yes,
+20260828_153945693_Product_OK.png,dev,S1_1539,no,
+20260828_153947060_Product_OK.png,dev,S1_1539,no,large angle error -9deg
+20260828_153948870_Product_OK.png,dev,S1_1539,no,
+20260828_154736360_Product_OK.png,teach,S2_1547,yes,
+20260828_154912214_Product_OK.png,dev,S2_1547,yes,
+20260828_155009621_Product_OK.png,teach,S2_1550,yes,
+20260828_155032453_Product_OK.png,dev,S2_1550,yes,
+20260828_155055353_Product_OK.png,dev,S2_1550,no,segmentation outlier area=85
+20260828_155104575_Product_OK.png,dev,S2_1551,no,
+20260828_155120831_Product_OK.png,teach,S2_1551,yes,
+20260828_155134721_Product_OK.png,dev,S2_1551,no,
+20260828_155951276_Product_OK.png,teach,S3_1559,no,late batch representative fail
+20260828_160028323_Product_OK.png,dev,S3_1600,no,
+20260828_160130962_Product_OK.png,dev,S3_1601,no,
+20260828_160256120_Product_OK.png,dev,S3_1602,no,
+20260828_160315766_Product_OK.png,dev,S3_1603,no,180deg flip candidate
+20260828_160411525_Product_OK.png,dev,S3_1604,no,
+20260828_160926635_Product_OK.png,holdout,S3_1609,no,180deg flip candidate
+20260828_160952833_Product_OK.png,holdout,S3_1609,no,
+20260828_161003712_Product_OK.png,holdout,S3_1610,no,
+20260828_161116390_Product_OK.png,holdout,S3_1611,no,
+20260828_161122478_Product_OK.png,holdout,S3_1611,no,
+20260828_161129468_Product_OK.png,holdout,S3_1611,no,
+20260828_161417536_Product_OK.png,holdout,S3_1614,no,
+20260828_161422128_Product_OK.png,holdout,S3_1614,no,
+20260828_161429081_Product_OK.png,holdout,S3_1614,no,
+20260828_161700040_Product_OK.png,holdout,S3_1617,no,
+20260828_161725766_Product_OK.png,holdout,S3_1617,no,
+20260828_161746958_Product_OK.png,holdout,S3_1617,no,

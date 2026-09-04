@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>配方页预览 C · 三栏编辑器</title>
+  <style>
+    :root {
+      --bg: #0b1118; --panel: #131a22; --panel-2: #1b2430; --line: #2a3544;
+      --text: #e8eef6; --muted: #8b97a8; --accent: #3d8bff; --warn: #e8a33d;
+      --ok: #3ddc97; --danger: #f97171; --image: #070b10;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 12.5px/1.4 "Segoe UI", "Microsoft YaHei", sans-serif; }
+    a { color: var(--accent); text-decoration: none; }
+    button, select, input { font: inherit; color: var(--text); }
+    button { cursor: pointer; border: 1px solid var(--line); background: var(--panel-2); border-radius: 3px; padding: 5px 9px; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.ghost { background: transparent; }
+    button.on { background: #1a3a6a; border-color: var(--accent); }
+    button.layer.on { outline: 1px solid currentColor; }
+    input, select { background: #0f1620; border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; width: 100%; }
+    .app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+    .banner { display: flex; gap: 16px; align-items: center; padding: 7px 12px; background: #111820; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+    .banner strong { color: var(--text); }
+    .cols { display: grid; grid-template-columns: 188px minmax(0, 1fr) 300px; min-height: 0; }
+    .list, .props { background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+    .list { border-right: 1px solid var(--line); }
+    .props { border-left: 1px solid var(--line); }
+    .hd { padding: 8px 10px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); }
+    .rec { padding: 7px 10px; cursor: pointer; border-left: 2px solid transparent; }
+    .rec.on { background: #1c2633; border-left-color: var(--accent); }
+    .rec .sum { color: var(--muted); font-size: 11px; }
+    .mid { display: grid; grid-template-rows: auto 1fr; min-height: 0; background: var(--image); }
+    .toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    .toolbar .sep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
+    .stage { position: relative; min-height: 0; }
+    svg { width: 100%; height: 100%; display: block; }
+    .hint { position: absolute; left: 8px; bottom: 8px; background: #0008; padding: 5px 8px; border-radius: 3px; color: #c5d0dc; }
+    .sec { border-bottom: 1px solid var(--line); }
+    .sec h4 { margin: 0; padding: 7px 10px; font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; background: #10161e; }
+    .sec .in { padding: 8px 10px; }
+    .f { margin-bottom: 7px; }
+    .f span { display: block; color: var(--muted); font-size: 10.5px; margin-bottom: 3px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .status { display: flex; gap: 16px; padding: 5px 10px; background: #0e141c; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+    .status b { color: var(--warn); font-weight: 600; }
+    .status .ok { color: var(--ok); font-weight: 600; }
+    .cursor-roi { cursor: crosshair; }
+    .cursor-pan { cursor: grab; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="banner">
+      <strong>预览 C · 三栏编辑器</strong>
+      <span>给已经熟悉字段的人：列表 | 一张图+工具模式 | 按当前角度模式过滤的属性。图层开关代替「结果 / ROI 预览」两套 Viewer。</span>
+      <span style="margin-left:auto"><a href="A-cockpit.html">A 驾驶舱</a> · <a href="B-taskflow.html">B 任务流</a></span>
+    </div>
+    <div class="cols">
+      <aside class="list">
+        <div class="hd">配方 <span><button class="ghost" id="n">+</button><button class="ghost" id="c">复制</button></span></div>
+        <div id="list"></div>
+      </aside>
+      <section class="mid">
+        <div class="toolbar">
+          <button class="on" data-tool="pan">平移</button>
+          <button data-tool="roi">检测 ROI</button>
+          <button data-tool="feat">特征框</button>
+          <button data-tool="line" id="lineTool">基准线</button>
+          <span class="sep"></span>
+          <button class="layer on" data-ly="det" style="color:#3ddc97">检测</button>
+          <button class="layer on" data-ly="feat" style="color:#e8a33d">特征</button>
+          <button class="layer on" data-ly="match" style="color:#d4b45a">匹配</button>
+          <span class="sep"></span>
+          <button id="grab">取参考帧</button>
+          <button class="primary" id="test">测试触发</button>
+          <button id="save">保存</button>
+        </div>
+        <div class="stage" id="stage">
+          <svg viewBox="0 0 640 400">
+            <rect width="640" height="400" fill="#0c1218"/>
+            <rect x="198" y="116" width="236" height="152" rx="10" fill="#3a4554" stroke="#9aa7b8" stroke-width="2"/>
+            <rect x="284" y="88" width="58" height="28" rx="4" fill="#2e3845" stroke="#c9b48a" stroke-width="2"/>
+            <g id="ly-det"><rect x="176" y="82" width="280" height="214" fill="none" stroke="#3ddc97" stroke-width="2"/></g>
+            <g id="ly-feat"><rect x="278" y="82" width="70" height="42" fill="none" stroke="#e8a33d" stroke-width="2"/></g>
+            <g id="ly-match">
+              <rect x="236" y="122" width="160" height="112" fill="none" stroke="#d4b45a" stroke-width="1.5"/>
+              <circle cx="318" cy="174" r="4" fill="#d4b45a"/>
+              <line x1="318" y1="174" x2="362" y2="148" stroke="#d4b45a" stroke-width="1.5"/>
+            </g>
+            <g id="draft"></g>
+          </svg>
+          <div class="hint" id="hint">平移 · 滚轮缩放。工具模式画在当前这张图上。</div>
+        </div>
+      </section>
+      <aside class="props">
+        <div class="hd">A01.json <span style="color:var(--warn);font-weight:400">未保存</span></div>
+        <div class="sec">
+          <h4>基本</h4>
+          <div class="in">
+            <div class="row">
+              <div class="f"><span>名称</span><input value="A01"></div>
+              <div class="f"><span>序列号</span><input value="12"></div>
+            </div>
+            <div class="f"><span>相机</span><select><option>cam_gige</option></select></div>
+            <div class="f"><span>工位</span><select><option>st1</option></select></div>
+          </div>
+        </div>
+        <div class="sec">
+          <h4>检测</h4>
+          <div class="in">
+            <div class="f"><span>角度模式</span>
+              <select id="mode">
+                <option value="mask">分割+精修</option>
+                <option value="dual">双模型连线</option>
+                <option value="blob">双 BLOB</option>
+                <option value="rect">最小外接矩形</option>
+              </select>
+            </div>
+            <div class="f" id="refineF"><span>精修方法</span>
+              <select id="refine">
+                <option value="tpl">模板匹配</option>
+                <option value="line">直线拟合</option>
+                <option value="cal">卡尺+凸起</option>
+                <option value="sift">SIFT</option>
+              </select>
+            </div>
+            <div class="f" id="m1"><span>主模型</span><select><option>housing_seg.onnx</option></select></div>
+            <div class="f" id="m2" hidden><span>次模型</span><select><option>tab_det.onnx</option></select></div>
+            <div class="row" id="thr">
+              <div class="f"><span>置信度</span><input value="0.50"></div>
+              <div class="f"><span>IoU</span><input value="0.45"></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec" id="teachSec">
+          <h4>示教</h4>
+          <div class="in">
+            <div class="f"><span>期望件数</span><input value="1"></div>
+            <div class="f"><span>匹配阈值</span><input value="0.60"></div>
+            <p style="margin:0;color:var(--muted)">186×142px · 极性仅卡尺/模板显示</p>
+            <button style="margin-top:6px">示教模板</button>
+          </div>
+        </div>
+        <div class="sec">
+          <h4>输出 / 光源</h4>
+          <div class="in">
+            <div class="f"><span>旋转补偿</span><select><option>不补偿</option><option>偏心工具</option></select></div>
+            <div class="row">
+              <div class="f"><span>ΔX</span><input value="0"></div>
+              <div class="f"><span>ΔRz</span><input value="0"></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <div class="status">
+      <span id="stDirty"><b>未保存</b></span>
+      <span>试触发 = 编辑器</span>
+      <span>PLC #12</span>
+      <span>哈希未钉</span>
+      <span id="stTool">工具：平移</span>
+      <span id="stMode">模式：分割+精修 / 模板匹配</span>
+    </div>
+  </div>
+  <script>
+    const recipes = [
+      ["A01", "分割+精修 · #12"],
+      ["B02", "最小外接矩形 · st1"],
+      ["OSDP", "卡尺+凸起 · 产线"],
+    ];
+    let cur = "A01";
+    const list = document.getElementById("list");
+    function renderList() {
+      list.innerHTML = recipes.map(([id,s]) =>
+        `<div class="rec ${id===cur?"on":""}" data-id="${id}"><b>${id}</b><div class="sum">${s}</div></div>`).join("");
+    }
+    renderList();
+    list.onclick = e => { const n = e.target.closest(".rec"); if (!n) return; cur = n.dataset.id; renderList(); };
+
+    let tool = "pan";
+    document.querySelector(".toolbar").onclick = e => {
+      const t = e.target.closest("[data-tool]");
+      const ly = e.target.closest("[data-ly]");
+      if (t) {
+        tool = t.dataset.tool;
+        document.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("on", b===t));
+        document.getElementById("stage").className = "stage " + (tool==="pan"?"cursor-pan":"cursor-roi");
+        const names = { pan:"平移", roi:"检测 ROI（画在当前图）", feat:"特征框", line:"LineFit 基准线" };
+        document.getElementById("hint").textContent = names[tool];
+        document.getElementById("stTool").textContent = "工具：" + names[tool];
+      }
+      if (ly) {
+        ly.classList.toggle("on");
+        document.getElementById("ly-"+ly.dataset.ly).style.display = ly.classList.contains("on") ? "block" : "none";
+      }
+    };
+
+    document.getElementById("mode").onchange = e => {
+      const v = e.target.value;
+      document.getElementById("m2").hidden = v !== "dual";
+      document.getElementById("refineF").hidden = v !== "mask";
+      document.getElementById("teachSec").style.display = v === "mask" ? "block" : "none";
+      document.getElementById("m1").hidden = v === "blob";
+      document.getElementById("thr").hidden = v === "blob";
+      document.getElementById("lineTool").disabled = v !== "mask";
+      const label = e.target.selectedOptions[0].text;
+      document.getElementById("stMode").textContent = "模式：" + label;
+      if (v !== "dual") document.getElementById("stDirty").innerHTML = "<b>未保存</b> · 次模型已从名单移除";
+    };
+    document.getElementById("refine").onchange = e => {
+      document.getElementById("lineTool").disabled = e.target.value !== "line";
+      if (e.target.value === "line" || e.target.value === "cal")
+        document.getElementById("stDirty").innerHTML = "<b>未保存</b> · 示教模板图已清除（当前方法不使用）";
+    };
+    document.getElementById("test").onclick = () => {
+      ["ly-det","ly-feat","ly-match"].forEach(id => document.getElementById(id).style.display = "block");
+      document.querySelectorAll("[data-ly]").forEach(b => b.classList.add("on"));
+      document.getElementById("hint").textContent = "测试完成（编辑器）· 1 件 · 金十字=匹配峰";
+    };
+    document.getElementById("save").onclick = () => {
+      document.getElementById("stDirty").innerHTML = "<span class='ok'>已保存</span>";
+    };
+  </script>
+</body>
+</html>

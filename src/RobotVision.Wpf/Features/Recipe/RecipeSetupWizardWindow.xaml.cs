@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using RobotVision.Core.Recipe;
+using RobotVision.WpfHost.Shared;
 using Wpf.Ui.Controls;
 
 namespace RobotVision.WpfHost.Features.Recipe;
@@ -33,7 +34,10 @@ public partial class RecipeSetupWizardWindow : FluentWindow, IDisposable
 
         _vm = e.NewValue as RecipeSetupWizardViewModel;
         if (_vm is not null)
+        {
             HookViewModel(_vm);
+            NumberBoxCommit.Bind(this, _vm);
+        }
         WireImageHost();
     }
 

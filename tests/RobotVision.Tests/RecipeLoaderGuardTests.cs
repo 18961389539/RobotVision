@@ -314,7 +314,7 @@ public sealed class RecipeLoaderGuardTests : IDisposable
 
         var dual = TemplateOptions.RefineRangeHintText(new TemplateOptions { RefineRangeDeg = 5 });
         Assert.Contains("±5", dual, StringComparison.Ordinal);
-        Assert.Contains("翻转支", dual, StringComparison.Ordinal);
+        Assert.Contains("180°", dual, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -334,7 +334,7 @@ public sealed class RecipeLoaderGuardTests : IDisposable
     }
 
     [Fact]
-    public void Validate_EccentricTool_WithLineFit_Throws()
+    public void Validate_EccentricTool_WithLineFit_Ok()
     {
         var recipe = new RecipeConfig
         {
@@ -346,7 +346,7 @@ public sealed class RecipeLoaderGuardTests : IDisposable
             RotationCompensation = RotationCompensationMode.EccentricTool,
             Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.LineFit },
         };
-        Assert.Throws<InvalidRecipeException>(() => RecipeLoader.Validate(recipe));
+        RecipeLoader.Validate(recipe);
     }
 
     [Fact]
@@ -383,7 +383,7 @@ public sealed class RecipeLoaderGuardTests : IDisposable
     public void HasUndirectedAngle_MinAreaRectAndLineFit()
     {
         Assert.True(RecipeLoader.HasUndirectedAngle(new RecipeConfig { AngleMode = AngleMode.MaskMinAreaRect }));
-        Assert.True(RecipeLoader.HasUndirectedAngle(new RecipeConfig
+        Assert.False(RecipeLoader.HasUndirectedAngle(new RecipeConfig
         {
             AngleMode = AngleMode.MaskTemplate,
             Template = new TemplateOptions { RefineMethod = SegmentRefineMethod.LineFit },
