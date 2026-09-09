@@ -32,9 +32,9 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.11" />
 
     <!-- 日志 -->
-    <PackageVersion Include="Serilog" Version="4.0.2" />
-    <PackageVersion Include="Serilog.Extensions.Logging" Version="8.0.0" />
-    <PackageVersion Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageVersion Include="Serilog" Version="4.4.0" />
+    <PackageVersion Include="Serilog.Extensions.Logging" Version="10.0.0" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
 
     <!-- UI -->
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.3.2" />
