@@ -76,36 +76,51 @@
                            OpenPaneLength="196">
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem Content="运行监控" TargetPageType="{x:Type monitor:MonitorPage}"
+                                       ToolTip="Alt+1"
                                        Icon="{ui:SymbolIcon Home24}" />
                 <ui:NavigationViewItem Content="相机管理" TargetPageType="{x:Type cameras:CamerasPage}"
+                                       ToolTip="Alt+2"
                                        Icon="{ui:SymbolIcon Camera24}" />
                 <ui:NavigationViewItem Content="光源管理" TargetPageType="{x:Type lightings:LightingsPage}"
+                                       ToolTip="Alt+3"
                                        Icon="{ui:SymbolIcon Lightbulb24}" />
-                <ui:NavigationViewItem Content="配方管理" TargetPageType="{x:Type recipe:RecipePage}"
-                                       Icon="{ui:SymbolIcon DocumentEdit24}" />
-                <ui:NavigationViewItem Content="模型管理" TargetPageType="{x:Type models:ModelsPage}"
-                                       Icon="{ui:SymbolIcon Cube24}" />
-                <ui:NavigationViewItem Content="标定档案" TargetPageType="{x:Type calibration:CalibrationPage}"
-                                       Icon="{ui:SymbolIcon Wrench24}" />
                 <ui:NavigationViewItem Content="标定向导" TargetPageType="{x:Type wizard:CalibrationWizardPage}"
+                                       ToolTip="Alt+4"
                                        Icon="{ui:SymbolIcon BookCompass24}" />
+                <ui:NavigationViewItem Content="标定档案" TargetPageType="{x:Type calibration:CalibrationPage}"
+                                       ToolTip="Alt+5"
+                                       Icon="{ui:SymbolIcon Wrench24}" />
+                <ui:NavigationViewItem Content="模型管理" TargetPageType="{x:Type models:ModelsPage}"
+                                       ToolTip="Alt+6"
+                                       Icon="{ui:SymbolIcon Cube24}" />
+                <ui:NavigationViewItem Content="配方管理" TargetPageType="{x:Type recipe:RecipePage}"
+                                       ToolTip="Alt+7"
+                                       Icon="{ui:SymbolIcon DocumentEdit24}" />
                 <ui:NavigationViewItem Content="失败现场" TargetPageType="{x:Type failures:FailuresPage}"
+                                       ToolTip="Alt+8"
                                        Icon="{ui:SymbolIcon ImageMultiple24}" />
                 <ui:NavigationViewItem Content="结果分析" TargetPageType="{x:Type analysis:AnalysisPage}"
+                                       ToolTip="Alt+9"
                                        Icon="{ui:SymbolIcon DataBarVertical24}" />
                 <ui:NavigationViewItem Content="通信监控" TargetPageType="{x:Type communication:CommunicationPage}"
+                                       ToolTip="Alt+0"
                                        Icon="{ui:SymbolIcon PlugConnected24}" />
                 <ui:NavigationViewItem Content="工艺助手" TargetPageType="{x:Type chat:ChatPage}"
+                                       ToolTip="Alt+Shift+1"
                                        Icon="{ui:SymbolIcon Chat24}" />
                 <ui:NavigationViewItem Content="日志浏览" TargetPageType="{x:Type logs:LogsPage}"
+                                       ToolTip="Alt+Shift+2"
                                        Icon="{ui:SymbolIcon DocumentSearch24}" />
                 <ui:NavigationViewItem Content="服务设置" TargetPageType="{x:Type settings:SettingsPage}"
+                                       ToolTip="Alt+Shift+3"
                                        Icon="{ui:SymbolIcon Options24}" />
                 <ui:NavigationViewItem Content="系统信息" TargetPageType="{x:Type sys:SystemPage}"
+                                       ToolTip="Alt+Shift+4"
                                        Icon="{ui:SymbolIcon Settings24}" />
             </ui:NavigationView.MenuItems>
             <ui:NavigationView.FooterMenuItems>
                 <ui:NavigationViewItem Content="关于" TargetPageType="{x:Type about:AboutPage}"
+                                       ToolTip="Alt+Shift+5"
                                        Icon="{ui:SymbolIcon Info24}" />
             </ui:NavigationView.FooterMenuItems>
         </ui:NavigationView>
