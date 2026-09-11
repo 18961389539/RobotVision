@@ -233,7 +233,9 @@ public class AppSettingsStoreTests : IDisposable
             ResultLogEnabled: false, ResultLogJsonl: true, ResultLogSqlite: false, ResultLogRetainedDays: 60,
             InferenceProvider: "OpenVinoCpu", InferenceMaxSessions: 4,
             FileLoggingEnabled: false, FileLoggingRetainedDays: 14,
-            ProcessHealthRetainedDays: 45));
+            ProcessHealthRetainedDays: 45,
+            FailureSaveOverlay: true,
+            CaptureSuccessSaveOverlay: true));
 
         using var doc = JsonDocument.Parse(File.ReadAllText(_file));
         var root = doc.RootElement;
@@ -247,9 +249,11 @@ public class AppSettingsStoreTests : IDisposable
         Assert.Equal(2, root.GetProperty("IpWhitelist").GetArrayLength());
         Assert.Equal("192.168.2.*", root.GetProperty("IpWhitelist")[1].GetString());
         Assert.False(root.GetProperty("FailureImage").GetProperty("Enabled").GetBoolean());
+        Assert.True(root.GetProperty("FailureImage").GetProperty("SaveOverlay").GetBoolean());
         Assert.Equal(50, root.GetProperty("FailureImage").GetProperty("RetainedCount").GetInt32());
         Assert.Equal(14, root.GetProperty("FailureImage").GetProperty("RetainedDays").GetInt32());
         Assert.True(root.GetProperty("CaptureSuccess").GetProperty("Enabled").GetBoolean());
+        Assert.True(root.GetProperty("CaptureSuccess").GetProperty("SaveOverlay").GetBoolean());
         Assert.Equal(7, root.GetProperty("CaptureSuccess").GetProperty("RetainedDays").GetInt32());
         Assert.Equal(1280, root.GetProperty("CaptureSuccess").GetProperty("MaxWidth").GetInt32());
         Assert.False(root.GetProperty("ResultLog").GetProperty("Enabled").GetBoolean());
@@ -270,9 +274,11 @@ public class AppSettingsStoreTests : IDisposable
         Assert.Equal("192.168.1.50", cfg.IpAddress);
         Assert.Equal(8888, cfg.TcpPort);
         Assert.False(cfg.FailureImage.Enabled);
+        Assert.True(cfg.FailureImage.SaveOverlay);
         Assert.Equal(50, cfg.FailureImage.RetainedCount);
         Assert.Equal(14, cfg.FailureImage.RetainedDays);
         Assert.True(cfg.CaptureSuccess.Enabled);
+        Assert.True(cfg.CaptureSuccess.SaveOverlay);
         Assert.Equal(7, cfg.CaptureSuccess.RetainedDays);
         Assert.Equal(1280, cfg.CaptureSuccess.MaxWidth);
         Assert.False(cfg.ResultLog.Enabled);

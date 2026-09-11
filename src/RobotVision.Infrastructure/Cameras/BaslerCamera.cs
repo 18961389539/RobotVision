@@ -27,7 +27,8 @@ namespace RobotVision.Infrastructure.Cameras;
 /// - 自动重连：单帧采集失败（连接中断类）后同请求内重连一次
 ///   （Close→Open→重发参数→再 GrabOne），仍失败才返回 1003；
 /// - 软件取图：连接时把 TriggerMode 置 Off、关闭 ExposureAuto/GainAuto，避免相机 UserSet
-///   残留硬触发导致 GrabOne 一直等到超时；
+///   里残留硬触发/自动曝光导致 GrabOne 超时或亮度漂移。每次取图前 CameraManager.BeforeGrab
+///   再按下发 appsettings 当前曝光/增益；
 /// - 曝光/增益兼容 SFNC 1.x（ExposureTimeAbs / GainAbs / GainRaw）与 2.x+（ExposureTime / Gain）；
 ///   ace GigE 的 Gain 节点常不可写，须走 GainAbs（dB）或 GainRaw；写前切 GainSelector 并关 GainAuto；
 /// - 连接后始终下发 2×2 全图降采样（binning，否则 decimation），减轻 GigE 全幅 underrun；

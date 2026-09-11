@@ -24,7 +24,7 @@ public sealed record FailureContext(
 /// - 1007 未检出：限流（同配方窗口内只存 1 张）+ 降采样缩图（默认宽 640）；
 /// - 其余错误（1003/1005/1099 等）：全量留存、原分辨率；
 /// - 滚动清理优先保留非 1007（先删 1007 最旧，再删非 1007 最旧），支持数量与天数双配额。
-/// 文件名 {时间戳}_{配方}_{错误码}.png；孤儿 JSON（无对应 PNG）一并清理。
+/// 文件名 {时间戳}_{配方}_{错误码}.png；绘制图为同名 _ov.png。孤儿 JSON（无对应 PNG）一并清理。
 /// 留存是尽力而为：任何 I/O 异常只记日志，绝不影响产线管线；克隆留调用线程完成，
 /// PNG 编码/元数据/清理移到后台线程池（_sync 串行），管线不阻塞。
 /// </summary>
@@ -34,7 +34,8 @@ public sealed class FailureImageStore
         string Recipe, int ErrorCode, string Message, double ElapsedMs,
         DateTime SavedAt, int Width, int Height,
         string? CameraId, string? StationId, string? Models, string? AngleMode,
-        double? Confidence, double? Iou, string? Source);
+        double? Confidence, double? Iou, string? Source,
+        bool Overlay = false);
 
     private static readonly JsonSerializerOptions MetaJsonOptions = new()
     {
@@ -63,10 +64,14 @@ public sealed class FailureImageStore
         _log = log;
         _now = clock ?? (() => DateTime.Now);
         Enabled = cfg.Enabled;
+        SaveOverlay = cfg.SaveOverlay;
     }
 
-    /// <summary>运行时开关（热属性：管理界面可切换）。</summary>
+    /// <summary>保存去畸变原图（热属性：管理界面可切换）。</summary>
     public bool Enabled { get; set; }
+
+    /// <summary>另存绘制图（热属性）。</summary>
+    public bool SaveOverlay { get; set; }
 
     /// <summary>滚动保留数量（热属性），≤0 表示不按数量清理。</summary>
     public int RetainedCount { get; set; }
@@ -92,28 +97,44 @@ public sealed class FailureImageStore
     /// <summary>最近一次留存时间（进程内）。</summary>
     public DateTime? LastSavedAt { get { lock (_sync) return _lastSaveTime; } }
 
-    public void Save(string recipeName, VisionImage image, VisionResult failure, FailureContext? context = null)
+    public void Save(
+        string recipeName,
+        VisionImage image,
+        VisionResult failure,
+        FailureContext? context = null,
+        VisionImage? overlay = null)
     {
         if (image.IsEmpty)
             return;
         using var mat = VisionImageCv.AsMat(image);
-        Save(recipeName, mat, failure, context);
+        using var overlayMat = OverlayMatOrNull(overlay);
+        Save(recipeName, mat, failure, context, overlayMat);
     }
 
     /// <summary>
     /// 提交一次失败留存（尽力而为）：克隆（或 1007 缩图）在调用线程完成并立即返回，
     /// PNG 编码/元数据/滚动清理移到后台线程池执行，绝不在管线线程同步落盘拖累产线。
     /// </summary>
-    public void Save(string recipeName, Mat image, VisionResult failure, FailureContext? context = null)
+    public void Save(
+        string recipeName,
+        Mat image,
+        VisionResult failure,
+        FailureContext? context = null,
+        Mat? overlay = null)
     {
-        if (!Enabled || failure.Ok || image.Empty())
+        if (failure.Ok || image.Empty())
+            return;
+
+        var wantOriginal = Enabled;
+        var wantOverlay = SaveOverlay && overlay is not null && !overlay.Empty();
+        if (!wantOriginal && !wantOverlay)
             return;
 
         try
         {
             var isNoTarget = failure.ErrorCode == VisionErrorCode.NoTargetFound;
 
-            // 1007 限流：同一 (配方, 1007) 在窗口内只存一张，防未检出风暴冲刷配额
+            // 1007 限流：同一 (配方, 1007) 在窗口内只存一次（原图+绘制图算同一次）
             if (isNoTarget)
             {
                 lock (_sync)
@@ -126,55 +147,46 @@ public sealed class FailureImageStore
                 }
             }
 
-            // 1007 降采样（省磁盘与内存峰值）；其余错误原分辨率克隆
-            Mat clone;
-            if (isNoTarget && MaxNoTargetWidth > 0 && image.Width > MaxNoTargetWidth)
-                clone = Downscale(image, MaxNoTargetWidth);
-            else
-                clone = image.Clone();
+            Mat? originalClone = null;
+            Mat? overlayClone = null;
+            if (wantOriginal)
+                originalClone = CloneOrDownscale(image, isNoTarget);
+            if (wantOverlay)
+                overlayClone = CloneOrDownscale(overlay!, isNoTarget);
 
+            var sample = originalClone ?? overlayClone!;
             var meta = new FailureMeta(
                 recipeName, (int)failure.ErrorCode, failure.Message, failure.ElapsedMs,
-                _now(), clone.Width, clone.Height,
+                _now(), sample.Width, sample.Height,
                 context?.CameraId, context?.StationId, context?.Models, context?.AngleMode,
                 context?.Confidence, context?.Iou, context?.Source);
 
-            // fire-and-forget：留存是尽力而为，异步异常在 WriteCore 内捕获，绝不污染产线管线
-            _ = Task.Run(() => WriteCore(clone, recipeName, failure, meta));
+            _ = Task.Run(() => WriteCore(originalClone, overlayClone, meta));
         }
         catch (Exception ex)
         {
-            // 克隆/入队阶段异常同样尽力而为
             FailureImageStoreLog.EnqueueFailed(_log, ex);
         }
     }
 
     /// <summary>后台线程实际落盘：PNG + JSON 元数据 + 统计 + 滚动清理（_sync 串行）。</summary>
-    private void WriteCore(Mat image, string recipeName, VisionResult failure, FailureMeta meta)
+    private void WriteCore(Mat? original, Mat? overlay, FailureMeta meta)
     {
         try
         {
             lock (_sync)
             {
                 Directory.CreateDirectory(_folder);
-
-                var baseName = $"{meta.SavedAt:yyyyMMdd_HHmmssfff}_{recipeName}_{meta.ErrorCode}";
-                var png = Path.Combine(_folder, baseName + ".png");
-                for (var i = 1; File.Exists(png); i++)
-                    png = Path.Combine(_folder, $"{baseName}_{i}.png");
-
-                Cv2.ImWrite(png, image);
-                var jsonPath = Path.ChangeExtension(png, ".json");
-                File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, MetaJsonOptions));
-
-                _totalSaved++;
-                _totalBytes += new FileInfo(png).Length + new FileInfo(jsonPath).Length;
-                _lastSaveTime = meta.SavedAt;
+                var baseName = $"{meta.SavedAt:yyyyMMdd_HHmmssfff}_{meta.Recipe}_{meta.ErrorCode}";
+                if (original is not null)
+                    WritePair(original, baseName, meta with { Overlay = false, Width = original.Width, Height = original.Height });
+                if (overlay is not null)
+                    WritePair(overlay, baseName + "_ov", meta with { Overlay = true, Width = overlay.Width, Height = overlay.Height });
 
                 if (RetainedCount > 0 || RetainedDays > 0)
                     Cleanup();
 
-                FailureImageStoreLog.Saved(_log, png, meta.ErrorCode, meta.Message);
+                FailureImageStoreLog.Saved(_log, baseName, meta.ErrorCode, meta.Message);
             }
         }
         catch (Exception ex)
@@ -183,9 +195,36 @@ public sealed class FailureImageStore
         }
         finally
         {
-            // 后台线程持有克隆副本的所有权，落盘后释放
-            image.Dispose();
+            original?.Dispose();
+            overlay?.Dispose();
         }
+    }
+
+    private void WritePair(Mat image, string baseName, FailureMeta meta)
+    {
+        var png = Path.Combine(_folder, baseName + ".png");
+        for (var i = 1; File.Exists(png); i++)
+            png = Path.Combine(_folder, $"{baseName}_{i}.png");
+
+        Cv2.ImWrite(png, image);
+        var jsonPath = Path.ChangeExtension(png, ".json");
+        File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, MetaJsonOptions));
+
+        _totalSaved++;
+        _totalBytes += new FileInfo(png).Length + new FileInfo(jsonPath).Length;
+        _lastSaveTime = meta.SavedAt;
+    }
+
+    private Mat CloneOrDownscale(Mat image, bool isNoTarget) =>
+        isNoTarget && MaxNoTargetWidth > 0 && image.Width > MaxNoTargetWidth
+            ? Downscale(image, MaxNoTargetWidth)
+            : image.Clone();
+
+    private static Mat? OverlayMatOrNull(VisionImage? overlay)
+    {
+        if (overlay is null || overlay.IsEmpty)
+            return null;
+        return VisionImageCv.AsMat(overlay);
     }
 
     /// <summary>
@@ -253,8 +292,12 @@ public sealed class FailureImageStore
             System.Globalization.DateTimeStyles.None, out savedAt);
     }
 
-    private static bool IsNoTargetFile(string png) =>
-        Path.GetFileName(png).EndsWith("_1007.png", StringComparison.OrdinalIgnoreCase);
+    private static bool IsNoTargetFile(string png)
+    {
+        var name = Path.GetFileName(png);
+        return name.EndsWith("_1007.png", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("_1007_ov", StringComparison.OrdinalIgnoreCase);
+    }
 
     private void TryDelete(string path)
     {

@@ -150,7 +150,10 @@ public static partial class ServiceCollectionExtensions
         {
             var log = sp.GetRequiredService<ILogger<CameraManager>>();
             var registry = sp.GetRequiredService<CameraTypeRegistry>();
-            var manager = new CameraManager(log);
+            var manager = new CameraManager(log)
+            {
+                BeforeGrab = camera => CameraExposureBeforeGrab.Apply(cfg, camera),
+            };
             foreach (var camera in cfg.Cameras)
             {
                 try
@@ -318,7 +321,8 @@ public static partial class ServiceCollectionExtensions
             sp.GetRequiredService<AssetIntegrityChecker>(),
             sp.GetRequiredService<ProcessHealthStore>(),
             sp.GetRequiredService<ResultLogStore>(),
-            sp.GetRequiredService<SuccessCaptureStore>())
+            sp.GetRequiredService<SuccessCaptureStore>(),
+            sp.GetService<ICaptureOverlayPainter>())
         {
             MaxQueueDepth = Math.Max(1, cfg.MaxQueueDepth),
             MaxConcurrent = Math.Clamp(cfg.MaxConcurrent, 1, Math.Max(1, cfg.MaxQueueDepth)),
@@ -431,6 +435,7 @@ public static partial class ServiceCollectionExtensions
 
                 var failures = sp.GetRequiredService<FailureImageStore>();
                 failures.Enabled = updated.FailureImage.Enabled;
+                failures.SaveOverlay = updated.FailureImage.SaveOverlay;
                 failures.RetainedCount = updated.FailureImage.RetainedCount;
                 failures.RetainedDays = updated.FailureImage.RetainedDays;
 

@@ -280,7 +280,9 @@
                     </ui:CardExpander.Header>
                     <StackPanel Margin="0,10,0,0">
                         <StackPanel Margin="0,0,0,8">
-                            <ui:ToggleSwitch Content="启用失败现场图像留存" IsChecked="{Binding FailureEnabled}" />
+                            <ui:ToggleSwitch Content="保存原图（去畸变现场图）" IsChecked="{Binding FailureEnabled}" />
+                            <ui:ToggleSwitch Content="保存绘制图（十字/框/ROI，文件名带 _ov）"
+                                             IsChecked="{Binding FailureSaveOverlay}" Margin="0,8,0,0" />
                         </StackPanel>
                         <StackPanel MaxWidth="480" HorizontalAlignment="Left"
                                     Visibility="{Binding ShowFailureRetention,
@@ -304,7 +306,7 @@
                         </StackPanel>
                         <ui:TextBlock FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                       TextWrapping="Wrap"
-                                      Text="仅产线 TRIGGER / 监控触发失败时存图；配方页试触发不入库；1007 限流与缩图策略见代码默认" />
+                                      Text="仅产线 TRIGGER / 监控触发失败时存图；配方页试触发不入库；绘制图与配方试触发结果图一致；1007 限流与缩图策略见代码默认" />
                     </StackPanel>
                 </ui:CardExpander>
 
@@ -319,8 +321,10 @@
                         </StackPanel>
                     </ui:CardExpander.Header>
                     <StackPanel Margin="0,10,0,0">
-                        <ui:ToggleSwitch Content="启用成功检测图像留存（默认关，高速产线慎用）"
+                        <ui:ToggleSwitch Content="保存原图（去畸变现场图，默认关，高速产线慎用）"
                                          IsChecked="{Binding CaptureSuccessEnabled}" />
+                        <ui:ToggleSwitch Content="保存绘制图（十字/框/ROI，文件名带 _ov）"
+                                         IsChecked="{Binding CaptureSuccessSaveOverlay}" Margin="0,8,0,0" />
                         <StackPanel Margin="0,8,0,0" MaxWidth="480" HorizontalAlignment="Left"
                                     Visibility="{Binding ShowCaptureSuccessFields,
                                         Converter={StaticResource BoolToVisibilityConverter}}">

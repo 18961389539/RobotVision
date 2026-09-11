@@ -51,7 +51,8 @@ public sealed class VisionService(
     AssetIntegrityChecker? assets = null,
     ProcessHealthStore? health = null,
     ResultLogStore? resultLog = null,
-    SuccessCaptureStore? captures = null)
+    SuccessCaptureStore? captures = null,
+    ICaptureOverlayPainter? overlayPainter = null)
 {
     private PipelineScheduler? _scheduler;
 
@@ -246,6 +247,8 @@ public sealed class VisionService(
         var stopwatch = Stopwatch.StartNew();
         using var processing = Scheduler.BeginExecution();
         VisionImage? undistorted = null;
+        RecipeConfig? captureRecipe = null;
+        IReadOnlyList<PixelPose> pixelPoses = [];
         double grabMs = 0, undistortMs = 0, inferenceMs = 0;
         double recipeMs = 0, lightOnMs = 0, stabilizeMs = 0;
         double gateWaitMs = 0, acquireMs = 0, convertMs = 0;
@@ -262,6 +265,7 @@ public sealed class VisionService(
             }
             else
                 recipe = recipes.Get(recipeName);
+            captureRecipe = recipe;
             failureCtx = BuildFailureContext(recipe, preview);
 
             // 停用配方（Enabled=false）拒绝触发，文件保留；试触发仍可跑编辑器以便调试停用配方
@@ -291,7 +295,7 @@ public sealed class VisionService(
 
             recipeMs = stopwatch.Elapsed.TotalMilliseconds;
 
-            // 取图前：点亮光源并等待稳定（配方未配置照明时零开销）
+            // 取图前：点亮光源并等待稳定，随后 CameraManager.BeforeGrab 按下发曝光/增益
             using var lightingScope = lighting.Apply(recipe.LightControllerId, recipe.Lighting);
             lightOnMs = stopwatch.Elapsed.TotalMilliseconds - recipeMs;
             if (lightingScope.StabilizeDelayMs > 0)
@@ -352,7 +356,7 @@ public sealed class VisionService(
                 var (seg, refine) = InferenceStageClock.Snapshot();
                 return (Poses: poses, SegmentMs: seg, RefineMs: refine);
             }, ct).ConfigureAwait(false);
-            var pixelPoses = infer.Poses;
+            pixelPoses = infer.Poses;
             segmentMs = infer.SegmentMs;
             refineMs = infer.RefineMs;
             inferenceMs = stopwatch.Elapsed.TotalMilliseconds;
@@ -386,7 +390,7 @@ public sealed class VisionService(
                     : "未检出目标";
                 var miss = VisionResult.Fail(recipeName, missCode, missMessage, missElapsed);
                 if (!preview)
-                    failureImages.Save(recipeName, undistorted, miss, failureCtx);
+                    SaveFailureCapture(recipe, undistorted, pixelPoses, miss, failureCtx);
                 VisionServiceLog.ProcessMessage(log, recipeName, missMessage, missElapsed, Stages(missElapsed));
                 return Core(miss, TryHandoffPreview(preview, recipe, ref undistorted, pixelPoses));
             }
@@ -418,7 +422,7 @@ public sealed class VisionService(
             // 成功产品现场图留存（开关 CaptureSuccess.Enabled，默认关）：
             // 克隆在调用线程完成，PNG 编码/写盘在后台线程池，不阻塞管线
             if (!preview && captures is not null)
-                captures.Save(recipeName, undistorted, robotPoses, success, failureCtx);
+                SaveSuccessCapture(recipe, undistorted, pixelPoses, robotPoses, success, failureCtx);
 
             return Core(success, TryHandoffPreview(preview, recipe, ref undistorted, pixelPoses));
         }
@@ -442,8 +446,8 @@ public sealed class VisionService(
         {
             var fail = VisionResult.Fail(recipeName, vex.ErrorCode, vex.Message,
                 stopwatch.Elapsed.TotalMilliseconds);
-            if (undistorted is not null && !preview)
-                failureImages.Save(recipeName, undistorted, fail, failureCtx);
+            if (undistorted is not null && !preview && captureRecipe is not null)
+                SaveFailureCapture(captureRecipe, undistorted, pixelPoses, fail, failureCtx);
             return Core(fail);
         }
         catch (Exception ex)
@@ -451,8 +455,8 @@ public sealed class VisionService(
             VisionServiceLog.ProcessFailed(log, ex, recipeName);
             var fail = VisionResult.Fail(recipeName, VisionErrorCode.InternalError, ex.Message,
                 stopwatch.Elapsed.TotalMilliseconds);
-            if (undistorted is not null && !preview)
-                failureImages.Save(recipeName, undistorted, fail, failureCtx);
+            if (undistorted is not null && !preview && captureRecipe is not null)
+                SaveFailureCapture(captureRecipe, undistorted, pixelPoses, fail, failureCtx);
             return Core(fail);
         }
         finally
@@ -525,6 +529,37 @@ public sealed class VisionService(
         Confidence: recipe.Confidence,
         Iou: recipe.Iou,
         Source: preview ? "recipe-preview" : "pipeline");
+
+    private void SaveFailureCapture(
+        RecipeConfig recipe,
+        VisionImage undistorted,
+        IReadOnlyList<PixelPose> poses,
+        VisionResult failure,
+        FailureContext? context)
+    {
+        using var overlay = NeedsOverlay(failureImages.SaveOverlay)
+            ? CaptureOverlayPaint.TryClone(
+                overlayPainter, undistorted, poses, RecipeDisplayHints.ForRecipeTest(recipe), log)
+            : null;
+        failureImages.Save(recipe.Name, undistorted, failure, context, overlay);
+    }
+
+    private void SaveSuccessCapture(
+        RecipeConfig recipe,
+        VisionImage undistorted,
+        IReadOnlyList<PixelPose> poses,
+        IReadOnlyList<RobotPose> robotPoses,
+        VisionResult success,
+        FailureContext? context)
+    {
+        using var overlay = NeedsOverlay(captures!.SaveOverlay)
+            ? CaptureOverlayPaint.TryClone(
+                overlayPainter, undistorted, poses, RecipeDisplayHints.ForRecipeTest(recipe), log)
+            : null;
+        captures.Save(recipe.Name, undistorted, robotPoses, success, context, overlay);
+    }
+
+    private bool NeedsOverlay(bool saveOverlay) => saveOverlay && overlayPainter is not null;
 
     private void PublishSnapshot(RecipeConfig recipe, VisionImage undistorted, IReadOnlyList<PixelPose> poses)
     {

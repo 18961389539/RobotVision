@@ -21,4 +21,7 @@ internal static partial class VisionServiceLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "FrameProcessed 订阅者处理快照异常")]
     public static partial void FrameProcessedHandlerFailed(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "绘制留存图失败（仍可保存原图）")]
+    public static partial void OverlayPaintFailed(ILogger logger, Exception ex);
 }

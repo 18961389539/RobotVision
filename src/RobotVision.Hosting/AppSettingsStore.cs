@@ -90,12 +90,14 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
 
             var failure = obj["FailureImage"] as JsonObject ?? [];
             failure["Enabled"] = values.FailureEnabled;
+            failure["SaveOverlay"] = values.FailureSaveOverlay;
             failure["RetainedCount"] = values.FailureRetainedCount;
             failure["RetainedDays"] = values.FailureRetainedDays;
             obj["FailureImage"] = failure;
 
             var capture = obj["CaptureSuccess"] as JsonObject ?? [];
             capture["Enabled"] = values.CaptureSuccessEnabled;
+            capture["SaveOverlay"] = values.CaptureSuccessSaveOverlay;
             capture["RetainedDays"] = values.CaptureSuccessRetainedDays;
             capture["MaxWidth"] = values.CaptureSuccessMaxWidth;
             obj["CaptureSuccess"] = capture;
@@ -125,9 +127,11 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         cfg.TcpPort = values.TcpPort;
         cfg.IpWhitelist = [.. values.IpWhitelist];
         cfg.FailureImage.Enabled = values.FailureEnabled;
+        cfg.FailureImage.SaveOverlay = values.FailureSaveOverlay;
         cfg.FailureImage.RetainedCount = values.FailureRetainedCount;
         cfg.FailureImage.RetainedDays = values.FailureRetainedDays;
         cfg.CaptureSuccess.Enabled = values.CaptureSuccessEnabled;
+        cfg.CaptureSuccess.SaveOverlay = values.CaptureSuccessSaveOverlay;
         cfg.CaptureSuccess.RetainedDays = values.CaptureSuccessRetainedDays;
         cfg.CaptureSuccess.MaxWidth = values.CaptureSuccessMaxWidth;
         cfg.ResultLog.Enabled = values.ResultLogEnabled;
@@ -316,4 +320,6 @@ public sealed record ServiceSettingsValues(
     bool PlcDebugAlwaysOk = false,
     double PlcDebugDefaultX = 0,
     double PlcDebugDefaultY = 0,
-    double PlcDebugDefaultRz = 0);
+    double PlcDebugDefaultRz = 0,
+    bool FailureSaveOverlay = false,
+    bool CaptureSuccessSaveOverlay = false);

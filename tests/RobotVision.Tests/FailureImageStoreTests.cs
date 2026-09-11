@@ -336,6 +336,55 @@ public class FailureImageStoreTests : IDisposable
         Assert.Contains("\"Models\": \"a.onnx|b.onnx\"", text, StringComparison.Ordinal);
         Assert.Contains("\"Source\": \"pipeline\"", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Save_OriginalAndOverlay_WritesTwoPngs()
+    {
+        var store = new FailureImageStore(
+            new FailureImageConfig { Enabled = true, SaveOverlay = true, Folder = _folder, RetainedCount = 10 },
+            NullLogger<FailureImageStore>.Instance, () => _base);
+        using var image = MakeImage();
+        using var overlay = new Mat(12, 16, MatType.CV_8UC3, Scalar.All(10));
+
+        store.Save("A01", image, MakeFailure(VisionErrorCode.InternalError, "内部错误"), overlay: overlay);
+        WaitForPngs(_folder, 2);
+
+        var names = Directory.GetFiles(_folder, "*.png").Select(Path.GetFileName).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("20260822_100000000_A01_1099.png", names);
+        Assert.Contains("20260822_100000000_A01_1099_ov.png", names);
+        Assert.Equal(2, names.Count);
+        var ovJson = File.ReadAllText(Path.Combine(_folder, "20260822_100000000_A01_1099_ov.json"));
+        Assert.Contains("\"Overlay\": true", ovJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Save_OverlayOnly_WritesOvFile()
+    {
+        var store = new FailureImageStore(
+            new FailureImageConfig { Enabled = false, SaveOverlay = true, Folder = _folder, RetainedCount = 10 },
+            NullLogger<FailureImageStore>.Instance, () => _base);
+        using var image = MakeImage();
+        using var overlay = new Mat(12, 16, MatType.CV_8UC3, Scalar.All(10));
+
+        store.Save("A01", image, MakeFailure(VisionErrorCode.InternalError, "内部错误"), overlay: overlay);
+        WaitForPngs(_folder, 1);
+
+        Assert.Equal("20260822_100000000_A01_1099_ov.png",
+            Path.GetFileName(Directory.GetFiles(_folder, "*.png").Single()));
+    }
+
+    [Fact]
+    public void Save_OverlayOnButNoOverlayImage_SkipsWhenOriginalOff()
+    {
+        var store = new FailureImageStore(
+            new FailureImageConfig { Enabled = false, SaveOverlay = true, Folder = _folder, RetainedCount = 10 },
+            NullLogger<FailureImageStore>.Instance, () => _base);
+        using var image = MakeImage();
+
+        store.Save("A01", image, MakeFailure(VisionErrorCode.InternalError, "内部错误"));
+
+        Assert.False(Directory.Exists(_folder));
+    }
 }
 
 

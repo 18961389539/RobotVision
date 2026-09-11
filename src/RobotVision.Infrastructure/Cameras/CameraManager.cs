@@ -28,6 +28,12 @@ public sealed class CameraManager : IDisposable
     private bool _disposed;
     private bool _shuttingDown;
 
+    /// <summary>
+    /// 取图前钩子：在相机 Id 门闩内、调用 <see cref="ICamera.Grab"/> 之前执行。
+    /// 用于按 appsettings 当前曝光/增益下发（相机页保存后下次取图生效，不必重连）。
+    /// </summary>
+    public Action<ICamera>? BeforeGrab { get; set; }
+
     public CameraManager(ILogger<CameraManager>? logger = null) => _logger = logger;
 
     public int Count => _cameras.Count;
@@ -175,6 +181,7 @@ public sealed class CameraManager : IDisposable
         gate.Wait(ct);
         try
         {
+            BeforeGrab?.Invoke(grabbing);
             return CameraOutput2x2.Ensure(grabbing, grab());
         }
         finally
@@ -196,7 +203,11 @@ public sealed class CameraManager : IDisposable
         {
             // WaitAsync 若同步完成会停在调用线程；从 UI 进来时必须把 pylon Grab 丢到线程池。
             sw.Restart();
-            var frame = await Task.Run(() => CameraOutput2x2.Ensure(grabbing, grab()), ct).ConfigureAwait(false);
+            var frame = await Task.Run(() =>
+            {
+                BeforeGrab?.Invoke(grabbing);
+                return CameraOutput2x2.Ensure(grabbing, grab());
+            }, ct).ConfigureAwait(false);
             return new GrabTrace(frame, waitMs, sw.Elapsed.TotalMilliseconds);
         }
         finally

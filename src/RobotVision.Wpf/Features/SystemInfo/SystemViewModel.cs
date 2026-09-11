@@ -90,7 +90,7 @@ public partial class SystemViewModel : ObservableObject, IDisposable
             _cfg.MaxQueueDepth, _cfg.MaxConcurrent,
             _cfg.TcpBacklog, _cfg.MaxConnections, string.Join(",", _cfg.IpWhitelist),
             _cfg.FileLogging.Enabled, _cfg.FileLogging.RetainedDays,
-            _failures.Enabled, _cfg.FailureImage.RetainedCount,
+            _failures.Enabled, _failures.SaveOverlay, _cfg.FailureImage.RetainedCount,
             _cfg.ResultLog.Enabled, _cfg.ResultLog.Jsonl, _cfg.ResultLog.Sqlite, _cfg.ResultLog.RetainedDays,
             _cfg.Inference.Provider, _inference.ActiveDevice, _inference.GpuUnavailable);
         if (digest == _settingsDigest)
@@ -114,8 +114,7 @@ public partial class SystemViewModel : ObservableObject, IDisposable
             : $"开启 · {_cfg.IpWhitelist.Count} 条（保存后立即生效）"));
         Settings.Add(new("文件日志", _cfg.FileLogging.Enabled
             ? $"开启 · 保留 {_cfg.FileLogging.RetainedDays} 天" : "关闭"));
-        Settings.Add(new("失败留存", _failures.Enabled
-            ? $"开启 · 保留 {_cfg.FailureImage.RetainedCount} 张" : "关闭"));
+        Settings.Add(new("失败留存", FormatFailureKeep()));
         Settings.Add(new("结果留档", FormatResultLog()));
     }
 
@@ -129,6 +128,18 @@ public partial class SystemViewModel : ObservableObject, IDisposable
         var sink = sinks.Count == 0 ? "无写入目标" : string.Join("+", sinks);
         var keep = _cfg.ResultLog.RetainedDays <= 0 ? "不清理" : $"保留 {_cfg.ResultLog.RetainedDays} 天";
         return $"开启 · {sink} · {keep}";
+    }
+
+    private string FormatFailureKeep()
+    {
+        if (!_failures.Enabled && !_failures.SaveOverlay)
+            return "关闭";
+        var kinds = new List<string>();
+        if (_failures.Enabled)
+            kinds.Add("原图");
+        if (_failures.SaveOverlay)
+            kinds.Add("绘制图");
+        return $"{string.Join("+", kinds)} · 保留 {_cfg.FailureImage.RetainedCount} 张";
     }
 
     private string FormatInference()

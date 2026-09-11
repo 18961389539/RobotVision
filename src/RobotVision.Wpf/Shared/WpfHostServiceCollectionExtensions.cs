@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using RobotVision.Hosting;
 using RobotVision.WpfHost.Features.Analysis;
 using RobotVision.WpfHost.Features.Calibration;
 using RobotVision.WpfHost.Features.CalibrationWizard;
@@ -25,7 +26,9 @@ internal static class WpfHostServiceCollectionExtensions
     {
         services.AddSingleton<IPageService, DiPageService>();
         services.AddSingleton<ShellViewModel>();
-        services.AddSingleton<IFrameOverlayPresenter, FrameOverlayPresenter>();
+        services.AddSingleton<FrameOverlayPresenter>();
+        services.AddSingleton<IFrameOverlayPresenter>(sp => sp.GetRequiredService<FrameOverlayPresenter>());
+        services.AddSingleton<ICaptureOverlayPainter>(sp => sp.GetRequiredService<FrameOverlayPresenter>());
 
         services.AddTransient<MonitorViewModel>();
         services.AddTransient<RecipeViewModel>();

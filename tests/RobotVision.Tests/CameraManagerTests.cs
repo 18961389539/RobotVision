@@ -383,4 +383,30 @@ public class CameraManagerTests
         Assert.Throws<ObjectDisposedException>(() => manager.Register(new FakeCamera("x")));
         Assert.Throws<ObjectDisposedException>(() => manager.Unregister("x"));
     }
+
+    [Fact]
+    public void Grab_InvokesBeforeGrab_ThenCameraGrab()
+    {
+        using var manager = new CameraManager();
+        var order = new List<string>();
+        var camera = new FakeCamera("cam1")
+        {
+            OnGrab = _ =>
+            {
+                order.Add("grab");
+                return new CameraFrame(VisionImage.AllocateZero(4, 4, 3), DateTime.UtcNow);
+            },
+        };
+        manager.BeforeGrab = c =>
+        {
+            Assert.Same(camera, c);
+            order.Add("before");
+        };
+        manager.Register(camera);
+
+        using var frame = manager.Grab("cam1");
+
+        Assert.Equal(["before", "grab"], order);
+        Assert.Equal(4, frame.Image.Width);
+    }
 }

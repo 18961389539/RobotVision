@@ -123,8 +123,12 @@ public partial class FailuresViewModel : ObservableObject, IDisposable
                 token);
             if (token.IsCancellationRequested)
                 return;
+            var display = Path.GetFileName(png);
+            if (display.Contains("_ov.", StringComparison.OrdinalIgnoreCase) ||
+                display.Contains("_ov_", StringComparison.OrdinalIgnoreCase))
+                display = "[绘制] " + display;
             loaded.Add(new FailureItem(
-                png, json, Path.GetFileName(png), recipe, code, meta, thumb));
+                png, json, display, recipe, code, meta, thumb));
         }
 
         _allItems.Clear();

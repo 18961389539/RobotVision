@@ -107,6 +107,10 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
     private bool _failureEnabled;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowFailureRetention))]
+    private bool _failureSaveOverlay;
+
+    [ObservableProperty]
     private int _failureRetainedCount;
 
     [ObservableProperty]
@@ -115,6 +119,10 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowCaptureSuccessFields))]
     private bool _captureSuccessEnabled;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowCaptureSuccessFields))]
+    private bool _captureSuccessSaveOverlay;
 
     [ObservableProperty]
     private int _captureSuccessRetainedDays = DefaultCaptureSuccessRetainedDays;
@@ -155,8 +163,8 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
 
     public bool ShowPoseToleranceFields => PoseCheckEnabled;
     public bool ShowProcessHealthFields => ProcessHealthEnabled;
-    public bool ShowFailureRetention => FailureEnabled;
-    public bool ShowCaptureSuccessFields => CaptureSuccessEnabled;
+    public bool ShowFailureRetention => FailureEnabled || FailureSaveOverlay;
+    public bool ShowCaptureSuccessFields => CaptureSuccessEnabled || CaptureSuccessSaveOverlay;
     public bool ShowResultLogFields => ResultLogEnabled;
     public bool ShowFileLoggingFields => FileLoggingEnabled;
 
@@ -256,9 +264,11 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         TcpBacklog = _tcp.Backlog;
         MaxConnections = _tcp.MaxConnections;
         FailureEnabled = _failures.Enabled;
+        FailureSaveOverlay = _failures.SaveOverlay;
         FailureRetainedCount = _failures.RetainedCount;
         FailureRetainedDays = _failures.RetainedDays;
         CaptureSuccessEnabled = _captures.Enabled;
+        CaptureSuccessSaveOverlay = _captures.SaveOverlay;
         CaptureSuccessRetainedDays = _captures.RetainedDays;
         CaptureSuccessMaxWidth = _captures.MaxWidth;
         ResultLogEnabled = _results.Enabled;
@@ -395,6 +405,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         _tcp.PlcDebugDefaultY = values.PlcDebugDefaultY;
         _tcp.PlcDebugDefaultRz = values.PlcDebugDefaultRz;
         _failures.Enabled = values.FailureEnabled;
+        _failures.SaveOverlay = values.FailureSaveOverlay;
         _failures.RetainedCount = values.FailureRetainedCount;
         _failures.RetainedDays = values.FailureRetainedDays;
         _results.ApplyConfig(new ResultLogConfig
@@ -408,6 +419,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         _captures.ApplyConfig(new CaptureSuccessConfig
         {
             Enabled = values.CaptureSuccessEnabled,
+            SaveOverlay = values.CaptureSuccessSaveOverlay,
             RetainedDays = values.CaptureSuccessRetainedDays,
             MaxWidth = values.CaptureSuccessMaxWidth,
             Folder = _cfg.CaptureSuccess.Folder,
@@ -430,9 +442,11 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         TcpBacklog = DefaultTcpBacklog;
         MaxConnections = DefaultMaxConnections;
         FailureEnabled = DefaultFailureEnabled;
+        FailureSaveOverlay = false;
         FailureRetainedCount = DefaultFailureRetainedCount;
         FailureRetainedDays = DefaultFailureRetainedDays;
         CaptureSuccessEnabled = DefaultCaptureSuccessEnabled;
+        CaptureSuccessSaveOverlay = false;
         CaptureSuccessRetainedDays = DefaultCaptureSuccessRetainedDays;
         CaptureSuccessMaxWidth = DefaultCaptureSuccessMaxWidth;
         ResultLogEnabled = DefaultResultLogEnabled;
@@ -529,17 +543,21 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
             FileLoggingEnabled, FileLoggingRetainedDays,
             ProcessHealthRetainedDays,
             UiTheme,
-            PlcDebugAlwaysOk, PlcDebugDefaultX, PlcDebugDefaultY, PlcDebugDefaultRz);
+            PlcDebugAlwaysOk, PlcDebugDefaultX, PlcDebugDefaultY, PlcDebugDefaultRz,
+            FailureSaveOverlay, CaptureSuccessSaveOverlay);
     }
 
     private static bool Same(ServiceSettingsValues a, ServiceSettingsValues b) =>
         a.TimeoutMs == b.TimeoutMs &&
         a.MaxQueueDepth == b.MaxQueueDepth &&
         a.MaxConcurrent == b.MaxConcurrent && a.TcpBacklog == b.TcpBacklog &&
-        a.MaxConnections == b.MaxConnections && a.FailureEnabled == b.FailureEnabled &&
+        a.MaxConnections == b.MaxConnections &&
+        a.FailureEnabled == b.FailureEnabled &&
+        a.FailureSaveOverlay == b.FailureSaveOverlay &&
         a.FailureRetainedCount == b.FailureRetainedCount &&
         a.FailureRetainedDays == b.FailureRetainedDays &&
         a.CaptureSuccessEnabled == b.CaptureSuccessEnabled &&
+        a.CaptureSuccessSaveOverlay == b.CaptureSuccessSaveOverlay &&
         a.CaptureSuccessRetainedDays == b.CaptureSuccessRetainedDays &&
         a.CaptureSuccessMaxWidth == b.CaptureSuccessMaxWidth &&
         a.ResultLogEnabled == b.ResultLogEnabled &&

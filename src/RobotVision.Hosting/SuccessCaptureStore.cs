@@ -18,7 +18,8 @@ public sealed class SuccessCaptureStore
 {
     private sealed record CaptureMeta(
         string Recipe, string T, double? X, double? Y, double? Angle, double? Confidence,
-        int Count, double ElapsedMs, string? CameraId, string? StationId, string? AngleMode);
+        int Count, double ElapsedMs, string? CameraId, string? StationId, string? AngleMode,
+        bool Overlay = false);
 
     private static readonly JsonSerializerOptions MetaJsonOptions = new() { WriteIndented = true };
 
@@ -31,12 +32,16 @@ public sealed class SuccessCaptureStore
         _folder = AppConfigExtensions.ResolveFolder(cfg.Folder);
         _log = log;
         Enabled = cfg.Enabled;
+        SaveOverlay = cfg.SaveOverlay;
         MaxWidth = cfg.MaxWidth;
         RetainedDays = cfg.RetainedDays;
     }
 
-    /// <summary>运行时开关（热属性；管理界面可切换）。</summary>
+    /// <summary>保存去畸变原图（热属性；管理界面可切换）。</summary>
     public bool Enabled { get; set; }
+
+    /// <summary>另存绘制图（热属性）。</summary>
+    public bool SaveOverlay { get; set; }
 
     /// <summary>缩图最大宽度；0 = 原图。</summary>
     public int MaxWidth { get; set; }
@@ -48,6 +53,7 @@ public sealed class SuccessCaptureStore
     public void ApplyConfig(CaptureSuccessConfig cfg)
     {
         Enabled = cfg.Enabled;
+        SaveOverlay = cfg.SaveOverlay;
         MaxWidth = cfg.MaxWidth;
         RetainedDays = cfg.RetainedDays;
     }
@@ -58,18 +64,35 @@ public sealed class SuccessCaptureStore
     /// 提交一次成功留存（尽力而为）：克隆（或缩图）在调用线程完成并立即返回，
     /// PNG 编码/元数据/清理移到后台线程池，绝不在管线线程同步落盘拖累产线。
     /// </summary>
-    public void Save(string recipeName, VisionImage image, IReadOnlyList<RobotPose> poses,
-        VisionResult result, FailureContext? context = null)
+    public void Save(
+        string recipeName,
+        VisionImage image,
+        IReadOnlyList<RobotPose> poses,
+        VisionResult result,
+        FailureContext? context = null,
+        VisionImage? overlay = null)
     {
-        if (!Enabled || image.IsEmpty)
+        if (image.IsEmpty)
+            return;
+
+        var wantOriginal = Enabled;
+        var wantOverlay = SaveOverlay && overlay is not null && !overlay.IsEmpty;
+        if (!wantOriginal && !wantOverlay)
             return;
 
         try
         {
             using var mat = VisionImageCv.AsMat(image);
-            var clone = MaxWidth > 0 && mat.Width > MaxWidth
-                ? Downscale(mat, MaxWidth)
-                : mat.Clone();
+            Mat? originalClone = null;
+            Mat? overlayClone = null;
+            if (wantOriginal)
+                originalClone = CloneOrDownscale(mat);
+            if (wantOverlay)
+            {
+                using var overlayMat = VisionImageCv.AsMat(overlay!);
+                overlayClone = CloneOrDownscale(overlayMat);
+            }
+
             var savedAt = DateTime.Now;
             var first = poses.Count > 0 ? poses[0] : null;
             var meta = new CaptureMeta(
@@ -79,7 +102,7 @@ public sealed class SuccessCaptureStore
                 poses.Count, result.ElapsedMs,
                 context?.CameraId, context?.StationId, context?.AngleMode);
 
-            _ = Task.Run(() => WriteCore(clone, recipeName, savedAt, meta));
+            _ = Task.Run(() => WriteCore(originalClone, overlayClone, recipeName, savedAt, meta));
         }
         catch (Exception ex)
         {
@@ -88,7 +111,7 @@ public sealed class SuccessCaptureStore
     }
 
     /// <summary>后台线程实际落盘：PNG + JSON 元数据（_sync 串行）+ 超期清理。</summary>
-    private void WriteCore(Mat image, string recipe, DateTime savedAt, CaptureMeta meta)
+    private void WriteCore(Mat? original, Mat? overlay, string recipe, DateTime savedAt, CaptureMeta meta)
     {
         try
         {
@@ -98,13 +121,10 @@ public sealed class SuccessCaptureStore
                 Directory.CreateDirectory(dayDir);
 
                 var baseName = $"{savedAt:yyyyMMdd_HHmmssfff}_{recipe}_OK";
-                var png = Path.Combine(dayDir, baseName + ".png");
-                for (var i = 1; File.Exists(png); i++)
-                    png = Path.Combine(dayDir, $"{baseName}_{i}.png");
-
-                Cv2.ImWrite(png, image);
-                File.WriteAllText(Path.ChangeExtension(png, ".json"),
-                    JsonSerializer.Serialize(meta, MetaJsonOptions));
+                if (original is not null)
+                    WritePair(dayDir, original, baseName, meta with { Overlay = false });
+                if (overlay is not null)
+                    WritePair(dayDir, overlay, baseName + "_ov", meta with { Overlay = true });
 
                 if (RetainedDays > 0)
                     Cleanup(DateTime.Now);
@@ -116,10 +136,24 @@ public sealed class SuccessCaptureStore
         }
         finally
         {
-            // 后台线程持有克隆副本的所有权，落盘后释放
-            image.Dispose();
+            original?.Dispose();
+            overlay?.Dispose();
         }
     }
+
+    private static void WritePair(string dayDir, Mat image, string baseName, CaptureMeta meta)
+    {
+        var png = Path.Combine(dayDir, baseName + ".png");
+        for (var i = 1; File.Exists(png); i++)
+            png = Path.Combine(dayDir, $"{baseName}_{i}.png");
+
+        Cv2.ImWrite(png, image);
+        File.WriteAllText(Path.ChangeExtension(png, ".json"),
+            JsonSerializer.Serialize(meta, MetaJsonOptions));
+    }
+
+    private Mat CloneOrDownscale(Mat mat) =>
+        MaxWidth > 0 && mat.Width > MaxWidth ? Downscale(mat, MaxWidth) : mat.Clone();
 
     /// <summary>删除超过保留天数的按天目录（目录名 yyyy-MM-dd）。</summary>
     private void Cleanup(DateTime now)

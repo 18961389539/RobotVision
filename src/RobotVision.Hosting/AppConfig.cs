@@ -120,7 +120,11 @@ public enum MonitorOverlayMode
 
 public sealed class FailureImageConfig
 {
+    /// <summary>保存去畸变原图（无十字/框）。false 且 <see cref="SaveOverlay"/> 也为 false 时不留存。</summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>另存绘制图（十字/框/ROI，与配方试触发结果图一致）；文件名带 _ov。</summary>
+    public bool SaveOverlay { get; set; }
 
     /// <summary>留存目录（相对路径按目录解析规则锚定：exe 目录优先，工作目录回退）。</summary>
     public string Folder { get; set; } = "data/failures";
@@ -231,7 +235,11 @@ public sealed class ResultLogConfig
 /// </summary>
 public sealed class CaptureSuccessConfig
 {
+    /// <summary>保存去畸变原图。默认关，避免高速节拍下磁盘暴涨。</summary>
     public bool Enabled { get; set; }
+
+    /// <summary>另存绘制图（十字/框/ROI）；文件名带 _ov。默认关。</summary>
+    public bool SaveOverlay { get; set; }
 
     public string Folder { get; set; } = "data/captures";
 
@@ -251,7 +259,7 @@ public sealed class ChatConfig
     public string Endpoint { get; set; } = "http://127.0.0.1:8080";
 
     /// <summary>请求中的 model 字段；llama-server 可填任意占位名。</summary>
-    public string Model { get; set; } = "qwen";
+    public string Model { get; set; } = "Qwen3.5-4B";
 
     public int MaxTokens { get; set; } = 512;
 
@@ -275,6 +283,9 @@ public sealed class ChatConfig
     public string GgufPath { get; set; } = "";
 
     public int Port { get; set; } = 8080;
+
+    /// <summary>工艺助手 WebView2 回环端口（assistant-ui）。0 则从 18080 起尝试。</summary>
+    public int UiPort { get; set; } = 18080;
 
     /// <summary>CPU 线程数；14700 建议 8（性能核）。</summary>
     public int Threads { get; set; } = 8;
@@ -378,10 +389,13 @@ public sealed class LightControllerConfig
     /// </summary>
     public string Type { get; set; } = "None";
 
-    /// <summary>串口控制器：串口名（如 COM3）。</summary>
+    /// <summary>串口控制器：串口名（如 COM5）。</summary>
     public string Port { get; set; } = "";
 
     public int BaudRate { get; set; } = 9600;
+
+    /// <summary>东冠数字电源通道数（2 或 4，默认 4）。熄灯时关闭 1..N 路。</summary>
+    public int ChannelCount { get; set; } = 4;
 
     /// <summary>Modbus 控制器：从站地址。</summary>
     public int Address { get; set; } = 1;

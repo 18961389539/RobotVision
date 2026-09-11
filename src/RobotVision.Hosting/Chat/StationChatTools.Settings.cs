@@ -152,5 +152,11 @@ public sealed partial class StationChatTools
         ProcessHealthEnabled: _cfg.ProcessHealth.Enabled,
         ConsecutiveFailLimit: _cfg.ProcessHealth.ConsecutiveFailLimit,
         InhibitOnLimit: _cfg.ProcessHealth.InhibitOnLimit,
-        UiTheme: _cfg.UiTheme);
+        FailureRetainedDays: _cfg.FailureImage.RetainedDays,
+        CaptureSuccessEnabled: _cfg.CaptureSuccess.Enabled,
+        CaptureSuccessRetainedDays: _cfg.CaptureSuccess.RetainedDays,
+        CaptureSuccessMaxWidth: _cfg.CaptureSuccess.MaxWidth,
+        UiTheme: _cfg.UiTheme,
+        FailureSaveOverlay: _cfg.FailureImage.SaveOverlay,
+        CaptureSuccessSaveOverlay: _cfg.CaptureSuccess.SaveOverlay);
 }
