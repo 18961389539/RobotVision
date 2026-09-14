@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Wpf.Ui.Controls;
@@ -24,8 +25,11 @@ internal static class NumberBoxCommit
 
     /// <summary>页面 Loaded 时挂上 Flush；真正离开时断开，避免单例 VM 指到已卸载页面。
     /// 窗口若已 Loaded（DataContext 后绑）则立即挂上。
-    /// Unloaded 可能是主题切换误触发：延迟清空，并在仍 Loaded 时重新挂上。</summary>
-    public static void Bind(FrameworkElement page, ICommitPendingEdits? target)
+    /// Unloaded 可能是主题切换误触发：延迟清空，并在仍 Loaded 时重新挂上。
+    /// <paramref name="flushOnFocusLoss"/> 为 true 时，页内任意 NumberBox 失焦即写回绑定源 ——
+    /// 服务设置页靠它让「N 项未保存」徽章在用户切走输入框后就立刻准确，
+    /// 而不是等点保存或离开页面（默认关闭，不影响其它页面既有行为）。</summary>
+    public static void Bind(FrameworkElement page, ICommitPendingEdits? target, bool flushOnFocusLoss = false)
     {
         if (target is null)
             return;
@@ -42,6 +46,16 @@ internal static class NumberBoxCommit
                     target.FlushPendingEdits = null;
             });
         };
+        if (flushOnFocusLoss)
+        {
+            page.AddHandler(UIElement.LostKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((_, _) =>
+            {
+                // 仅在编辑区内部换焦点时提交；离开整页交给 Unloaded 那次 Flush
+                if (page.IsLoaded)
+                    target.FlushPendingEdits?.Invoke();
+            }), handledEventsToo: true);
+        }
+
         if (page.IsLoaded)
             Attach();
     }

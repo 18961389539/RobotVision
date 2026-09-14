@@ -144,6 +144,164 @@ public class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public void Save_ValidationFailure_KeepsUserEdits_AndLocatesOffendingField()
+    {
+        var vm = CreateVm();
+        vm.TcpPort = 0;          // 非法
+        vm.MaxQueueDepth = 6;    // 同一个未保存批次里的合法改动
+
+        vm.SaveCommand.Execute(null);
+
+        // 表单保留用户输入（旧行为是 LoadFromRuntime 整屏清空，改完端口要从头再填）
+        vm.TcpPort.Should().Be(0);
+        vm.MaxQueueDepth.Should().Be(6);
+        vm.HasUnsavedChanges.Should().BeTrue();
+
+        // 错误定位到具体字段与分组
+        vm.ErrorField.Should().Be(SettingsField.TcpPort);
+        vm.ErrorGroup.Should().Be(SettingsGroup.Endpoint);
+        vm["TcpPort"].Should().BeTrue("出错字段的标签应转为红字");
+        vm["MaxQueueDepth"].Should().BeFalse();
+        vm.SelectedAnchor!.Key.Should().Be(SettingsGroup.Endpoint, "出错分组应被自动定位");
+        vm.SelectedAnchor!.HasError.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Save_SucceedsAfterFixingLocatedField()
+    {
+        var vm = CreateVm();
+        vm.TcpPort = 0;
+        vm.SaveCommand.Execute(null);
+        vm.HasError.Should().BeTrue();
+
+        vm.TcpPort = FreeTcpPort(); // 直接改掉出错项重试
+        vm.SaveCommand.Execute(null);
+
+        vm.HasError.Should().BeFalse($"字段={vm.ErrorField} 原因={vm.ErrorMessage}");
+        vm.HasUnsavedChanges.Should().BeFalse();
+        vm.Message.Should().Contain("已保存并应用");
+    }
+
+    [Fact]
+    public void Save_ResultLogEnabledWithoutSink_LocatesCheckboxes()
+    {
+        var vm = CreateVm();
+        vm.ResultLogEnabled = true;
+        vm.ResultLogJsonl = false;
+        vm.ResultLogSqlite = false;
+
+        vm.SaveCommand.Execute(null);
+
+        vm.ErrorField.Should().Be(SettingsField.ResultLogSink);
+        vm.ErrorGroup.Should().Be(SettingsGroup.ResultLog);
+        vm["ResultLogSink"].Should().BeTrue();
+    }
+
+    [Fact]
+    public void DirtySummary_TracksFieldCount_AndAnchors()
+    {
+        var vm = CreateVm();
+        vm.IsDirty.Should().BeFalse();
+        vm.DirtySummary.Should().Be("无未保存改动");
+        vm.CanDiscard.Should().BeFalse();
+
+        vm.MaxQueueDepth = 6;   // runparams
+        vm.IsDirty.Should().BeTrue();
+        vm.DirtySummary.Should().Be("1 项未保存");
+        vm.CanDiscard.Should().BeTrue();
+        vm.IsRunParamsDirty.Should().BeTrue();
+        vm.IsWhitelistDirty.Should().BeFalse();
+        vm.Anchors.Single(a => a.Key == SettingsGroup.RunParams).IsDirty.Should().BeTrue();
+
+        vm.TcpPort = FreeTcpPort();  // endpoint
+        vm.DirtySummary.Should().Be("2 项未保存");
+        vm.IsWhitelistDirty.Should().BeFalse("端口属「网络端点」组，不是「IP 白名单」");
+        vm.IsEndpointDirty.Should().BeTrue();
+    }
+
+    [Fact]
+    public void PendingRestartSummary_ShowsBeforeSaveAndPersistsAfterSave()
+    {
+        var vm = CreateVm();
+        vm.PendingRestartSummary.Should().BeEmpty();
+
+        vm.TcpBacklog = 32; // 需重启项
+        vm.PendingRestartSummary.Should().Contain("监听 backlog");
+        vm.PendingRestartSummary.Should().Contain("保存后须重启");
+
+        SetValidPort(vm);
+        vm.SaveCommand.Execute(null);
+
+        // 保存后 Message 里那句会被后续轮询冲掉，底栏留痕必须自己撑住
+        vm.PendingRestartSummary.Should().Contain("监听 backlog");
+        vm.PendingRestartSummary.Should().Contain("已保存");
+    }
+
+    [Fact]
+    public void Discard_AfterConfirm_RevertsToBaseline()
+    {
+        var vm = CreateVm();
+        vm.MaxQueueDepth = 6;
+        vm.HasUnsavedChanges.Should().BeTrue();
+
+        vm.DiscardCommand.Execute(null);
+
+        vm.MaxQueueDepth.Should().Be(_vision.MaxQueueDepth);
+        vm.HasUnsavedChanges.Should().BeFalse();
+        vm.Message.Should().Contain("放弃");
+    }
+
+    [Fact]
+    public void Discard_WhenUserDeclines_KeepsEdits()
+    {
+        var dialogs = new TestDialogService { ConfirmDiscardResult = false };
+        var vm = new SettingsViewModel(
+            _cfg, TestInfra.TcpFacade(_tcp), _vision, _failures, _results, _captures, _store,
+            dialogs, TestLog.Null<SettingsViewModel>());
+        vm.MaxQueueDepth = 6;
+
+        vm.DiscardCommand.Execute(null);
+
+        vm.MaxQueueDepth.Should().Be(6);
+        vm.HasUnsavedChanges.Should().BeTrue();
+    }
+
+    [Fact]
+    public void RestoreDefaults_WhenUserDeclines_KeepsEdits()
+    {
+        var dialogs = new TestDialogService { ConfirmYesNoResult = false };
+        var vm = new SettingsViewModel(
+            _cfg, TestInfra.TcpFacade(_tcp), _vision, _failures, _results, _captures, _store,
+            dialogs, TestLog.Null<SettingsViewModel>());
+        vm.MaxQueueDepth = 99;
+
+        vm.RestoreDefaultsCommand.Execute(null);
+
+        vm.MaxQueueDepth.Should().Be(99);
+        dialogs.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>每个校验字段都必须能映射到页面上的一个分组，否则错误提示点会静默丢失。</summary>
+    [Fact]
+    public void EverySettingsField_MapsToAKnownGroup()
+    {
+        string[] groups =
+        [
+            SettingsGroup.Appearance, SettingsGroup.RunParams, SettingsGroup.Pose,
+            SettingsGroup.PlcDebug, SettingsGroup.Retention, SettingsGroup.ResultLog,
+            SettingsGroup.FileLog, SettingsGroup.Health, SettingsGroup.Whitelist,
+            SettingsGroup.Endpoint,
+        ];
+
+        foreach (var field in SettingsField.All)
+        {
+            var group = SettingsViewModel.GroupOf(field);
+            group.Should().NotBeNull($"字段 {field} 未登记分组");
+            groups.Should().Contain(group!);
+        }
+    }
+
+    [Fact]
     public void Save_WhitelistParsesMultiLine()
     {
         var vm = CreateVm();
@@ -193,7 +351,7 @@ public class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
-    public void Save_EndpointRestartFailure_DoesNotPersistOrUpdateBaseline()
+    public void Save_EndpointRestartFailure_RollsBackRuntimeButKeepsUserInput()
     {
         var vm = CreateVm();
         vm.IpAddress = "127.0.0.1";
@@ -214,13 +372,17 @@ public class SettingsViewModelTests : IDisposable
 
             vm.Message.Should().Contain("未保存");
             vm.Message.Should().NotContain("已保存并应用");
-            vm.HasUnsavedChanges.Should().BeFalse("失败保存会回滚表单到已保存基线");
-            vm.TcpPort.Should().Be(savedPort);
+
+            // 运行时与磁盘都回滚到旧端点
             _tcp.Port.Should().Be(savedPort);
             _tcp.IsRunning.Should().BeTrue();
+            using (var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(_settingsPath)))
+                doc.RootElement.GetProperty("TcpPort").GetInt32().Should().Be(savedPort);
 
-            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(_settingsPath));
-            doc.RootElement.GetProperty("TcpPort").GetInt32().Should().Be(savedPort);
+            // 但表单保留用户填的端口（旧行为是回滚表单，用户要从头再填一遍）
+            vm.TcpPort.Should().Be(busyPort);
+            vm.HasUnsavedChanges.Should().BeTrue("仍处于未保存状态，便于直接改端口重试");
+            vm.ErrorField.Should().Be(SettingsField.TcpPort);
         }
         finally
         {

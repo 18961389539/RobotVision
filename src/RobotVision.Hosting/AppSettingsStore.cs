@@ -36,19 +36,8 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
     /// </summary>
     public IReadOnlyList<string> Save(ServiceSettingsValues values)
     {
-        Validate(values);
-
-        // 反向联动校验：总超时必须大于所有硬件相机的取图超时，
-        // 否则相机取图超时将表现为 1008（处理超时）而非 1003（取图失败），排障困难
-        var conflicts = cfg.Cameras
-            .Where(c => c.UsesGrabTimeout())
-            .Where(c => c.GrabTimeoutMs >= values.TimeoutMs)
-            .Select(c => $"{c.Id}(GrabTimeoutMs={c.GrabTimeoutMs})")
-            .ToList();
-        if (conflicts.Count > 0)
-            throw new InvalidDataException(
-                $"相机 {string.Join("、", conflicts)} 的取图超时不小于新的总超时 {values.TimeoutMs}ms，" +
-                "取图超时将表现为 1008 而非 1003，请先调大总超时或调小 GrabTimeoutMs");
+        if (TryValidate(values) is { } invalid)
+            throw new InvalidDataException(invalid.Message);
 
         // 原子读-改-写：整段"读取→变更→落盘"在 JsonAtomicWrite 同一把进程内静态锁下执行，
         // 与其他写方（CameraConfigStore/LightingConfigStore）串行化，杜绝并发保存互相覆盖
@@ -168,56 +157,92 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
     /// </summary>
     public static void Validate(ServiceSettingsValues values)
     {
+        if (TryValidateValues(values) is { } invalid)
+            throw new InvalidDataException(invalid.Message);
+    }
+
+    /// <summary>
+    /// 完整校验（值域 + 相机取图超时联动），返回首个错误；null 表示通过。
+    /// 供 UI 使用：<see cref="SettingsValidationError.Field"/> 可定位到具体输入框并自动展开所属分组，
+    /// 避免「保存失败却不知哪一项错了」。非 UI 调用方仍用 <see cref="Save"/> / <see cref="Validate"/>。
+    /// </summary>
+    public SettingsValidationError? TryValidate(ServiceSettingsValues values)
+    {
+        if (TryValidateValues(values) is { } invalid)
+            return invalid;
+
+        // 反向联动校验：总超时必须大于所有硬件相机的取图超时，
+        // 否则相机取图超时将表现为 1008（处理超时）而非 1003（取图失败），排障困难
+        var conflicts = cfg.Cameras
+            .Where(c => c.UsesGrabTimeout())
+            .Where(c => c.GrabTimeoutMs >= values.TimeoutMs)
+            .Select(c => $"{c.Id}(GrabTimeoutMs={c.GrabTimeoutMs})")
+            .ToList();
+        if (conflicts.Count > 0)
+            return new SettingsValidationError(
+                SettingsField.Timeout,
+                $"相机 {string.Join("、", conflicts)} 的取图超时不小于新的总超时 {values.TimeoutMs}ms，" +
+                "取图超时将表现为 1008 而非 1003，请先调大总超时或调小 GrabTimeoutMs");
+
+        return null;
+    }
+
+    /// <summary>值域校验（不含相机联动），返回首个错误；null 表示通过。</summary>
+    public static SettingsValidationError? TryValidateValues(ServiceSettingsValues values)
+    {
         if (values.TimeoutMs < 500)
-            throw new InvalidDataException("请求超时不能低于 500ms");
+            return new SettingsValidationError(SettingsField.Timeout, "请求超时不能低于 500ms");
         if (values.IdleTimeoutMs < 0)
-            throw new InvalidDataException("空闲超时不能为负（0 = 永久保持连接）");
+            return new SettingsValidationError(SettingsField.IdleTimeout, "空闲超时不能为负（0 = 永久保持连接）");
         if (values.IdleTimeoutMs is > 0 and < 1000)
-            throw new InvalidDataException("空闲超时若启用须 ≥1000ms（0 = 永久）");
+            return new SettingsValidationError(SettingsField.IdleTimeout, "空闲超时若启用须 ≥1000ms（0 = 永久）");
         if (values.PoseXyToleranceMm <= 0 || values.PoseRzToleranceDeg <= 0)
-            throw new InvalidDataException("PoseCheck 容差必须为正");
+            return new SettingsValidationError(SettingsField.PoseTolerance, "PoseCheck 容差必须为正");
         if (values.ConsecutiveFailLimit < 0)
-            throw new InvalidDataException("连续失败联锁次数不能为负（0 = 不联锁）");
+            return new SettingsValidationError(SettingsField.ConsecutiveFailLimit, "连续失败联锁次数不能为负（0 = 不联锁）");
         if (values.MaxQueueDepth < 1)
-            throw new InvalidDataException("队列深度至少为 1");
+            return new SettingsValidationError(SettingsField.MaxQueueDepth, "队列深度至少为 1");
         if (values.MaxConcurrent < 1 || values.MaxConcurrent > values.MaxQueueDepth)
-            throw new InvalidDataException($"并发执行上限必须在 1~队列深度({values.MaxQueueDepth}) 之间（含执行中的任务）");
+            return new SettingsValidationError(SettingsField.MaxConcurrent,
+                $"并发执行上限必须在 1~队列深度({values.MaxQueueDepth}) 之间（含执行中的任务）");
         if (values.TcpBacklog is < 1 or > 1024)
-            throw new InvalidDataException("监听 backlog 必须在 1~1024");
+            return new SettingsValidationError(SettingsField.TcpBacklog, "监听 backlog 必须在 1~1024");
         if (values.MaxConnections < 0)
-            throw new InvalidDataException("连接上限不能为负（0 = 不限）");
+            return new SettingsValidationError(SettingsField.MaxConnections, "连接上限不能为负（0 = 不限）");
         if (values.FailureRetainedCount < 0)
-            throw new InvalidDataException("失败留存数量不能为负（0 = 不自动清理）");
+            return new SettingsValidationError(SettingsField.FailureRetainedCount, "失败留存数量不能为负（0 = 不自动清理）");
         if (values.FailureRetainedDays < 0)
-            throw new InvalidDataException("失败留存天数不能为负（0 = 不按天清理）");
+            return new SettingsValidationError(SettingsField.FailureRetainedDays, "失败留存天数不能为负（0 = 不按天清理）");
         if (values.CaptureSuccessRetainedDays < 0)
-            throw new InvalidDataException("成功留存天数不能为负（0 = 不按天清理）");
+            return new SettingsValidationError(SettingsField.CaptureSuccessRetainedDays, "成功留存天数不能为负（0 = 不按天清理）");
         if (values.CaptureSuccessMaxWidth < 0)
-            throw new InvalidDataException("成功留存缩图宽度不能为负（0 = 原图）");
+            return new SettingsValidationError(SettingsField.CaptureSuccessMaxWidth, "成功留存缩图宽度不能为负（0 = 原图）");
         if (values.ResultLogRetainedDays < 0)
-            throw new InvalidDataException("结果留档天数不能为负（0 = 不清理）");
+            return new SettingsValidationError(SettingsField.ResultLogRetainedDays, "结果留档天数不能为负（0 = 不清理）");
         if (values.ResultLogEnabled && !values.ResultLogJsonl && !values.ResultLogSqlite)
-            throw new InvalidDataException("结果留档已开启时，须至少勾选 JSONL 或 SQLite 之一");
+            return new SettingsValidationError(SettingsField.ResultLogSink, "结果留档已开启时，须至少勾选 JSONL 或 SQLite 之一");
         if (!IsKnownInferenceProvider(values.InferenceProvider))
-            throw new InvalidDataException("推理 Provider 须为 OpenVinoGpu 或 OpenVinoCpu");
+            return new SettingsValidationError(SettingsField.InferenceProvider, "推理 Provider 须为 OpenVinoGpu 或 OpenVinoCpu");
         if (values.InferenceMaxSessions < 0)
-            throw new InvalidDataException("推理会话上限不能为负（0 = 不限制）");
+            return new SettingsValidationError(SettingsField.InferenceMaxSessions, "推理会话上限不能为负（0 = 不限制）");
         if (values.FileLoggingRetainedDays < 0)
-            throw new InvalidDataException("文件日志保留天数不能为负（0 = 不清理）");
+            return new SettingsValidationError(SettingsField.FileLoggingRetainedDays, "文件日志保留天数不能为负（0 = 不清理）");
         if (values.ProcessHealthRetainedDays < 0)
-            throw new InvalidDataException("过程能力指标保留天数不能为负（0 = 不按天清理）");
+            return new SettingsValidationError(SettingsField.ProcessHealthRetainedDays, "过程能力指标保留天数不能为负（0 = 不按天清理）");
         if (values.TcpPort is < 1 or > 65535)
-            throw new InvalidDataException("端口必须在 1~65535");
+            return new SettingsValidationError(SettingsField.TcpPort, "端口必须在 1~65535");
         if (!IPAddress.TryParse(values.IpAddress, out _))
-            throw new InvalidDataException($"IP 地址无效: {values.IpAddress}");
+            return new SettingsValidationError(SettingsField.IpAddress, $"IP 地址无效: {values.IpAddress}");
         foreach (var entry in values.IpWhitelist)
         {
             if (!TcpServerManager.TryParseWhitelistEntry(entry))
-                throw new InvalidDataException($"白名单条目无效: {entry}（支持精确 IP 或前缀通配如 192.168.*）");
+                return new SettingsValidationError(SettingsField.IpWhitelist,
+                    $"白名单条目无效: {entry}（支持精确 IP 或前缀通配如 192.168.*）");
         }
         if (!double.IsFinite(values.PlcDebugDefaultX) || !double.IsFinite(values.PlcDebugDefaultY) ||
             !double.IsFinite(values.PlcDebugDefaultRz))
-            throw new InvalidDataException("PLC 调试默认坐标必须为有限数字");
+            return new SettingsValidationError(SettingsField.PlcDebugCoordinates, "PLC 调试默认坐标必须为有限数字");
+        return null;
     }
 
     /// <summary>
@@ -282,6 +307,54 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             .Replace(" ", "", StringComparison.Ordinal);
         return key is "OPENVINOGPU" or "GPU" or "OPENVINO" or "OPENVINOCPU" or "CPU";
     }
+}
+
+/// <summary>
+/// 保存校验失败的结构化描述：<see cref="Field"/> 取自 <see cref="SettingsField"/>，
+/// 供 UI 定位到具体输入框并自动展开所属分组。
+/// </summary>
+public sealed record SettingsValidationError(string Field, string Message);
+
+/// <summary>
+/// 保存校验可能出错的字段标识。取值与 WPF 侧 SettingsViewModel 的属性名一致，
+/// 页面通过索引器绑定（<c>{Binding [MaxConcurrent]}</c>）把错误落到对应标签上。
+/// </summary>
+public static class SettingsField
+{
+    public const string Timeout = "RequestTimeoutMs";
+    public const string IdleTimeout = "IdleTimeoutMs";
+    public const string PoseTolerance = "PoseTolerance";
+    public const string ConsecutiveFailLimit = "ConsecutiveFailLimit";
+    public const string MaxQueueDepth = "MaxQueueDepth";
+    public const string MaxConcurrent = "MaxConcurrent";
+    public const string TcpBacklog = "TcpBacklog";
+    public const string MaxConnections = "MaxConnections";
+    public const string FailureRetainedCount = "FailureRetainedCount";
+    public const string FailureRetainedDays = "FailureRetainedDays";
+    public const string CaptureSuccessRetainedDays = "CaptureSuccessRetainedDays";
+    public const string CaptureSuccessMaxWidth = "CaptureSuccessMaxWidth";
+    public const string ResultLogRetainedDays = "ResultLogRetainedDays";
+    public const string ResultLogSink = "ResultLogSink";
+    public const string InferenceProvider = "InferenceProvider";
+    public const string InferenceMaxSessions = "InferenceMaxSessions";
+    public const string FileLoggingRetainedDays = "FileLoggingRetainedDays";
+    public const string ProcessHealthRetainedDays = "ProcessHealthRetainedDays";
+    public const string TcpPort = "TcpPort";
+    public const string IpAddress = "IpAddress";
+    public const string IpWhitelist = "IpWhitelist";
+    public const string PlcDebugCoordinates = "PlcDebugCoordinates";
+    public const string UiTheme = "UiTheme";
+    public const string FileLoggingEnabled = "FileLoggingEnabled";
+
+    /// <summary>全部字段标识（测试用：断言每个字段都能映射到页面上的一组控件）。</summary>
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Timeout, IdleTimeout, PoseTolerance, ConsecutiveFailLimit, MaxQueueDepth, MaxConcurrent,
+        TcpBacklog, MaxConnections, FailureRetainedCount, FailureRetainedDays,
+        CaptureSuccessRetainedDays, CaptureSuccessMaxWidth, ResultLogRetainedDays, ResultLogSink,
+        InferenceProvider, InferenceMaxSessions, FileLoggingRetainedDays, ProcessHealthRetainedDays,
+        TcpPort, IpAddress, IpWhitelist, PlcDebugCoordinates, UiTheme, FileLoggingEnabled,
+    ];
 }
 
 /// <summary>一次保存携带的完整参数集合（与 AppConfig 字段一一对应）。</summary>

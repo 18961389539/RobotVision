@@ -10,8 +10,12 @@ namespace RobotVision.WpfHost.Features.Settings;
 /// <summary>
 /// 服务参数管理：运行参数（超时/队列/连接上限/失败留存/白名单）保存即热生效；
 /// 并发槽位（MaxConcurrent）与 TCP backlog 修改需重启程序生效；
-/// 网络端点（IP/端口）先热重启监听，成功后再落盘（失败则回滚运行时、不写入 appsettings、UI 保持脏标记）。
+/// 网络端点（IP/端口）先热重启监听，成功后再落盘（失败则回滚运行时、不写入 appsettings）。
 /// 校验集中在 AppSettingsStore（值域 + 相机取图超时联动），本页只负责展示与交互。
+///
+/// 保存失败时**不再重载表单**：用户填的一屏内容原样保留，只把出错字段与所属分组标出来
+/// （见 SettingsViewModel.Groups.cs 的 ShowError），避免「改了端口想重试却要从头再填一遍」。
+/// 脏状态、分组锚点与「需重启」留痕同样在 Groups 分部中实现。
 /// </summary>
 public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, IDisposable
 {
@@ -251,47 +255,61 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
 
     public void LoadFromRuntime()
     {
-        RequestTimeoutMs = _cfg.TimeoutMs;
-        IdleTimeoutMs = _tcp.IdleTimeoutMs;
-        PoseCheckEnabled = _cfg.PoseCheck.Enabled;
-        PoseXyToleranceMm = _cfg.PoseCheck.XyToleranceMm;
-        PoseRzToleranceDeg = _cfg.PoseCheck.RzToleranceDeg;
-        ProcessHealthEnabled = _cfg.ProcessHealth.Enabled;
-        ConsecutiveFailLimit = _cfg.ProcessHealth.ConsecutiveFailLimit;
-        InhibitOnLimit = _cfg.ProcessHealth.InhibitOnLimit;
-        MaxQueueDepth = _vision.MaxQueueDepth;
-        MaxConcurrent = _vision.MaxConcurrent;
-        TcpBacklog = _tcp.Backlog;
-        MaxConnections = _tcp.MaxConnections;
-        FailureEnabled = _failures.Enabled;
-        FailureSaveOverlay = _failures.SaveOverlay;
-        FailureRetainedCount = _failures.RetainedCount;
-        FailureRetainedDays = _failures.RetainedDays;
-        CaptureSuccessEnabled = _captures.Enabled;
-        CaptureSuccessSaveOverlay = _captures.SaveOverlay;
-        CaptureSuccessRetainedDays = _captures.RetainedDays;
-        CaptureSuccessMaxWidth = _captures.MaxWidth;
-        ResultLogEnabled = _results.Enabled;
-        ResultLogJsonl = _results.JsonlEnabled;
-        ResultLogSqlite = _results.SqliteEnabled;
-        ResultLogRetainedDays = _results.RetainedDays;
-        InferenceProvider = string.IsNullOrWhiteSpace(_cfg.Inference.Provider)
-            ? DefaultInferenceProvider
-            : _cfg.Inference.Provider;
-        InferenceMaxSessions = _cfg.Inference.MaxSessions;
-        FileLoggingEnabled = _cfg.FileLogging.Enabled;
-        FileLoggingRetainedDays = _cfg.FileLogging.RetainedDays;
-        ProcessHealthRetainedDays = _cfg.ProcessHealth.RetainedDays;
-        IpAddress = _cfg.IpAddress;
-        TcpPort = _cfg.TcpPort;
-        UiTheme = UiThemes.Normalize(_cfg.UiTheme);
-        WhitelistText = string.Join(Environment.NewLine, _cfg.IpWhitelist);
-        PlcDebugAlwaysOk = _cfg.PlcDebug.AlwaysOk;
-        PlcDebugDefaultX = _cfg.PlcDebug.DefaultX;
-        PlcDebugDefaultY = _cfg.PlcDebug.DefaultY;
-        PlcDebugDefaultRz = _cfg.PlcDebug.DefaultRz;
-        _baseline = CurrentValues();
-        RefreshStatus();
+        _suspendRecompute = true;
+        try
+        {
+            RequestTimeoutMs = _cfg.TimeoutMs;
+            IdleTimeoutMs = _tcp.IdleTimeoutMs;
+            PoseCheckEnabled = _cfg.PoseCheck.Enabled;
+            PoseXyToleranceMm = _cfg.PoseCheck.XyToleranceMm;
+            PoseRzToleranceDeg = _cfg.PoseCheck.RzToleranceDeg;
+            ProcessHealthEnabled = _cfg.ProcessHealth.Enabled;
+            ConsecutiveFailLimit = _cfg.ProcessHealth.ConsecutiveFailLimit;
+            InhibitOnLimit = _cfg.ProcessHealth.InhibitOnLimit;
+            MaxQueueDepth = _vision.MaxQueueDepth;
+            MaxConcurrent = _vision.MaxConcurrent;
+            TcpBacklog = _tcp.Backlog;
+            MaxConnections = _tcp.MaxConnections;
+            FailureEnabled = _failures.Enabled;
+            FailureSaveOverlay = _failures.SaveOverlay;
+            FailureRetainedCount = _failures.RetainedCount;
+            FailureRetainedDays = _failures.RetainedDays;
+            CaptureSuccessEnabled = _captures.Enabled;
+            CaptureSuccessSaveOverlay = _captures.SaveOverlay;
+            CaptureSuccessRetainedDays = _captures.RetainedDays;
+            CaptureSuccessMaxWidth = _captures.MaxWidth;
+            ResultLogEnabled = _results.Enabled;
+            ResultLogJsonl = _results.JsonlEnabled;
+            ResultLogSqlite = _results.SqliteEnabled;
+            ResultLogRetainedDays = _results.RetainedDays;
+            InferenceProvider = string.IsNullOrWhiteSpace(_cfg.Inference.Provider)
+                ? DefaultInferenceProvider
+                : _cfg.Inference.Provider;
+            InferenceMaxSessions = _cfg.Inference.MaxSessions;
+            FileLoggingEnabled = _cfg.FileLogging.Enabled;
+            FileLoggingRetainedDays = _cfg.FileLogging.RetainedDays;
+            ProcessHealthRetainedDays = _cfg.ProcessHealth.RetainedDays;
+            IpAddress = _cfg.IpAddress;
+            TcpPort = _cfg.TcpPort;
+            UiTheme = UiThemes.Normalize(_cfg.UiTheme);
+            WhitelistText = string.Join(Environment.NewLine, _cfg.IpWhitelist);
+            PlcDebugAlwaysOk = _cfg.PlcDebug.AlwaysOk;
+            PlcDebugDefaultX = _cfg.PlcDebug.DefaultX;
+            PlcDebugDefaultY = _cfg.PlcDebug.DefaultY;
+            PlcDebugDefaultRz = _cfg.PlcDebug.DefaultRz;
+
+            // 表单已回到运行时值：基线重置、错误与「需重启」留痕一并清空
+            _baseline = CurrentValues();
+            ClearError();
+            _savedRestartLabels = [];
+            RefreshStatus();
+        }
+        finally
+        {
+            _suspendRecompute = false;
+        }
+
+        RecomputeDirtyState();
         OnPropertyChanged(nameof(FailureFolderPath));
         OnPropertyChanged(nameof(CaptureSuccessFolderPath));
         OnPropertyChanged(nameof(ResultLogFolderPath));
@@ -330,6 +348,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         try
         {
             this.Commit();
+            ClearError();
             var values = CurrentValues();
             var rollbackBaseline = _baseline ?? values;
 
@@ -341,7 +360,13 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
                     "PLC 调试模式"))
                 return;
 
-            AppSettingsStore.Validate(values);
+            // 校验不过时只标记出错字段并保留用户输入（不再重载表单清空整屏编辑），
+            // 用户可直接修正后重试；分组自动展开与滚动见 ShowError
+            if (_store.TryValidate(values) is { } invalid)
+            {
+                ShowError(invalid.Field, invalid.Message);
+                return;
+            }
 
             var endpointChanged = !string.Equals(rollbackBaseline.IpAddress, values.IpAddress, StringComparison.OrdinalIgnoreCase)
                 || rollbackBaseline.TcpPort != values.TcpPort;
@@ -349,14 +374,17 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
                                 values.TcpBacklog != rollbackBaseline.TcpBacklog;
             var restartForConfig = NeedsProgramRestart(rollbackBaseline, values);
             var endpointText = $"{values.IpAddress}:{values.TcpPort}";
+            var restartLabels = CurrentRestartLabels();
+            var hadChanges = _dirtyFields.Count > 0;
 
             ApplyHotRuntime(values);
 
             if (endpointChanged && !_tcp.Restart(values.IpAddress, values.TcpPort))
             {
+                // 运行时回滚到旧监听，但表单保留用户填的端点，便于改端口后直接重试
                 ApplyHotRuntime(rollbackBaseline);
-                LoadFromRuntime();
-                Message = $"监听 {endpointText} 启动失败，未保存（当前仍监听 {_tcp.ListenEndPoint}，请检查端口占用）";
+                ShowError(SettingsField.TcpPort,
+                    $"监听 {endpointText} 启动失败，未保存（当前仍监听 {_tcp.ListenEndPoint}，请检查端口占用）");
                 return;
             }
 
@@ -372,6 +400,13 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
                 throw;
             }
 
+            // 保存成功：把待重启项转为底栏常驻留痕（Message 里的那一次会被后续轮询/操作冲掉）。
+            // 无改动的重复点击不清空留痕，避免「保存过重启项后又点一下保存」把提醒弄丢。
+            if (restartLabels.Count > 0)
+                _savedRestartLabels = restartLabels;
+            else if (hadChanges)
+                _savedRestartLabels = [];
+
             if (endpointChanged)
             {
                 Message = $"已保存并应用；监听已热重启到 {endpointText}（客户端将短暂断开）"
@@ -384,11 +419,12 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
 
             _baseline = CurrentValues();
             RefreshStatus();
+            RecomputeDirtyState();
         }
         catch (Exception ex)
         {
-            LoadFromRuntime();
-            Message = $"保存失败: {ex.Message}";
+            // 落盘/IO 类失败：保留用户输入与已回滚的运行时状态，只提示原因
+            ShowError("", ex.Message);
         }
     }
 
@@ -429,6 +465,14 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
     [RelayCommand]
     private void RestoreDefaults()
     {
+        // 一键清空全部编辑（含监听 IP/端口、白名单、主题），必须二次确认：
+        // 之前它与「重新载入」并列在服务状态卡里，误点即丢失整屏编辑
+        if (!_dialogs.ConfirmYesNo(
+                "将把本页所有参数填回出厂默认值（含监听 IP/端口、IP 白名单、界面主题），" +
+                "并丢弃当前未保存的编辑。\n\n填入后仍需点「保存并应用」才会真正生效。继续？",
+                "恢复出厂默认值"))
+            return;
+
         RequestTimeoutMs = AppConfig.DefaultRequestTimeoutMs;
         IdleTimeoutMs = DefaultIdleTimeoutMs;
         PoseCheckEnabled = true;
@@ -466,11 +510,32 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         PlcDebugDefaultX = 0;
         PlcDebugDefaultY = 0;
         PlcDebugDefaultRz = 0;
+        ClearError();
+        _savedRestartLabels = [];
         Message = "已填入出厂默认值，点击「保存并应用」生效";
     }
 
+    /// <summary>放弃未保存的修改，回到上一次载入/保存的状态。</summary>
     [RelayCommand]
-    private void Reload() => LoadFromRuntime();
+    private void Discard()
+    {
+        if (!HasUnsavedChanges)
+            return;
+        if (!_dialogs.ConfirmDiscard(
+                "将丢弃本页所有未保存的修改，回到上一次载入或保存的状态。继续？",
+                "放弃改动"))
+            return;
+
+        LoadFromRuntime();
+        Message = "已放弃未保存的修改";
+    }
+
+    [RelayCommand]
+    private void Reload()
+    {
+        LoadFromRuntime();
+        Message = "已重新载入运行时参数";
+    }
 
     [RelayCommand]
     private void SetIdleNever() => IdleTimeoutMs = 0;
@@ -522,12 +587,16 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         return "";
     }
 
-    private ServiceSettingsValues CurrentValues()
-    {
-        var whitelist = WhitelistText
+    /// <summary>白名单文本框 → 条目列表（去空行、去首尾空白）。脏状态比对与保存共用同一口径。</summary>
+    private List<string> WhitelistEntries() =>
+        WhitelistText
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(l => l.Length > 0)
             .ToList();
+
+    private ServiceSettingsValues CurrentValues()
+    {
+        var whitelist = WhitelistEntries();
         return new ServiceSettingsValues(
             (int)Math.Round(RequestTimeoutMs),
             MaxQueueDepth, MaxConcurrent, TcpBacklog, MaxConnections,
