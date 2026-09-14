@@ -430,6 +430,18 @@ public partial class App : Application, IDisposable
             host.UpdateLayout();
             System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
                 () => { }, System.Windows.Threading.DispatcherPriority.SystemIdle);
+
+            // ui:CardExpander 的展开由动画驱动：只 pump 一次 SystemIdle 时内容停在动画中间态，
+            // 此时量到的高度不够，首行说明文字会被裁掉（甚至整块不显示），快照看起来像布局坏了。
+            // 留足时间让动画跑完再测量，否则快照会给出错误的布局结论。
+            var expandDeadline = Environment.TickCount64 + 600;
+            while (Environment.TickCount64 < expandDeadline)
+            {
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                    () => { }, System.Windows.Threading.DispatcherPriority.Background);
+                Thread.Sleep(20);
+            }
+
             if (instance.DataContext is AnalysisViewModel analysis)
             {
                 analysis.ScheduleRefresh();
