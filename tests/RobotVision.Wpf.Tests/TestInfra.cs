@@ -40,12 +40,31 @@ public static class TestInfra
                 return;
 
             var ready = new ManualResetEventSlim(false);
+            Exception? startupError = null;
             _uiThread = new Thread(() =>
             {
-                var app = new App();
-                app.InitializeComponent();
-                ready.Set();
-                Dispatcher.Run();
+                try
+                {
+                    var app = new App();
+                    app.InitializeComponent();
+
+                    // 必须改成显式关闭：App.xaml 是 ShutdownMode="OnMainWindowClose"，而多个测试
+                    // （如 PanelTitleThemeTests）会 new Window{...}.Show()/.Close() 来取样式。
+                    // WPF 会把第一个创建的 Window 当作 MainWindow，它一关就触发 Application 关闭：
+                    // Application.Current 随之变 null，之后任何 EnsureWpfApp 都会去再建一个 App，
+                    // 而「同一 AppDomain 只能有一个 Application」→ new App() 在后台线程抛异常 →
+                    // 未处理异常直接干掉测试进程（现象是随机的「测试运行已中止」，崩溃点每次不同）。
+                    app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+                    ready.Set();
+                    Dispatcher.Run();
+                }
+                catch (Exception ex)
+                {
+                    // 交给调用线程重新抛出：否则这里的异常只会打死进程，测试报告里什么都看不到
+                    startupError = ex;
+                    ready.Set();
+                }
             })
             {
                 IsBackground = true,
@@ -54,6 +73,9 @@ public static class TestInfra
             _uiThread.SetApartmentState(ApartmentState.STA);
             _uiThread.Start();
             ready.Wait();
+
+            if (startupError is not null)
+                ExceptionDispatchInfo.Capture(startupError).Throw();
         }
     }
 
