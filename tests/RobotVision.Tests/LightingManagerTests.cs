@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
@@ -38,6 +39,9 @@ public class LightingManagerTests
 
         public bool ApplySucceeds { get; set; } = true;
 
+        /// <summary>false = 模拟"串口没打开/协议不对"的发送失败。用于验证熄灯不再被静默吞掉。</summary>
+        public bool TurnOffSucceeds { get; set; } = true;
+
         public bool Apply(LightingConfig lighting)
         {
             ApplyCount++;
@@ -45,13 +49,56 @@ public class LightingManagerTests
             return ApplySucceeds;
         }
 
-        public void SendRaw(string command)
+        public bool SendRaw(string command)
         {
+            return true;
         }
 
-        public void TurnOff() => TurnOffCount++;
+        public bool TurnOff()
+        {
+            TurnOffCount++;
+            return TurnOffSucceeds;
+        }
 
         public void Dispose() => DisposedCount++;
+    }
+
+    /// <summary>带传输层诊断信息的假控制器：验证失败原因会被带进异常消息。</summary>
+    private sealed class DiagnosticLight(string id) : ILightController, ILightDiagnostics
+    {
+        public string Id { get; } = id;
+
+        public LightControllerKind Kind => LightControllerKind.Virtual;
+
+        public string? LastTransportError { get; set; } = "COM5: UnauthorizedAccessException: 拒绝访问";
+
+        public bool Apply(LightingConfig lighting) => false;
+
+        public bool TurnOff() => false;
+
+        public bool SendRaw(string command)
+        {
+            return true;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    /// <summary>自包含的日志捕获 sink：断言"否则完全静默"的路径确实留了痕。</summary>
+    private sealed class CapturingLogger : ILogger<LightingManager>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     private static LightingConfig SampleLighting(int brightness = 128) => new()
@@ -119,6 +166,30 @@ public class LightingManagerTests
     }
 
     [Fact]
+    public void Apply_TwoChannels_PassesBothToController()
+    {
+        var manager = new LightingManager();
+        var light = new FakeLight("dongguan");
+        manager.Register(light);
+
+        var lighting = new LightingConfig
+        {
+            Channels =
+            [
+                new LightingChannelConfig { Channel = 1, Brightness = 180 },
+                new LightingChannelConfig { Channel = 2, Brightness = 90 },
+            ],
+        };
+
+        using var scope = manager.Apply("dongguan", lighting);
+        Assert.Equal(2, light.LastConfig?.Channels.Count);
+        Assert.Equal(1, light.LastConfig!.Channels[0].Channel);
+        Assert.Equal(180, light.LastConfig.Channels[0].Brightness);
+        Assert.Equal(2, light.LastConfig.Channels[1].Channel);
+        Assert.Equal(90, light.LastConfig.Channels[1].Brightness);
+    }
+
+    [Fact]
     public void Apply_RegisteredController_AppliesAndScopeDisposeTurnsOff()
     {
         var manager = new LightingManager();
@@ -151,6 +222,52 @@ public class LightingManagerTests
 
         using var scope = manager.Apply("l1", lighting);
         Assert.Equal(0, light.TurnOffCount);
+    }
+
+    [Fact]
+    public void SuppressAutoTurnOff_TurnOffAfterGrabTrue_DisposeKeepsLightOn()
+    {
+        var manager = new LightingManager { SuppressAutoTurnOff = true };
+        var light = new FakeLight("l1");
+        manager.Register(light);
+
+        // 配方照常要求熄灯（TurnOffAfterGrab 默认 true），但被临时调试开关屏蔽
+        using (var scope = manager.Apply("l1", SampleLighting()))
+            Assert.Equal(1, light.ApplyCount);
+
+        Assert.Equal(0, light.TurnOffCount);
+    }
+
+    [Fact]
+    public void SuppressAutoTurnOff_ManualTurnOffStillWorks()
+    {
+        var manager = new LightingManager { SuppressAutoTurnOff = true };
+        var light = new FakeLight("l1");
+        manager.Register(light);
+
+        using (manager.Apply("l1", SampleLighting()))
+        {
+        }
+
+        // 只屏蔽自动熄灯；光源页手动「熄灯」必须照常生效，否则调试时关不掉灯
+        manager.TurnOff("l1");
+        Assert.Equal(1, light.TurnOffCount);
+    }
+
+    [Fact]
+    public void SuppressAutoTurnOffFalse_DefaultBehaviourTurnsOff()
+    {
+        var manager = new LightingManager();
+        Assert.False(manager.SuppressAutoTurnOff);
+
+        var light = new FakeLight("l1");
+        manager.Register(light);
+
+        using (manager.Apply("l1", SampleLighting()))
+        {
+        }
+
+        Assert.Equal(1, light.TurnOffCount);
     }
 
     [Fact]
@@ -291,6 +408,100 @@ public class LightingManagerTests
 
         manager.TurnOff("l1");
         Assert.Equal(1, light.TurnOffCount);
+    }
+
+    /// <summary>
+    /// 熄灯指令发送失败必须抛 1020，不得静默成功。
+    /// 2026-09-14 实况：TurnOff 曾忽略 SendFrame 的返回值，串口压根没打开时 UI 照样显示"已熄灯"，
+    /// 而开灯会如实抛错 —— 现场就表现为"能关灯、不能开灯"，把排查方向完全带偏。
+    /// </summary>
+    [Fact]
+    public void TurnOff_SendFailed_ThrowsLightCommandFailed_NotSilentSuccess()
+    {
+        var manager = new LightingManager();
+        var light = new FakeLight("l1") { TurnOffSucceeds = false };
+        manager.Register(light);
+
+        var ex = Assert.Throws<VisionException>(() => manager.TurnOff("l1"));
+
+        Assert.Equal(VisionErrorCode.LightCommandFailed, ex.ErrorCode);
+        Assert.Equal(1, light.TurnOffCount); // 确实尝试过发指令，只是失败
+    }
+
+    /// <summary>熄灯失败的异常消息必须带上传输层原因，便于现场判断是没插线还是被占用。</summary>
+    [Fact]
+    public void TurnOff_SendFailed_MessageCarriesTransportCause()
+    {
+        var manager = new LightingManager();
+        manager.Register(new DiagnosticLight("l1"));
+
+        var ex = Assert.Throws<VisionException>(() => manager.TurnOff("l1"));
+
+        Assert.Contains("COM5", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("拒绝访问", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>开灯失败的异常消息同样带传输层原因。</summary>
+    [Fact]
+    public void TurnOn_SendFailed_MessageCarriesTransportCause()
+    {
+        var manager = new LightingManager();
+        manager.Register(new DiagnosticLight("l1"));
+
+        var ex = Assert.Throws<VisionException>(() => manager.TurnOn("l1", 1, 128));
+
+        Assert.Contains("COM5", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>取图收尾的自动熄灯仍是"尽力而为"：失败不得中断取图流程。</summary>
+    [Fact]
+    public void TurnOffWhileHoldingGate_SendFailed_IsSwallowed()
+    {
+        var manager = new LightingManager();
+        var light = new FakeLight("l1") { TurnOffSucceeds = false };
+        manager.Register(light);
+
+        manager.TurnOffWhileHoldingGate("l1"); // 不抛
+
+        Assert.Equal(1, light.TurnOffCount);
+    }
+
+    /// <summary>
+    /// 自动熄灯失败必须留痕。这条路径不出现在任何 UI 上，若静默，
+    /// 现场只会看到"灯一直亮着"而查无实据（2026-09-14 排查光源时正是吃这个亏）。
+    /// </summary>
+    [Fact]
+    public void TurnOffWhileHoldingGate_Rejected_LogsWarningWithoutThrowing()
+    {
+        var logger = new CapturingLogger();
+        var manager = new LightingManager(logger);
+        manager.Register(new DiagnosticLight("l1"));   // TurnOff 恒返回 false，且带传输层原因
+
+        manager.TurnOffWhileHoldingGate("l1");         // 不抛
+
+        Assert.Contains(logger.Entries, e =>
+            e.Level == LogLevel.Warning
+            && e.Message.Contains("Auto turn-off after grab was rejected", StringComparison.Ordinal));
+        Assert.Contains(logger.Entries, e => e.Message.Contains("COM5", StringComparison.Ordinal));
+    }
+
+    /// <summary>未 Dispose 的作用域会一直持锁，Dispose 必须有界返回，否则进程退不掉。</summary>
+    [Fact]
+    public void Dispose_WhileScopeStillHoldsGate_ReturnsInsteadOfHanging()
+    {
+        var logger = new CapturingLogger();
+        var manager = new LightingManager(logger);
+        manager.Register(new FakeLight("l1"));
+        _ = manager.Apply("l1", SampleLighting());   // 故意不 Dispose：门闩一直被持有
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        manager.Dispose();
+        sw.Stop();
+
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"Dispose 疑似挂死：{sw.Elapsed}");
+        Assert.Contains(logger.Entries, e =>
+            e.Level == LogLevel.Warning
+            && e.Message.Contains("gate drain timed out", StringComparison.Ordinal));
     }
 
     [Fact]

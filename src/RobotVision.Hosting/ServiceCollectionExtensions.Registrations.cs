@@ -89,6 +89,8 @@ public static partial class ServiceCollectionExtensions
             sp.GetRequiredService<ChatToolAuditStore>(),
             sp.GetRequiredService<ChatConfig>()));
         services.AddSingleton<ChatAgent>();
+        services.AddSingleton<ChatUiHost>();
+        services.AddHostedService(sp => sp.GetRequiredService<ChatUiHost>());
     }
 
     private static void RegisterConfigStores(IServiceCollection services, AppConfig cfg)
@@ -219,6 +221,27 @@ public static partial class ServiceCollectionExtensions
             cfg.Inference.MaxSessions));
     }
 
+    /// <summary>
+    /// 【临时调试开关】true = 屏蔽取图后的自动熄灯，灯在取图结束后保持点亮，用于现场排查光源/亮度问题。
+    /// <para>
+    /// 默认 false：Debug 与 Release 构建行为一致，均按配方 <c>TurnOffAfterGrab</c> 正常熄灯——
+    /// Debug 若默认屏蔽会让开发者误以为熄灯功能失效，Release 若屏蔽则光源长期通电发热、缩短寿命。
+    /// 需要临时排查时用环境变量开启（见 <see cref="ResolveKeepLightOn"/>），排障结束置 0 恢复。
+    /// </para>
+    /// 环境变量 <c>ROBOTVISION_KEEP_LIGHT_ON=1</c> / <c>=0</c> 可覆盖本常量（两种构建都生效），
+    /// 无需重编译；仅 <c>1</c>/<c>true</c>（忽略大小写）视为开。
+    /// </summary>
+    private const bool KeepLightOnAfterGrab = false;
+
+    /// <summary>环境变量优先、否则用常量；仅 1/true（忽略大小写）视为开。internal 供测试覆盖真值表。</summary>
+    internal static bool ResolveKeepLightOn()
+    {
+        var raw = Environment.GetEnvironmentVariable("ROBOTVISION_KEEP_LIGHT_ON");
+        if (string.IsNullOrWhiteSpace(raw))
+            return KeepLightOnAfterGrab;
+        return raw is "1" || raw.Equals("true", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>光源控制器：None 为虚拟实现；真实控制器注册进 <see cref="LightControllerTypeRegistry"/> 后自动创建。</summary>
     private static void RegisterLighting(IServiceCollection services, AppConfig cfg)
     {
@@ -226,7 +249,12 @@ public static partial class ServiceCollectionExtensions
         {
             var log = sp.GetRequiredService<ILogger<LightingManager>>();
             var registry = sp.GetRequiredService<LightControllerTypeRegistry>();
-            var manager = new LightingManager();
+            var manager = new LightingManager(log);
+            if (ResolveKeepLightOn())
+            {
+                manager.SuppressAutoTurnOff = true;
+                ServiceCollectionExtensionsLog.LightAutoTurnOffSuppressed(log);
+            }
             foreach (var light in cfg.LightControllers)
             {
                 try

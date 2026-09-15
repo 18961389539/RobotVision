@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Web.WebView2.Wpf;
 
 namespace RobotVision.WpfHost.Shared;
@@ -28,6 +29,8 @@ public sealed class HtmlPreviewService : IHtmlPreviewService
                 WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20)),
                 Content = view,
+                Icon = BitmapFrame.Create(
+                    new Uri("pack://application:,,,/Assets/app.ico", UriKind.Absolute)),
             };
             // 丢弃 Task 而非 async void：异常在 InitializePreviewAsync 内部全捕获，
             // 不会直冲同步上下文导致进程崩溃，也不会变成不可观察的静默失败。

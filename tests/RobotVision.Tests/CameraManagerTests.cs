@@ -292,6 +292,16 @@ public class CameraManagerTests
     }
 
     [Fact]
+    public void PrepareForShutdown_DisposesCameras()
+    {
+        using var manager = new CameraManager();
+        var camera = new FakeCamera("cam1");
+        manager.Register(camera);
+        manager.PrepareForShutdown(TimeSpan.FromSeconds(1));
+        camera.DisposedCount.Should().Be(1);
+    }
+
+    [Fact]
     public void Dispose_WithStuckGrab_DoesNotBlockIndefinitely()
     {
         var manager = new CameraManager();

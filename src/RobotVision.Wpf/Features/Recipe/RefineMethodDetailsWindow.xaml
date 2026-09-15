@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="精修参数"
+        Icon="pack://application:,,,/Assets/app.ico"
         Width="620" Height="720"
         MinWidth="520" MinHeight="520"
         WindowStartupLocation="CenterOwner"
@@ -11,7 +12,11 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
     </Window.Resources>
     <DockPanel>
-        <ui:TitleBar DockPanel.Dock="Top" Title="{Binding MethodTitle}" />
+        <ui:TitleBar DockPanel.Dock="Top" Title="{Binding MethodTitle}">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="pack://application:,,,/Assets/app.png" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
 
         <Border DockPanel.Dock="Bottom"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"

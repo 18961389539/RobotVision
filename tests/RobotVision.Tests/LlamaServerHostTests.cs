@@ -6,7 +6,7 @@ namespace RobotVision.Tests;
 
 public sealed class LlamaServerHostTests
 {
-    private const string SampleGgufName = "Qwen3.5-4B-Q4_K_M.gguf";
+    private const string SampleGgufName = LlamaServerHost.DefaultGgufFileName;
 
     [Fact]
     public void BuildArguments_PinsCpuAndDisablesThinking()
@@ -59,5 +59,12 @@ public sealed class LlamaServerHostTests
     {
         var cfg = new ChatConfig { GgufPath = @"Z:\does-not-exist\no.gguf" };
         Assert.Null(LlamaServerHost.ResolveGguf(cfg));
+    }
+
+    [Fact]
+    public void DefaultGguf_IsQwen35_4B_Q4KM()
+    {
+        Assert.Equal("Qwen3.5-4B-Q4_K_M.gguf", LlamaServerHost.DefaultGgufFileName);
+        Assert.Contains("unsloth/Qwen3.5-4B-GGUF", LlamaServerHost.DefaultGgufSource, StringComparison.Ordinal);
     }
 }

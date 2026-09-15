@@ -33,8 +33,8 @@ public enum ShutdownOutcome
 }
 
 /// <summary>
-/// 有序关闭：相机排水 → TCP/聊天进程 → Host.StopAsync →（仅成功时）Host.Dispose。
-/// 超时后不再同步 Dispose，避免 UI 线程被卡死相机驱动拖住。
+/// 有序关闭：相机排水并立刻 Close 设备 → TCP/聊天进程 → Host.StopAsync →（仅成功时）Host.Dispose。
+/// 超时后不再同步 Dispose，避免 UI 线程被卡死相机驱动拖住；设备句柄已在排水阶段释放。
 /// </summary>
 public static class ApplicationShutdownCoordinator
 {

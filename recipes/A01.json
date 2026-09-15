@@ -13,10 +13,14 @@
     "indexB": 1,
     "minConfidence": 0.3
   }
-  // 光源（可选，缺省不亮灯）：取图前点亮 1 号通道 200 亮度，稳定 10ms 后取图
-  // "lightControllerId": "light_none",
+  // 光源（可选，缺省不亮灯）：东冠双通道，取图前两路一起点亮
+  // "lightControllerId": "dongguan",
   // "lighting": {
-  //   "channels": [ { "channel": 1, "brightness": 200 } ],
-  //   "stabilizeDelayMs": 10
+  //   "channels": [
+  //     { "channel": 1, "brightness": 180 },
+  //     { "channel": 2, "brightness": 180 }
+  //   ],
+  //   "stabilizeDelayMs": 20,
+  //   "turnOffAfterGrab": true
   // }
 }

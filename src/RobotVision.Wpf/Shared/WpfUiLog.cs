@@ -16,6 +16,22 @@ internal static partial class WpfUiLog
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to add lighting controller {Id}")]
     public static partial void LightingAddFailed(ILogger logger, Exception ex, string id);
 
+    // 手动开灯/熄灯失败：此前只写进页面 Message，用户一离开光源页就再无痕迹。
+    // 灯不亮/关不掉是现场最常见的报障，必须留档（含 ILightDiagnostics 给出的串口原因）。
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to turn ON lighting {Id} (channel {Channel}, brightness {Brightness})")]
+    public static partial void LightingTurnOnFailed(ILogger logger, Exception ex, string id, int channel, int brightness);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to turn OFF lighting {Id}")]
+    public static partial void LightingTurnOffFailed(ILogger logger, Exception ex, string id);
+
+    // 协议调试框：曾无脑显示「已发送」，而串口没打开时其实一帧没出去 ——
+    // 排障时最不能骗人的一步（2026-09-14 排查光源时被它带偏过）。
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to send raw command to lighting {Id}: {Command}")]
+    public static partial void LightingSendRawFailed(ILogger logger, string id, string command);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to send raw command to lighting {Id}: {Command}")]
+    public static partial void LightingSendRawFailed(ILogger logger, Exception ex, string id, string command);
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Monitor snapshot overlay failed for recipe {Recipe}")]
     public static partial void MonitorSnapshotOverlayFailed(ILogger logger, Exception ex, string recipe);
 

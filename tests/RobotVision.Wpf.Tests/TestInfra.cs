@@ -39,6 +39,11 @@ public static class TestInfra
             if (Application.Current is not null)
                 return;
 
+            // 告诉 App.OnStartup 这是测试宿主：只需资源字典与主题，跳过单实例互斥 / 主窗口 / TCP。
+            // 不设这个变量，本机若正运行着应用，App 会弹模态「已在运行中」框无人点击而永久阻塞
+            // （实测：应用在跑时全量 Wpf 测试 13 分钟零输出）。也顺带避免测试去抢 TCP 9999。
+            Environment.SetEnvironmentVariable("ROBOTVISION_TEST_HOST", "1");
+
             var ready = new ManualResetEventSlim(false);
             Exception? startupError = null;
             _uiThread = new Thread(() =>

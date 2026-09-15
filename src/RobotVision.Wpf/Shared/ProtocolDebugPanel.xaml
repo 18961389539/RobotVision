@@ -12,7 +12,7 @@
             <ui:TextBlock Text="协议调试（发送原始指令）" FontTypography="BodyStrong"
                           Margin="0,0,0,6" />
             <TextBox Text="{Binding DebugCommand, UpdateSourceTrigger=PropertyChanged}"
-                     ToolTip="输入原始指令，支持 \r \n \t 转义（如 SET 1 128\r\n）"
+                     ToolTip="十六进制帧（如 00 12 64 FF FF）或 ASCII；支持 \r \n \t 转义"
                      Margin="0,0,0,6" />
             <Grid>
                 <Grid.ColumnDefinitions>

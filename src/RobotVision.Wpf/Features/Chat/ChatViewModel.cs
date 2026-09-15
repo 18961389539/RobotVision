@@ -58,7 +58,7 @@ public sealed partial class ChatBubble : ObservableObject
     }
 }
 
-/// <summary>本机 CPU 对话页：只连接 llama-server，不加载 9GB 权重。</summary>
+/// <summary>本机 CPU 对话页：只连接 llama-server，不加载完整精度权重。</summary>
 public partial class ChatViewModel : ObservableObject, IDisposable
 {
     public const string TitleText = "站内工艺助手";
@@ -74,12 +74,36 @@ public partial class ChatViewModel : ObservableObject, IDisposable
     private readonly ChatConfig _cfg;
     private readonly IHtmlPreviewService _htmlPreview;
     private readonly ChatAgent? _agent;
+    private readonly ChatUiHost? _uiHost;
     private readonly ILogger<ChatViewModel> _log;
     private CancellationTokenSource? _sendCts;
 
     public ObservableCollection<ChatBubble> Messages { get; } = [];
 
     public string EndpointText => OpenAiChatClient.NormalizeEndpoint(_cfg.Endpoint);
+
+    public string ChatUiUrl => _uiHost is { IsListening: true } host ? host.StartUrl : "";
+
+    public string ChatUiToken => _uiHost is { IsListening: true } host ? host.Token : "";
+
+    public string ChatUiOrigin => _uiHost is { IsListening: true } host ? host.Origin : "";
+
+    public bool HasChatUi => ChatUiUrl.Length > 0;
+
+    public event Action? UiReset;
+
+    public async Task EnsureChatUiAsync()
+    {
+        if (_uiHost is null || _uiHost.IsListening)
+            return;
+        await _uiHost.StartAsync(CancellationToken.None);
+        OnPropertyChanged(nameof(HasChatUi));
+        OnPropertyChanged(nameof(ChatUiUrl));
+        OnPropertyChanged(nameof(ChatUiOrigin));
+        OnPropertyChanged(nameof(ChatUiToken));
+        if (!_uiHost.IsListening && !string.IsNullOrEmpty(_uiHost.LastError))
+            Status = _uiHost.LastError;
+    }
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
@@ -101,13 +125,15 @@ public partial class ChatViewModel : ObservableObject, IDisposable
         ChatConfig cfg,
         IHtmlPreviewService htmlPreview,
         ILogger<ChatViewModel> log,
-        ChatAgent? agent = null)
+        ChatAgent? agent = null,
+        ChatUiHost? uiHost = null)
     {
         _client = client;
         _cfg = cfg;
         _htmlPreview = htmlPreview;
         _log = log;
         _agent = agent;
+        _uiHost = uiHost;
     }
 
     public void ScheduleProbe() => UiFireAndForget.Run(ProbeAsync, _log);
@@ -265,6 +291,7 @@ public partial class ChatViewModel : ObservableObject, IDisposable
             Stop();
         Messages.Clear();
         Status = IsReady ? ReadyStatus : Status;
+        UiReset?.Invoke();
     }
 
     /// <summary>在独立窗口中用 WebView2 预览模型回复里的 HTML。内容为模型生成，

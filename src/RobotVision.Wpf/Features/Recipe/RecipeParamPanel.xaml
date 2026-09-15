@@ -203,24 +203,27 @@
                                                       IsEditable="True" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,8">
-                                            <TextBlock Text="通道（≥1）" Margin="0,0,0,4" FontSize="11" />
-                                            <ui:NumberBox Value="{Binding Lighting.LightChannel}"
-                                                          Minimum="1" Maximum="64" SmallChange="1"
-                                                          SpinButtonPlacementMode="Compact" />
-                                        </StackPanel>
-                                        <StackPanel Margin="0,0,8,8">
-                                            <TextBlock Text="亮度(0-255)" Margin="0,0,0,4" FontSize="11" />
-                                            <ui:NumberBox Value="{Binding Lighting.LightBrightness}"
-                                                          Minimum="0" Maximum="255" SmallChange="5"
-                                                          SpinButtonPlacementMode="Compact" />
-                                        </StackPanel>
-                                        <StackPanel Margin="0,0,0,8">
                                             <TextBlock Text="稳定延时(ms)" Margin="0,0,0,4" FontSize="11" />
                                             <ui:NumberBox Value="{Binding Lighting.LightStabilizeDelayMs}"
                                                           Minimum="0" Maximum="10000" SmallChange="5"
                                                           SpinButtonPlacementMode="Compact" />
                                         </StackPanel>
+                                        <StackPanel Margin="0,0,8,8">
+                                            <TextBlock Text="通道1 亮度(0-255)" Margin="0,0,0,4" FontSize="11" />
+                                            <ui:NumberBox Value="{Binding Lighting.LightBrightness1}"
+                                                          Minimum="0" Maximum="255" SmallChange="5"
+                                                          SpinButtonPlacementMode="Compact" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,8">
+                                            <TextBlock Text="通道2 亮度(0-255)" Margin="0,0,0,4" FontSize="11" />
+                                            <ui:NumberBox Value="{Binding Lighting.LightBrightness2}"
+                                                          Minimum="0" Maximum="255" SmallChange="5"
+                                                          SpinButtonPlacementMode="Compact" />
+                                        </StackPanel>
                                     </UniformGrid>
+                                    <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                               Text="两路对应东冠 CH1/CH2；亮度 0 表示该路不亮。TRIGGER / 试触发会按两路一起下发。" />
                                     <CheckBox Content="取图完成后熄灯（常亮场景可取消）" FontSize="11"
                                               IsChecked="{Binding Lighting.LightTurnOffAfterGrab}" />
                                 </StackPanel>

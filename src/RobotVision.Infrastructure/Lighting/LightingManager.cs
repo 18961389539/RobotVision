@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using RobotVision.Core;
 using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
@@ -14,11 +15,37 @@ public sealed class LightingManager : IDisposable
 {
     private readonly ConcurrentDictionary<string, ILightController> _controllers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ILogger<LightingManager>? _logger;
     private bool _disposed;
+
+    /// <summary>
+    /// 可选日志。只用于两个"否则完全静默"的路径：取图后自动熄灯失败、关闭时门闩排空超时。
+    /// 传 null 完全可用（测试大量直接 <c>new LightingManager()</c>），不传则这两条路径只静默跳过。
+    /// </summary>
+    public LightingManager(ILogger<LightingManager>? logger = null) => _logger = logger;
+
+    /// <summary>
+    /// 关闭时等待在途 Apply/TurnOff 结束的最长时间，超时即放弃等待继续关闭。
+    /// <para>
+    /// 不能无限等：未 Dispose 的 <see cref="LightingScope"/> 会一直持有门闩，无界等待会让**进程退不掉**。
+    /// 与 <c>CameraManager.DefaultGateDrainTimeout</c> 对齐——相机侧已踩过这个坑并这样修好了。
+    /// </para>
+    /// </summary>
+    public static TimeSpan DefaultGateDrainTimeout { get; } = TimeSpan.FromSeconds(3);
 
     public int Count => _controllers.Count;
 
     public IReadOnlyCollection<string> ControllerIds => _controllers.Keys.ToArray();
+
+    /// <summary>
+    /// 临时调试开关：true 时屏蔽取图后的**自动**熄灯——<see cref="TurnOffWhileHoldingGate"/>
+    /// 变成空操作，灯在取图结束后保持点亮，直到显式 <see cref="TurnOff"/> 或进程退出。
+    /// 默认 false（产线行为：按配方 <c>TurnOffAfterGrab</c> 熄灯）。
+    /// 由宿主按环境变量 <c>ROBOTVISION_KEEP_LIGHT_ON</c> 置位，见 ServiceCollectionExtensions.RegisterLighting。
+    /// 只影响自动熄灯：手动 <see cref="TurnOff"/> 照常生效，下一次 <see cref="Apply"/> 照常改写亮度。
+    /// 关闭时不影响取图链路本身——<c>LightingScope.Dispose</c> 幂等，仅熄灯动作被跳过。
+    /// </summary>
+    public bool SuppressAutoTurnOff { get; set; }
 
     public void Register(ILightController controller)
     {
@@ -92,7 +119,7 @@ public sealed class LightingManager : IDisposable
             {
                 throw new VisionException(
                     VisionErrorCode.LightCommandFailed,
-                    $"光源 {controllerId} 指令发送失败");
+                    $"光源 {controllerId} 指令发送失败{TransportCause(controller)}");
             }
 
             return new LightingScope(this, controllerId, gate, lighting.StabilizeDelayMs, lighting.TurnOffAfterGrab);
@@ -125,7 +152,7 @@ public sealed class LightingManager : IDisposable
             {
                 throw new VisionException(
                     VisionErrorCode.LightCommandFailed,
-                    $"光源 {id} 指令发送失败");
+                    $"光源 {id} 指令发送失败{TransportCause(controller)}");
             }
         }
         finally
@@ -134,7 +161,9 @@ public sealed class LightingManager : IDisposable
         }
     }
 
-    /// <summary>手动熄灯（UI 调试调光）。控制器未注册时抛 1006。</summary>
+    /// <summary>
+    /// 手动熄灯（UI 调试调光）。控制器未注册时抛 1006；指令发送失败抛 1020（不再静默成功）。
+    /// </summary>
     public void TurnOff(string id)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -142,7 +171,13 @@ public sealed class LightingManager : IDisposable
         gate.Wait();
         try
         {
-            Get(id).TurnOff();
+            var controller = Get(id);
+            if (!controller.TurnOff())
+            {
+                throw new VisionException(
+                    VisionErrorCode.LightCommandFailed,
+                    $"光源 {id} 熄灯指令发送失败{TransportCause(controller)}");
+            }
         }
         finally
         {
@@ -150,35 +185,61 @@ public sealed class LightingManager : IDisposable
         }
     }
 
-    /// <summary>取图结束后熄灯（调用方已持有该 Id 门闩）。控制器已下线则跳过，不抛 1006。</summary>
+    /// <summary>
+    /// 取图结束后熄灯（调用方已持有该 Id 门闩）。控制器已下线则跳过，不抛 1006。
+    /// <see cref="SuppressAutoTurnOff"/> 为 true 时整体跳过（临时调试开关，灯保持点亮）。
+    /// <para>
+    /// **失败一律不上抛**（取图收尾不能被熄灯失败打断），但**必须留痕**：
+    /// 这条路径不出现在任何 UI 上，若静默，现场只会看到"灯一直亮着"而查无实据
+    /// （2026-09-14 排查光源时就吃过"故障看不见"的亏）。日志需注入 logger 才生效。
+    /// </para>
+    /// </summary>
     internal void TurnOffWhileHoldingGate(string id)
     {
         if (_disposed)
             return;
-        if (_controllers.TryGetValue(id, out var controller))
+        if (SuppressAutoTurnOff)
+            return;
+        if (!_controllers.TryGetValue(id, out var controller))
+            return;
+
+        try
         {
-            try { controller.TurnOff(); }
-            catch (VisionException) { /* 熄灯尽力而为，不让取图收尾失败 */ }
+            if (controller.TurnOff())
+                return;
+
+            if (_logger is not null)
+                LightingManagerLog.AutoTurnOffRejected(_logger, id, TransportCause(controller));
+        }
+        catch (VisionException ex)
+        {
+            if (_logger is not null)
+                LightingManagerLog.AutoTurnOffThrew(_logger, ex, id);
         }
     }
 
     private SemaphoreSlim Gate(string id) =>
         _gates.GetOrAdd(id, static _ => new SemaphoreSlim(1, 1));
 
+    /// <summary>
+    /// 把控制器的传输层失败原因附到消息上（仅当它实现了 <see cref="ILightDiagnostics"/>）。
+    /// 串口光源未打开/被占用时，只报「指令发送失败」现场无法判断原因，故带上具体异常。
+    /// </summary>
+    private static string TransportCause(ILightController controller) =>
+        controller is ILightDiagnostics { LastTransportError: { Length: > 0 } error }
+            ? $"（{error}）"
+            : "";
+
     public void Dispose()
     {
         if (_disposed)
             return;
 
+        // 先置 _disposed 再排空：所有入口都有 ObjectDisposedException.ThrowIf(_disposed)，
+        // 因此排空期间不会再有新操作来抢门闩，剩下的只是等在途者结束。
         _disposed = true;
 
-        var gateIds = _gates.Keys.ToArray();
-        Array.Sort(gateIds, StringComparer.OrdinalIgnoreCase);
-        foreach (var id in gateIds)
-        {
-            if (_gates.TryGetValue(id, out var gate))
-                gate.Wait();
-        }
+        DrainGates(DefaultGateDrainTimeout);
 
         try
         {
@@ -194,8 +255,8 @@ public sealed class LightingManager : IDisposable
                 catch (ObjectDisposedException)
                 {
                     // 关闭路径上另一线程恰好完成 Dispose 的竞态：门闩已释放，忽略即可
-                    System.Diagnostics.Trace.TraceWarning(
-                        "LightingManager: 门闩释放与 Dispose 竞态（预期，忽略）");
+                    if (_logger is not null)
+                        LightingManagerLog.GateReleaseRacedWithDispose(_logger);
                 }
             }
 
@@ -203,6 +264,35 @@ public sealed class LightingManager : IDisposable
                 gate.Dispose();
             _gates.Clear();
         }
+    }
+
+    /// <summary>在 <paramref name="timeout"/> 内逐个等在途者释放门闩；超时则记录并继续（不放任进程退不掉）。</summary>
+    private void DrainGates(TimeSpan timeout)
+    {
+        var gateIds = _gates.Keys.ToArray();
+        if (gateIds.Length == 0)
+            return;
+
+        Array.Sort(gateIds, StringComparer.OrdinalIgnoreCase);
+        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+        foreach (var id in gateIds)
+        {
+            var remainingMs = deadline - Environment.TickCount64;
+            if (remainingMs <= 0)
+            {
+                LogGateDrainTimedOut(id);
+                continue;
+            }
+
+            if (_gates.TryGetValue(id, out var gate) && !gate.Wait(TimeSpan.FromMilliseconds(remainingMs)))
+                LogGateDrainTimedOut(id);
+        }
+    }
+
+    private void LogGateDrainTimedOut(string id)
+    {
+        if (_logger is not null)
+            LightingManagerLog.GateDrainTimedOut(_logger, id);
     }
 }
 

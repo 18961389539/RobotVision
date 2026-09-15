@@ -9,6 +9,12 @@ namespace RobotVision.Hosting.Chat;
 /// <summary>按需启动本机 llama-server（CPU），退出时关掉我们拉起的进程。</summary>
 public sealed class LlamaServerHost : IHostedService, IDisposable
 {
+    /// <summary>默认权重：Qwen3.5-4B 的 Q4_K_M（约 2.6GB，CPU 可用）。</summary>
+    internal const string DefaultGgufFileName = "Qwen3.5-4B-Q4_K_M.gguf";
+
+    internal const string DefaultGgufSource =
+        "https://www.modelscope.cn/models/unsloth/Qwen3.5-4B-GGUF";
+
     private readonly ChatConfig _cfg;
     private readonly OpenAiChatClient _client;
     private readonly ILogger<LlamaServerHost>? _log;
@@ -61,7 +67,8 @@ public sealed class LlamaServerHost : IHostedService, IDisposable
             var exe = ResolveLlamaServer(_cfg)
                 ?? throw Fail($"找不到 llama-server.exe（当前配置 {_cfg.LlamaServerPath}）。请把 CPU 版解压到该路径。");
             var gguf = ResolveGguf(_cfg)
-                ?? throw Fail($"找不到 GGUF（当前配置 {_cfg.GgufPath}）。请先下载 Qwen3.5-4B Q4_K_M 到该路径。");
+                ?? throw Fail(
+                    $"找不到 GGUF（当前配置 {_cfg.GgufPath}）。请从 {DefaultGgufSource} 下载 {DefaultGgufFileName}。");
 
             StartProcess(exe, gguf);
             await WaitUntilHealthyAsync(cancellationToken).ConfigureAwait(false);
@@ -248,14 +255,14 @@ public sealed class LlamaServerHost : IHostedService, IDisposable
         if (!string.IsNullOrWhiteSpace(env))
             yield return env;
 
-        yield return Path.Combine(AppContext.BaseDirectory, "Qwen3.5-4B-Q4_K_M.gguf");
+        yield return Path.Combine(AppContext.BaseDirectory, DefaultGgufFileName);
 
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrEmpty(localAppData))
             yield break;
 
         var llmDir = Path.Combine(localAppData, "RobotVision", "llm");
-        yield return Path.Combine(llmDir, "Qwen3.5-4B-Q4_K_M.gguf");
+        yield return Path.Combine(llmDir, DefaultGgufFileName);
 
         // 用户数据目录下可能放了其它 Q4 GGUF，按文件名排序取第一个，避免依赖具体模型版本
         if (!Directory.Exists(llmDir))

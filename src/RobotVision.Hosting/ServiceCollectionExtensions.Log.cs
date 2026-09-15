@@ -78,4 +78,8 @@ internal static partial class ServiceCollectionExtensionsLog
 
     [LoggerMessage(EventId = 5019, Level = LogLevel.Warning, Message = "{Warning}")]
     public static partial void BootWarning(ILogger logger, string warning);
+
+    [LoggerMessage(EventId = 5020, Level = LogLevel.Warning,
+        Message = "取图后自动熄灯已被临时屏蔽（ROBOTVISION_KEEP_LIGHT_ON=1）——光源将在取图后保持点亮，请记得改回")]
+    public static partial void LightAutoTurnOffSuppressed(ILogger logger);
 }

@@ -19,13 +19,16 @@ public sealed class NoopLightController(string id) : ILightController
         return true;
     }
 
-    public void TurnOff()
+    public bool TurnOff()
     {
+        // 无操作：无硬件可关，视为成功（与 Apply 对称）
+        return true;
     }
 
-    public void SendRaw(string command)
+    public bool SendRaw(string command)
     {
-        // 无操作：无硬件可发送
+        // 无操作：无硬件可发送，视为成功（与 Apply/TurnOff 对称）
+        return true;
     }
 
     public void Dispose()

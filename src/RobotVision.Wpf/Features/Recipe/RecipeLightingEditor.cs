@@ -5,7 +5,7 @@ using RobotVision.Hosting;
 
 namespace RobotVision.WpfHost.Features.Recipe;
 
-/// <summary>配方光源扁平编辑字段，直接写 <see cref="RecipeConfig.Lighting"/>。</summary>
+/// <summary>配方光源编辑：一台双通道控制器上的 CH1/CH2 亮度，直接写 <see cref="RecipeConfig.Lighting"/>。</summary>
 public sealed class RecipeLightingEditor : ObservableObject
 {
     private readonly IRecipeWorkspace _host;
@@ -29,14 +29,14 @@ public sealed class RecipeLightingEditor : ObservableObject
             if (value)
             {
                 Editor.Lighting ??= NewLightingConfig();
-                Editor.LightControllerId ??= _lighting.ControllerIds.FirstOrDefault();
+                Editor.LightControllerId ??= PreferredControllerId();
             }
             else
             {
                 Editor.Lighting = null;
                 Editor.LightControllerId = null;
             }
-            OnPropertyChanged();
+            NotifyFromEditor();
             _host.NotifyDirty();
         }
     }
@@ -52,32 +52,16 @@ public sealed class RecipeLightingEditor : ObservableObject
         }
     }
 
-    public int LightChannel
+    public int LightBrightness1
     {
-        get => Editor.Lighting?.Channels.FirstOrDefault()?.Channel ?? 1;
-        set
-        {
-            if (Editor.Lighting is { } l)
-            {
-                Channel0(l).Channel = Math.Max(1, value);
-                OnPropertyChanged();
-                _host.NotifyDirty();
-            }
-        }
+        get => BrightnessOf(1);
+        set => SetBrightness(1, value);
     }
 
-    public int LightBrightness
+    public int LightBrightness2
     {
-        get => Editor.Lighting?.Channels.FirstOrDefault()?.Brightness ?? 128;
-        set
-        {
-            if (Editor.Lighting is { } l)
-            {
-                Channel0(l).Brightness = Math.Clamp(value, 0, 255);
-                OnPropertyChanged();
-                _host.NotifyDirty();
-            }
-        }
+        get => BrightnessOf(2);
+        set => SetBrightness(2, value);
     }
 
     public int LightStabilizeDelayMs
@@ -112,25 +96,53 @@ public sealed class RecipeLightingEditor : ObservableObject
     {
         OnPropertyChanged(nameof(UseLighting));
         OnPropertyChanged(nameof(SelectedLightControllerId));
-        OnPropertyChanged(nameof(LightChannel));
-        OnPropertyChanged(nameof(LightBrightness));
+        OnPropertyChanged(nameof(LightBrightness1));
+        OnPropertyChanged(nameof(LightBrightness2));
         OnPropertyChanged(nameof(LightStabilizeDelayMs));
         OnPropertyChanged(nameof(LightTurnOffAfterGrab));
     }
 
     public void RefreshControllerIds() => OnPropertyChanged(nameof(LightControllerIds));
 
-    private static LightingConfig NewLightingConfig() => new()
+    internal static LightingConfig NewLightingConfig() => new()
     {
-        Channels = [new LightingChannelConfig { Channel = 1, Brightness = 128 }],
-        StabilizeDelayMs = 0,
+        Channels =
+        [
+            new LightingChannelConfig { Channel = 1, Brightness = 128 },
+            new LightingChannelConfig { Channel = 2, Brightness = 128 },
+        ],
+        StabilizeDelayMs = 20,
         TurnOffAfterGrab = true,
     };
 
-    private static LightingChannelConfig Channel0(LightingConfig lighting)
+    private string? PreferredControllerId() =>
+        _lighting.ControllerIds.FirstOrDefault(id =>
+            string.Equals(id, "dongguan", StringComparison.OrdinalIgnoreCase))
+        ?? _lighting.ControllerIds.FirstOrDefault();
+
+    private int BrightnessOf(int channel)
     {
-        if (lighting.Channels.Count == 0)
-            lighting.Channels.Add(new LightingChannelConfig());
-        return lighting.Channels[0];
+        var hit = Editor.Lighting?.Channels.FirstOrDefault(c => c.Channel == channel);
+        return hit?.Brightness ?? 0;
+    }
+
+    private void SetBrightness(int channel, int brightness)
+    {
+        if (Editor.Lighting is not { } lighting)
+            return;
+        var value = Math.Clamp(brightness, 0, 255);
+        var hit = lighting.Channels.FirstOrDefault(c => c.Channel == channel);
+        if (hit is null)
+        {
+            lighting.Channels.Add(new LightingChannelConfig { Channel = channel, Brightness = value });
+            lighting.Channels.Sort((a, b) => a.Channel.CompareTo(b.Channel));
+        }
+        else
+        {
+            hit.Brightness = value;
+        }
+
+        OnPropertyChanged(channel == 1 ? nameof(LightBrightness1) : nameof(LightBrightness2));
+        _host.NotifyDirty();
     }
 }

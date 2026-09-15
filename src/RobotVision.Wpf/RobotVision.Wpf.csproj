@@ -6,6 +6,7 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -36,6 +37,12 @@
     <None Include="..\..\recipes\OSDP.json" CopyToOutputDirectory="PreserveNewest" Link="recipes\OSDP.json" />
     <None Include="..\..\data\calibration\**\*" CopyToOutputDirectory="PreserveNewest" Link="data\calibration\%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\data\replay\**\*" CopyToOutputDirectory="PreserveNewest" Link="data\replay\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\RobotVision.ChatUi\dist\**\*" CopyToOutputDirectory="PreserveNewest" Link="chat-ui\%(RecursiveDir)%(Filename)%(Extension)" Condition="Exists('..\RobotVision.ChatUi\dist\index.html')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app.png" />
   </ItemGroup>
 
 </Project>

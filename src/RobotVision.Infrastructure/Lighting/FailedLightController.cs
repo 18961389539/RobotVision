@@ -23,10 +23,12 @@ public sealed class FailedLightController(string id, string message) : ILightCon
         throw new VisionException(VisionErrorCode.LightNotRegistered, _message);
     }
 
-    public void TurnOff() =>
+    /// <summary>永远失败——占位光源绝不能"静默成功"，否则配方会以为灯关了。</summary>
+    public bool TurnOff() =>
         throw new VisionException(VisionErrorCode.LightNotRegistered, _message);
 
-    public void SendRaw(string command) =>
+    /// <summary>永远失败——占位光源绝不能"静默成功"，否则调试框会谎报已发送。</summary>
+    public bool SendRaw(string command) =>
         throw new VisionException(VisionErrorCode.LightNotRegistered, _message);
 
     public void Dispose()

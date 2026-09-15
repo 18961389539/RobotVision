@@ -90,18 +90,19 @@ public sealed class NetworkLightController : ILightController
         return ok;
     }
 
-    /// <summary>熄灭全部通道。</summary>
-    public void TurnOff() => SendFrame(BuildOffFrame());
+    /// <summary>熄灭全部通道。返回 false 表示指令发送失败（不得静默当作已熄灯）。</summary>
+    public bool TurnOff() => SendFrame(BuildOffFrame());
 
     /// <summary>
     /// 发送原始指令（协议调试）：输入文本中的 \r \n \t 转义序列解析为真实字符后发送。
     /// 例：输入 "SET 1 128\r\n" → 发送字节 53 45 54 20 31 20 31 32 38 0D 0A。
+    /// 与 <see cref="Apply"/>/<see cref="TurnOff"/> 对称返回是否发出。
     /// </summary>
-    public void SendRaw(string command)
+    public bool SendRaw(string command)
     {
         if (string.IsNullOrEmpty(command))
-            return;
-        SendFrame(Encoding.ASCII.GetBytes(Unescape(command)));
+            return true;
+        return SendFrame(Encoding.ASCII.GetBytes(Unescape(command)));
     }
 
     private static string Unescape(string text) =>

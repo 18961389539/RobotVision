@@ -14,6 +14,13 @@ public interface ILightingGrabScope : IDisposable
 public interface ILightingRuntime
 {
     IReadOnlyCollection<string> ControllerIds { get; }
+
+    /// <summary>
+    /// 取图后**自动**熄灯是否被临时调试开关屏蔽（灯保持点亮）。供 UI 显式提示，
+    /// 避免「灯怎么一直亮着」无从解释。手动 <see cref="TurnOff"/> 不受该开关影响。
+    /// </summary>
+    bool SuppressAutoTurnOff { get; }
+
     bool TryGet(string id, out ILightController? controller);
     bool IsRegistered(string id);
     ILightingGrabScope Apply(string? controllerId, LightingConfig? lighting);
@@ -32,6 +39,7 @@ internal sealed class LightingGrabScope(LightingScope inner) : ILightingGrabScop
 internal sealed class LightingRuntime(LightingManager inner) : ILightingRuntime
 {
     public IReadOnlyCollection<string> ControllerIds => inner.ControllerIds;
+    public bool SuppressAutoTurnOff => inner.SuppressAutoTurnOff;
     public bool TryGet(string id, out ILightController? controller) => inner.TryGet(id, out controller);
     public bool IsRegistered(string id) => inner.IsRegistered(id);
     public ILightingGrabScope Apply(string? controllerId, LightingConfig? lighting) =>

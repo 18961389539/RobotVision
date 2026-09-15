@@ -57,7 +57,8 @@ public sealed partial class StationChatTools
             var command = Str(doc, "command");
             if (string.IsNullOrWhiteSpace(command))
                 return Task.FromResult(Fail("raw 需要 command"));
-            _lights.Get(id).SendRaw(command);
+            if (!_lights.Get(id).SendRaw(command))
+                return Task.FromResult(Fail($"光源 {id} 未发出该指令（串口未打开/被占用，或控制器未接线）"));
             return Task.FromResult(Ok(new { ok = true, id, action, command }));
         }
         if (action is not ("on" or "off"))
@@ -290,7 +291,8 @@ public sealed partial class StationChatTools
         var command = Str(doc, "command");
         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(command))
             return Task.FromResult(Fail("需要 id 和 command"));
-        _lights.Get(id).SendRaw(command);
+        if (!_lights.Get(id).SendRaw(command))
+            return Task.FromResult(Fail($"光源 {id} 未发出该指令（串口未打开/被占用，或控制器未接线）"));
         return Task.FromResult(Ok(new { ok = true, id, command }));
     }
 }

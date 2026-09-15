@@ -3,7 +3,7 @@
   "DataRoot": "E:\\RobotVisionData",
   "Chat": {
     "LlamaServerPath": "E:\\path\\to\\llama-server.exe",
-    "GgufPath": "E:\\path\\to\\model.gguf"
+    "GgufPath": "E:\\path\\to\\Qwen3.5-4B-Q4_K_M.gguf"
   },
   "Cameras": [
     {

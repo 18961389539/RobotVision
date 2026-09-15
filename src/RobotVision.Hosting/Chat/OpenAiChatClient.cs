@@ -92,7 +92,7 @@ public sealed class OpenAiChatClient : ILocalChatClient, IDisposable
         }
 
         var body = new ChatRequestDto(
-            string.IsNullOrWhiteSpace(_cfg.Model) ? "qwen" : _cfg.Model,
+            string.IsNullOrWhiteSpace(_cfg.Model) ? "Qwen3.5-4B" : _cfg.Model,
             dtoMessages,
             Stream: true,
             MaxTokens: Math.Clamp(_cfg.MaxTokens, 16, 4096),

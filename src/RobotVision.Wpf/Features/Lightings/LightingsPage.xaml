@@ -109,6 +109,24 @@
         <!-- 右：添加 / 编辑 / 手动调光 -->
         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
             <StackPanel>
+                <!-- 临时调试开关提示：取图后自动熄灯被屏蔽（KeepLightOnAfterGrab / ROBOTVISION_KEEP_LIGHT_ON）。
+                     不显示时对页面无影响；「关灯」按钮不受该开关影响，仍可手动熄灯。 -->
+                <Border x:Name="autoTurnOffBanner" Margin="0,0,0,8" Padding="10,8"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource SystemFillColorCautionBrush}"
+                        BorderThickness="1"
+                        CornerRadius="{DynamicResource ControlCornerRadius}"
+                        Visibility="{Binding AutoTurnOffSuppressed,
+                            Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel>
+                        <ui:TextBlock Text="取图后自动熄灯已屏蔽（调试）" FontTypography="BodyStrong"
+                                      Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                        <ui:TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                                      Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                      Text="灯在取图结束后保持点亮，属临时排查状态（该开关仅 Debug 构建生效，Release 产物不受影响）；「关灯」按钮仍可手动熄灯。" />
+                    </StackPanel>
+                </Border>
+
                 <!-- 添加控制器 -->
                 <ui:Card Margin="0,0,0,8" Padding="12">
                     <StackPanel>
@@ -124,9 +142,9 @@
 
                         <UniformGrid Columns="2" Margin="0,0,0,8">
                             <StackPanel Margin="0,0,8,0">
-                                <ui:TextBlock Text="控制器 Id（字母/数字/_/-）" Margin="0,0,0,4" />
+                                <ui:TextBlock Text="新控制器 Id（字母/数字/_/-）" Margin="0,0,0,4" />
                                 <TextBox Text="{Binding NewId, UpdateSourceTrigger=PropertyChanged}"
-                                         ToolTip="新控制器 Id，添加后写入 appsettings 的 LightControllers 段" />
+                                         ToolTip="仅用于新建。已保存的 Id 在左侧列表，重启后看「当前控制器」卡片，不会出现在此输入框。" />
                             </StackPanel>
                             <StackPanel>
                                 <ui:TextBlock Text="类型" Margin="0,0,0,4" />
@@ -148,7 +166,7 @@
                                 <StackPanel Margin="0,0,8,0">
                                     <ui:TextBlock Text="串口" Margin="0,0,0,4" />
                                     <TextBox Text="{Binding NewPort, UpdateSourceTrigger=PropertyChanged}"
-                                             ToolTip="如 COM3" />
+                                             ToolTip="如 COM5" />
                                 </StackPanel>
                                 <StackPanel>
                                     <ui:TextBlock Text="波特" Margin="0,0,0,4" />
@@ -192,6 +210,26 @@
                         <ui:TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                       Text="None = 无操作虚拟控制器（调试兜底）；真实类型由工厂注册表提供" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- 已保存项：重启后 Id 显示在这里，而不是上方新建框 -->
+                <ui:Card Margin="0,0,0,8" Padding="12"
+                         Visibility="{Binding HasSelection,
+                             Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel>
+                        <ui:TextBlock FontTypography="Subtitle" Text="当前控制器" Margin="0,0,0,10" />
+                        <UniformGrid Columns="2">
+                            <StackPanel Margin="0,0,8,0">
+                                <ui:TextBlock Text="控制器 Id" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding Selected.Id, Mode=OneWay}" IsReadOnly="True"
+                                         ToolTip="已写入配置的 Id，重启后仍在左侧列表与此处显示" />
+                            </StackPanel>
+                            <StackPanel>
+                                <ui:TextBlock Text="类型" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding Selected.Type, Mode=OneWay}" IsReadOnly="True" />
+                            </StackPanel>
+                        </UniformGrid>
                     </StackPanel>
                 </ui:Card>
 
@@ -288,7 +326,7 @@
                             <StackPanel Margin="0,0,8,0">
                                 <ui:TextBlock Text="串口" Margin="0,0,0,4" />
                                 <TextBox Text="{Binding EditPort, UpdateSourceTrigger=PropertyChanged}"
-                                         ToolTip="串口名称，如 COM3" />
+                                         ToolTip="串口名称，如 COM5" />
                             </StackPanel>
                             <StackPanel>
                                 <ui:TextBlock Text="波特" Margin="0,0,0,4" />
@@ -296,10 +334,16 @@
                                               SmallChange="9600" SpinButtonPlacementMode="Compact" />
                             </StackPanel>
                         </UniformGrid>
+                        <StackPanel Margin="0,8,8,0" HorizontalAlignment="Left" Width="220">
+                            <ui:TextBlock Text="通道数" Margin="0,0,0,4" />
+                            <ui:NumberBox Value="{Binding EditChannelCount}" Minimum="1" Maximum="9"
+                                          SmallChange="1" SpinButtonPlacementMode="Compact"
+                                          ToolTip="东冠 PWD 为 2 或 4；熄灯时关闭 1..N 路" />
+                        </StackPanel>
 
                         <ui:TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                      Text="指令帧默认 ASCII 行协议（SET ch brightness / OFF ALL）；实际控制器协议不同时替换 SerialLightController.BuildSetFrame 等" />
+                                      Text="东冠协议：9600 8N1，5 字节十六进制帧。通道 1 亮度 100% 为 00 12 64 FF FF；应用亮度时先切常亮再下发 0–100%。协议调试可直接粘贴十六进制。" />
 
                         <!-- 协议调试：手动发送原始指令（Network/Serial 卡片共用控件） -->
                         <shared:ProtocolDebugPanel />

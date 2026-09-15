@@ -6,6 +6,10 @@
       Background="{DynamicResource ApplicationBackgroundBrush}">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="24" MaxWidth="720">
+            <Image Source="pack://application:,,,/Assets/app.png"
+                   Width="64" Height="64" Margin="0,0,0,12"
+                   RenderOptions.BitmapScalingMode="HighQuality"
+                   HorizontalAlignment="Left" />
             <ui:TextBlock FontTypography="Title" Text="RobotVision 视觉调试" Margin="0,0,0,4" />
             <ui:TextBlock FontTypography="Body"
                           Text="机器人引导视觉系统 · C# / .NET 10 / OpenCvSharp / YoloDotNet"

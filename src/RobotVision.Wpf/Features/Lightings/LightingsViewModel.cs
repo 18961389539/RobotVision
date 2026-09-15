@@ -68,6 +68,13 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
     [ObservableProperty]
     private string _message = "";
 
+    /// <summary>
+    /// 临时调试开关生效时置位：取图后不再自动熄灯（灯保持点亮）。
+    /// 开关在宿主启动时按 <c>ROBOTVISION_KEEP_LIGHT_ON</c> / KeepLightOnAfterGrab 决定，
+    /// 运行期不变，故用计算属性而非 ObservableProperty（改开关需重启）。
+    /// </summary>
+    public bool AutoTurnOffSuppressed => _lighting.SuppressAutoTurnOff;
+
     /// <summary>新建控制器的 Id 输入。</summary>
     [ObservableProperty]
     private string _newId = "";
@@ -144,6 +151,9 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
     /// <summary>选中光源是否为 None（虚拟控制器，无连接参数）。</summary>
     public bool IsNone => Selected is not null && Selected.IsNoop;
 
+    /// <summary>左侧已选中已保存的控制器（编辑区显示其 Id；与上方「添加」表单区分）。</summary>
+    public bool HasSelection => Selected is not null;
+
     /// <summary>编辑 Network 且协议为 Tcp 时显示 TCP 重连次数。</summary>
     public bool IsEditTcp => IsNetwork
         && string.Equals(EditProtocol, "Tcp", StringComparison.OrdinalIgnoreCase);
@@ -151,7 +161,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
     public string NewTypeHint => NewType switch
     {
         "None" => "无操作虚拟控制器：配方联调时占位，开灯不会点亮硬件。",
-        "Serial" => "RS232/RS485 串口控制器：填写 COM 口与波特率。",
+        "Serial" => "东冠数字电源（RS232）：默认 COM5 @ 9600，亮度 0–255 映射为 0–100%。",
         "Network" => "UDP/TCP 网络控制器：填写 host:port；UDP 可填本机绑定端口。",
         _ => string.IsNullOrWhiteSpace(NewType) ? "" : $"类型 {NewType}：按工厂注册表要求填写参数。",
     };
@@ -163,6 +173,9 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
 
     [ObservableProperty]
     private int _editBaudRate = 9600;
+
+    [ObservableProperty]
+    private int _editChannelCount = 2;
 
     // ---- Network 专属参数（编辑区绑定） ----
 
@@ -196,6 +209,8 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
 
     partial void OnEditBaudRateChanged(int value) => MarkEditDirty();
 
+    partial void OnEditChannelCountChanged(int value) => MarkEditDirty();
+
     partial void OnEditEndpointChanged(string value) => MarkEditDirty();
 
     partial void OnEditProtocolChanged(string value) => MarkEditDirty();
@@ -217,7 +232,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         }
         if (string.IsNullOrWhiteSpace(DebugCommand))
         {
-            Message = "请输入要发送的指令（支持 \r \n \t 转义）";
+            Message = "请输入要发送的指令（十六进制如 00 12 64 FF FF，或 ASCII / \\r \\n \\t）";
             return;
         }
         if (!_lighting.TryGet(Selected.Id, out var controller) || controller is null)
@@ -227,12 +242,20 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         }
         try
         {
-            controller.SendRaw(DebugCommand);
+            if (!controller.SendRaw(DebugCommand))
+            {
+                // 不能报「已发送」：串口没打开/被占用时这里确实一帧都没出去。
+                // 调试框谎报成功会把排查方向直接带到协议/硬件上去。
+                WpfUiLog.LightingSendRawFailed(_log, Selected.Id, DebugCommand);
+                Message = $"发送失败：{Selected.Id} 未发出该指令（详见日志；常见原因：串口未打开或被占用、控制器未接线）";
+                return;
+            }
             DebugResult = DebugCommand;
             Message = $"已发送到 {Selected.Id}：{DebugCommand}";
         }
         catch (Exception ex)
         {
+            WpfUiLog.LightingSendRawFailed(_log, ex, Selected.Id, DebugCommand);
             Message = $"发送失败: {ex.Message}";
         }
     }
@@ -290,7 +313,8 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         if (string.Equals(light.Type, "Serial", StringComparison.OrdinalIgnoreCase))
         {
             var port = string.IsNullOrWhiteSpace(light.Port) ? "未配置串口" : light.Port;
-            return $"{port} @ {light.BaudRate}";
+            var channels = light.ChannelCount is >= 1 and <= 9 ? light.ChannelCount : 2;
+            return $"{port} @ {light.BaudRate} · 东冠 {channels} 通道";
         }
         return "无操作虚拟控制器（调试兜底）";
     }
@@ -301,6 +325,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         OnPropertyChanged(nameof(IsNetwork));
         OnPropertyChanged(nameof(IsSerial));
         OnPropertyChanged(nameof(IsNone));
+        OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(IsEditTcp));
 
         if (value is null)
@@ -318,6 +343,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
             EditReconnectAttempts = 3;
             EditPort = "";
             EditBaudRate = 9600;
+            EditChannelCount = 2;
         }
         else
         {
@@ -328,6 +354,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
             EditReconnectAttempts = config.ReconnectAttempts;
             EditPort = config.Port;
             EditBaudRate = config.BaudRate is >= 1200 and <= 921600 ? config.BaudRate : 9600;
+            EditChannelCount = config.ChannelCount is >= 1 and <= 9 ? config.ChannelCount : 2;
         }
 
         OnPropertyChanged(nameof(IsEditTcp));
@@ -376,11 +403,12 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         {
             if (string.IsNullOrWhiteSpace(EditPort))
             {
-                Message = "保存失败：Serial 光源需填写串口名（如 COM3）";
+                Message = "保存失败：Serial 光源需填写串口名（如 COM5）";
                 return;
             }
             entry.Port = EditPort.Trim();
             entry.BaudRate = EditBaudRate is >= 1200 and <= 921600 ? EditBaudRate : 9600;
+            entry.ChannelCount = EditChannelCount is >= 1 and <= 9 ? EditChannelCount : 2;
         }
 
         try
@@ -447,11 +475,12 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         {
             if (string.IsNullOrWhiteSpace(NewPort))
             {
-                Message = "添加失败：Serial 光源需填写串口名（如 COM3）";
+                Message = "添加失败：Serial 光源需填写串口名（如 COM5）";
                 return;
             }
             entry.Port = NewPort.Trim();
             entry.BaudRate = NewBaudRate is >= 1200 and <= 921600 ? NewBaudRate : 9600;
+            entry.ChannelCount = 2;
         }
         try
         {
@@ -514,21 +543,34 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
     [RelayCommand]
     private void TurnOn()
     {
-        this.Commit();
         if (Selected is not { Registered: true } item)
         {
             Message = "请选择已注册的光源控制器";
             return;
         }
+
+        // 先取一份"打算下发的值"，供失败时留档；Commit 之后会按刷写结果再取一次。
+        var channel = Math.Max(1, Channel);
+        var brightness = (int)Math.Round(Brightness);
         try
         {
-            _lighting.TurnOn(item.Id, Math.Max(1, Channel), (int)Math.Round(Brightness));
+            // Commit 必须在 try 内：它要把 NumberBox 里尚未写回绑定源的通道号/亮度刷进 VM
+            // （WPF-UI 3.1 用 SetCurrentValue 更新 Value，不写回源）。
+            // 原先放在 try 之外——一旦刷写抛异常就直接冒到 DispatcherUnhandledException，
+            // 命令静默失败、灯当然不亮；而 TurnOff 不依赖这两个字段，于是表现为"能关不能开"。
+            this.Commit();
+            channel = Math.Max(1, Channel);
+            brightness = (int)Math.Round(Brightness);
+
+            _lighting.TurnOn(item.Id, channel, brightness);
             Message = item.IsNoop
                 ? $"{item.Id} 是无操作控制器（None）：已模拟点亮，未点亮任何硬件"
-                : $"已点亮 {item.Id} · 通道 {Channel} · 亮度 {BrightnessText}（持续到手动熄灯或下次取图点亮）";
+                : $"已点亮 {item.Id} · 通道 {channel} · 亮度 {BrightnessText}（持续到手动熄灯或下次取图点亮）";
         }
         catch (Exception ex)
         {
+            // 留档：光靠页面 Message，用户一切走就再无线索（灯不亮是现场最高频报障）
+            WpfUiLog.LightingTurnOnFailed(_log, ex, item.Id, channel, brightness);
             Message = $"开灯失败: {ex.Message}";
         }
     }
@@ -548,6 +590,7 @@ public partial class LightingsViewModel : ObservableObject, ICommitPendingEdits
         }
         catch (Exception ex)
         {
+            WpfUiLog.LightingTurnOffFailed(_log, ex, item.Id);
             Message = $"熄灯失败: {ex.Message}";
         }
     }

@@ -8,7 +8,7 @@ public enum LightControllerKind
     /// <summary>无操作虚拟控制器（未接硬件时的调试兜底，同 FileCamera 定位）。</summary>
     None,
 
-    /// <summary>串口光源控制器（RS232/RS485，如奥普特/康耐视控制器）。</summary>
+    /// <summary>串口光源控制器（RS232，东冠 OSE PWD 数字电源）。</summary>
     Serial,
 
     /// <summary>Modbus 光源控制器。</summary>
@@ -42,12 +42,25 @@ public interface ILightController : IDisposable
     /// <returns>true 指令已发出或无需发出（空通道/Noop）；false 硬件发送失败。</returns>
     bool Apply(LightingConfig lighting);
 
-    /// <summary>熄灭全部通道。</summary>
-    void TurnOff();
+    /// <summary>
+    /// 熄灭全部通道。
+    /// 与 <see cref="Apply"/> 对称：**发送失败必须返回 false，不得吞掉后当作已熄灯**。
+    /// 否则串口没打开/协议不对时 UI 会谎报「已熄灯」，而「开灯」如实报错，
+    /// 表现为「能关灯、不能开灯」这种无从下手、方向被带偏的现象（2026-09-14 实际踩过）。
+    /// 初始化失败的占位实现（FailedLight）仍抛 1006。
+    /// </summary>
+    /// <returns>true 指令已发出或无需发出（Noop）；false 硬件发送失败。</returns>
+    bool TurnOff();
 
     /// <summary>
     /// 发送原始指令（协议调试用：UI 手动输入指令文本，便于联调控制器协议）。
-    /// 不支持的控制器静默无操作（如 Noop）；Network 实现支持 \r \n \t 转义解析。
+    /// 不支持的控制器静默无操作（如 Noop）；Serial 支持十六进制帧，Network/Serial 均支持 \r \n \t 转义。
+    /// <para>
+    /// 与 <see cref="Apply"/>/<see cref="TurnOff"/> 对称：**发送失败必须返回 false**。
+    /// 协议调试框是排障时最不能骗人的一步——它若谎报「已发送」，会把方向带到协议/硬件上去
+    /// （2026-09-14 排查光源时实际踩过）。
+    /// </para>
     /// </summary>
-    void SendRaw(string command);
+    /// <returns>true 指令已发出或无需发出（Noop/空指令）；false 硬件发送失败。</returns>
+    bool SendRaw(string command);
 }

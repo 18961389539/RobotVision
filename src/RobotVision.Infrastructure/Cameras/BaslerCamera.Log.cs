@@ -159,4 +159,10 @@ internal static partial class BaslerCameraLog
         Level = LogLevel.Warning,
         Message = "Basler 相机 {Id} 参数 {Param} 范围读取异常")]
     public static partial void ParameterRangeReadException(ILogger logger, Exception ex, string id, string param);
+
+    [LoggerMessage(
+        EventId = 27,
+        Level = LogLevel.Warning,
+        Message = "Basler 相机 {Id} 被其他程序占用，等待 {WaitMs}ms 后重试打开")]
+    public static partial void ExclusiveAccessRetry(ILogger logger, string id, int waitMs);
 }

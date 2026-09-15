@@ -37,12 +37,14 @@ public class LightControllerTypeRegistryTests
 
         public bool Apply(LightingConfig lighting) => true;
 
-        public void SendRaw(string command)
+        public bool SendRaw(string command)
         {
+            return true;
         }
 
-        public void TurnOff()
+        public bool TurnOff()
         {
+            return true;
         }
 
         public void Dispose()

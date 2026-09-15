@@ -223,8 +223,9 @@ PLC 可顺序读坐标，或用尾部 N 校验；也为将来"0 目标返回空 
 - **错误语义**：配方引用未注册控制器在加载时拦截；运行时兜底返回 1006
   （取图前的失败，无现场图可留）。
 
-接入真实光源控制器（奥普特/康耐视等，串口/Modbus/TCP）：
-1. 实现 `ILightController`（参照 `NoopLightController` 与 `BaslerCamera` 的接入模式）；
+接入真实光源：默认串口类型为东冠数字电源（`Type: "Serial"`，COM5 @ 9600）。
+其他品牌（奥普特/康耐视等，网口/Modbus）：
+1. 实现 `ILightController`（参照 `SerialLightController` / `NoopLightController`）；
 2. 实现 `ILightControllerFactory` 并调用 `LightControllerTypeRegistry.Default.Register(...)`
    一行注册（与相机 `CameraTypeRegistry` 同构）——服务注册、UI 类型下拉、
    运行时注册自动生效，无需改核心与 DI 代码；
@@ -439,17 +440,20 @@ CalibTool 用 `--tool-offset auto`。离散度 >5° 提示标记噪声大；若�
 后 TRIGGER 返回 **1018**（入队前拒绝，不占队列、不计入失败次数）。通信页「解除联锁」或 TCP `CLEARINHIBIT` / `CLEARINHIBIT,配方名` / `CLEARINHIBIT,#3`。
 配置类错误（1001/1004/1012/1017）不计入连续失败。
 
-**光源（可选）**：缺省不亮灯，行为与旧版完全一致。需要照明时在 appsettings
-注册光源控制器，配方成对指定 `lightControllerId` + `lighting`：
+**光源（可选）**：缺省不亮灯。已预置东冠串口控制器 `dongguan`（COM5 @ 9600）；
+配方成对指定 `lightControllerId` + `lighting`：
 
 ```json
 {
   "cameraId": "cam_basler",
   "stationId": "st1",
-  "lightControllerId": "light_ring",
+  "lightControllerId": "dongguan",
   "lighting": {
-    "channels": [ { "channel": 1, "brightness": 200 } ],
-    "stabilizeDelayMs": 10,
+    "channels": [
+      { "channel": 1, "brightness": 180 },
+      { "channel": 2, "brightness": 180 }
+    ],
+    "stabilizeDelayMs": 20,
     "turnOffAfterGrab": true
   }
 }
@@ -485,13 +489,16 @@ YoloDotNet **每个进程只能引用一种 Execution Provider 包**，因此仓
 
 ## 工艺助手（本地大模型对话）
 
-对话页内置一个**完全本地**的工艺问答助手：模型跑在本机 llama-server（CPU，`-ngl 0`），
+对话页内置一个**完全本地**的工艺问答助手：默认权重为
+[Qwen3.5-4B Q4_K_M](https://www.modelscope.cn/models/unsloth/Qwen3.5-4B-GGUF)
+（`Qwen3.5-4B-Q4_K_M.gguf`），跑在本机 llama-server（CPU，`-ngl 0`），
 **不上传任何图像、坐标或配方到公网**。用于现场查结果、看趋势、定位失败原因。
+需较新的 llama.cpp（支持 Qwen3.5 / Gated DeltaNet）。
 
 链路：
-`ChatPage`/`ChatViewModel`（Markdig 渲染气泡 + 流式输出）→ `ChatAgent`（工具循环，最多
-`MaxToolRounds` 轮，默认 8）→ `OpenAiChatClient`（OpenAI 兼容 SSE，增量合并 `tool_calls`）
-→ `LlamaServerHost`（按需拉起 `llama-server.exe`，退出时回收进程）。
+`ChatPage`（WebView2 + assistant-ui）→ 本机回环 `ChatUiHost`（`127.0.0.1:UiPort`，默认 18080）
+→ `ChatAgent`（工具循环，最多 `MaxToolRounds` 轮，默认 8）→ `OpenAiChatClient`
+→ `LlamaServerHost`（按需拉起 `llama-server.exe`，退出时回收进程）。浏览器不直连 llama-server。
 
 工具分两类：
 
@@ -509,7 +516,8 @@ YoloDotNet **每个进程只能引用一种 Execution Provider 包**，因此仓
 **部署注意**：`Chat:LlamaServerPath` 与 `Chat:GgufPath` 是**机器相关**的配置，
 默认值仅作占位，换工控机必须按实际路径填写；路径不存在时对话页不可用，
 但**不影响主视觉管线**（TCP 触发、取图、推理照常）。无本地模型时把
-`Chat:AutoStart` 设为 `false` 即可整体闲置。
+`Chat:AutoStart` 设为 `false` 即可整体闲置。工艺助手 UI 走本机 `Chat:UiPort`（默认 18080），
+须与 llama-server 的 `Chat:Port`（默认 8080）分开。
 
 ## 并发与线程安全
 

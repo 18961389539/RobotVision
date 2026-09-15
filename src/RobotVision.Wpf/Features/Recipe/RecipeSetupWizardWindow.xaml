@@ -6,6 +6,7 @@
         xmlns:ivc="clr-namespace:ImageViewer.Controls;assembly=ImageViewerControl"
         xmlns:vm="clr-namespace:RobotVision.WpfHost.Shared"
         Title="配方配置工作台"
+        Icon="pack://application:,,,/Assets/app.ico"
         Width="1040" Height="720"
         MinWidth="900" MinHeight="600"
         WindowStartupLocation="CenterOwner"
@@ -14,7 +15,11 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
     </Window.Resources>
     <DockPanel>
-        <ui:TitleBar DockPanel.Dock="Top" Title="配方配置工作台" />
+        <ui:TitleBar DockPanel.Dock="Top" Title="配方配置工作台">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="pack://application:,,,/Assets/app.png" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
 
         <Border DockPanel.Dock="Bottom"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"

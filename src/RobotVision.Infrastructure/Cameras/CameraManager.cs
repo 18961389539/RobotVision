@@ -165,9 +165,32 @@ public sealed class CameraManager : IDisposable
         return GrabCoreTracedAsync(camera.Id, camera, () => camera.Grab(ct), ct);
     }
 
-    /// <summary>退出前排空在途取图：拒绝新 Grab，并在限时内等待各相机门闩。</summary>
-    public void PrepareForShutdown(TimeSpan timeout, ILogger? logger = null) =>
-        DrainGates(timeout, markShuttingDown: true, logger ?? _logger);
+    /// <summary>
+    /// 退出前排空在途取图并立刻释放设备句柄。
+    /// 必须在 <c>host.Dispose</c> 之前关掉 pylon：Dispose 超时会放弃同步释放，GigE 独占会拖到心跳结束，下一进程 Open 报 0xE1018006。
+    /// </summary>
+    public void PrepareForShutdown(TimeSpan timeout, ILogger? logger = null)
+    {
+        var log = logger ?? _logger;
+        DrainGates(timeout, markShuttingDown: true, log);
+        ReleaseCameras(log);
+    }
+
+    private void ReleaseCameras(ILogger? logger)
+    {
+        foreach (var camera in _cameras.Values)
+        {
+            try
+            {
+                camera.Dispose();
+            }
+            catch (Exception ex)
+            {
+                if (logger is not null)
+                    CameraManagerLog.ShutdownReleaseFailed(logger, ex, camera.Id);
+            }
+        }
+    }
 
     // 与相机适配器内部的 _grabLock 是两层不同作用域的串行化：本门闩按 Id 串行整个"取图操作"
     // （TRIGGER/预览/示教互斥），适配器锁保护 SDK 句柄内部调用（GrabOne/Open/Close 非线程安全）。

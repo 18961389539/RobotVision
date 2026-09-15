@@ -18,6 +18,7 @@
         xmlns:about="clr-namespace:RobotVision.WpfHost.Features.About"
         xmlns:chat="clr-namespace:RobotVision.WpfHost.Features.Chat"
         Title="RobotVision 视觉调试"
+        Icon="pack://application:,,,/RobotVision.Wpf;component/Assets/app.ico"
         Width="1280" Height="820"
         MinWidth="960" MinHeight="600"
         FontFamily="Microsoft YaHei UI, Segoe UI"
@@ -25,7 +26,11 @@
         TextOptions.TextFormattingMode="Display"
         WindowStartupLocation="CenterScreen">
     <DockPanel>
-        <ui:TitleBar DockPanel.Dock="Top" Title="RobotVision 视觉调试" />
+        <ui:TitleBar DockPanel.Dock="Top" Title="RobotVision 视觉调试">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="pack://application:,,,/RobotVision.Wpf;component/Assets/app.png" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
 
         <!-- 全局状态栏：所有页面可） -->
         <Border DockPanel.Dock="Bottom"

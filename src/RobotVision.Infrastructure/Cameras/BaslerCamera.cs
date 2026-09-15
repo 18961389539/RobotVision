@@ -39,6 +39,8 @@ public sealed class BaslerCamera : ICamera, IExposureControl, IHardware2x2Output
 {
     private const long GigEDefaultPacketSize = 1500;
     private const int GigEUnderrunErrorCode = -520093676;
+    /// <summary>GigE 心跳释放占用通常约 3s；上次进程 Dispose 超时后新开机会撞上 0xE1018006。</summary>
+    internal const int ExclusiveAccessRetryWaitMs = 3000;
 
     private Camera? _camera;
 
@@ -204,7 +206,7 @@ public sealed class BaslerCamera : ICamera, IExposureControl, IHardware2x2Output
             SafeStopGrabbing();
             if (_camera.IsOpen)
                 _camera.Close();
-            _camera.Open();
+            OpenDevice(ct);
 
             var info = _camera.CameraInfo;
             _serialNumber = info is null ? _deviceId : info[CameraInfoKey.SerialNumber]!;
@@ -242,12 +244,52 @@ public sealed class BaslerCamera : ICamera, IExposureControl, IHardware2x2Output
         }
         catch (Exception ex)
         {
-            _lastFailureReason = ex.Message;
+            _lastFailureReason = DescribeConnectFailure(ex);
             ReleaseDevice();
             if (_log is { } log) BaslerCameraLog.ConnectFailed(log, ex, Id);
             return false;
         }
     }
+
+    private void OpenDevice(CancellationToken ct)
+    {
+        try
+        {
+            _camera!.Open();
+            return;
+        }
+        catch (Exception ex) when (IsExclusiveAccessError(ex))
+        {
+            if (_log is { } log)
+                BaslerCameraLog.ExclusiveAccessRetry(log, Id, ExclusiveAccessRetryWaitMs);
+            CameraGrabWait.WaitUnlessCanceled(ExclusiveAccessRetryWaitMs, ct);
+            try
+            {
+                if (_camera is { IsOpen: true })
+                    _camera.Close();
+            }
+            catch (Exception closeEx)
+            {
+                if (_log is { } closeLog)
+                    BaslerCameraLog.CloseSkipped(closeLog, closeEx, Id);
+            }
+
+            _camera!.Open();
+        }
+    }
+
+    internal static bool IsExclusiveAccessError(Exception ex)
+    {
+        var msg = ex.Message ?? "";
+        return msg.Contains("controlled by another application", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("0xE1018006", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string DescribeConnectFailure(Exception ex) =>
+        IsExclusiveAccessError(ex)
+            ? "相机被其他程序占用（pylon Viewer 或未退出的 RobotVision）。请关掉占用方后再取图；若刚热重启，等约 3 秒心跳超时。"
+              + " " + ex.Message
+            : ex.Message;
 
     private Camera CreateDevice(CancellationToken ct)
     {

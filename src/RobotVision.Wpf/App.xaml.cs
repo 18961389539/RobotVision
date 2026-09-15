@@ -59,6 +59,19 @@ public partial class App : Application, IDisposable
         ApplicationPaths.NormalizeAppConfig(bootstrapCfg);
         AppThemeManager.Apply(bootstrapCfg.UiTheme);
 
+        // 测试宿主提前返回：TestInfra.EnsureWpfApp 在构造本类前设置 ROBOTVISION_TEST_HOST=1。
+        // 测试只需要本类的资源字典与主题（上面已应用），不应触发单实例互斥 / 主窗口 / TCP——
+        // 否则本机若正运行着应用，TryAcquireSingleInstance 会弹模态 MessageBox 等人点击，
+        // STA 线程永久阻塞（实测：应用在跑时全量 Wpf 测试 13 分钟零输出，关掉应用后 39 秒跑完）。
+        // 该变量只由测试设置，生产环境不存在，正常启动路径完全不受影响。
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("ROBOTVISION_TEST_HOST"), "1", StringComparison.Ordinal))
+        {
+            System.Diagnostics.Trace.WriteLine(
+                "RobotVision: 测试宿主启动，已跳过单实例互斥 / 主窗口 / TCP");
+            return;
+        }
+
         // 离屏快照模式：渲染主窗口到 PNG 后退出（不启动 TCP，避免与运行实例抢端口）
         if (e.Args.Contains("--snapshot", StringComparer.OrdinalIgnoreCase))
         {
