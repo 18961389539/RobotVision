@@ -4,9 +4,9 @@
     "net10.0": {
       "OpenCvSharp4": {
         "type": "Direct",
-        "requested": "[4.10.0.20240615, )",
-        "resolved": "4.10.0.20240615",
-        "contentHash": "cX3cwyKaDFknbreKInp2nB91AqEci9OwippbXOKehrUoETTeiIYY3j1EwVwshb5k+o/EkJyoYUvq9vh3nbZupw=="
+        "requested": "[4.13.0.20260627, )",
+        "resolved": "4.13.0.20260627",
+        "contentHash": "nYk95jkyYY9f0sF5KqZ3OB1SWkmqsfV7eN0ROiQds/rxpSn0v1G0QIedMbwuqbdPhvQnOIG2DDmpkLnHEJMh8Q=="
       },
       "robotvision.core": {
         "type": "Project"
