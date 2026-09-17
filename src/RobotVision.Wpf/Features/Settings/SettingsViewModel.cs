@@ -27,9 +27,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
     private const int DefaultMaxConnections = 0;
     private const bool DefaultFailureEnabled = true;
     private const int DefaultFailureRetainedCount = 200;
-    private const int DefaultFailureRetainedDays = 0;
+    private const int DefaultFailureRetainedDays = 2;
     private const bool DefaultCaptureSuccessEnabled = false;
-    private const int DefaultCaptureSuccessRetainedDays = 30;
+    private const int DefaultCaptureSuccessRetainedDays = 2;
     private const int DefaultCaptureSuccessMaxWidth = 0;
     private const bool DefaultResultLogEnabled = true;
     private const bool DefaultResultLogJsonl = true;

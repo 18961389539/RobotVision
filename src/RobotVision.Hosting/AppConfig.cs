@@ -132,8 +132,8 @@ public sealed class FailureImageConfig
     /// <summary>滚动保留最近 N 张（含元数据）；≤0 表示不自动清理。</summary>
     public int RetainedCount { get; set; } = 200;
 
-    /// <summary>按时间保留最近 N 天；≤0 表示不按时间清理。与数量配额取更严格者。</summary>
-    public int RetainedDays { get; set; }
+    /// <summary>按时间保留最近 N 天（默认 2 天）；≤0 表示不按时间清理。与数量配额取更严格者。</summary>
+    public int RetainedDays { get; set; } = 2;
 }
 
 public sealed class InferenceConfig
@@ -246,8 +246,8 @@ public sealed class CaptureSuccessConfig
     /// <summary>缩图最大宽度（0 = 原图；产线量大利建议开缩图，如 1280）。</summary>
     public int MaxWidth { get; set; }
 
-    /// <summary>按天目录保留天数；≤0 不清理。</summary>
-    public int RetainedDays { get; set; } = 30;
+    /// <summary>按天目录保留天数（默认 2 天）；≤0 不清理。</summary>
+    public int RetainedDays { get; set; } = 2;
 }
 
 /// <summary>
