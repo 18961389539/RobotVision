@@ -104,6 +104,12 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
             plcDebug["DefaultY"] = values.PlcDebugDefaultY;
             plcDebug["DefaultRz"] = values.PlcDebugDefaultRz;
             obj["PlcDebug"] = plcDebug;
+
+            var retry = obj["Retry"] as JsonObject ?? [];
+            retry["Enabled"] = values.RetryEnabled;
+            retry["MaxAttempts"] = values.RetryMaxAttempts;
+            retry["DelayMs"] = values.RetryDelayMs;
+            obj["Retry"] = retry;
         });
 
         cfg.TimeoutMs = values.TimeoutMs;
@@ -143,6 +149,9 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         cfg.PlcDebug.DefaultX = values.PlcDebugDefaultX;
         cfg.PlcDebug.DefaultY = values.PlcDebugDefaultY;
         cfg.PlcDebug.DefaultRz = values.PlcDebugDefaultRz;
+        cfg.Retry.Enabled = values.RetryEnabled;
+        cfg.Retry.MaxAttempts = values.RetryMaxAttempts;
+        cfg.Retry.DelayMs = values.RetryDelayMs;
 
         // 落盘 + 内存同步完成后，把可热应用的参数同步到运行中的管理器（见 RuntimeSync 注释）
         RuntimeSync?.Invoke(cfg);
@@ -242,6 +251,10 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
         if (!double.IsFinite(values.PlcDebugDefaultX) || !double.IsFinite(values.PlcDebugDefaultY) ||
             !double.IsFinite(values.PlcDebugDefaultRz))
             return new SettingsValidationError(SettingsField.PlcDebugCoordinates, "PLC 调试默认坐标必须为有限数字");
+        if (values.RetryMaxAttempts is < 1 or > 5)
+            return new SettingsValidationError(SettingsField.RetryMaxAttempts, "重拍最大尝试次数必须在 1~5 之间");
+        if (values.RetryDelayMs is < 0 or > 5000)
+            return new SettingsValidationError(SettingsField.RetryDelayMs, "重拍间隔必须在 0~5000ms 之间（0 = 立即重拍）");
         return null;
     }
 
@@ -297,6 +310,10 @@ public sealed class AppSettingsStore(AppConfig cfg, string? settingsPath = null)
                     $"相机 {camera.Id} 的 GrabTimeoutMs={camera.GrabTimeoutMs} 不小于总超时 TimeoutMs={cfg.TimeoutMs}，" +
                     "取图超时将表现为 1008 而非 1003，请先调大总超时或调小 GrabTimeoutMs");
         }
+        if (cfg.Retry.MaxAttempts is < 1 or > 5)
+            throw new InvalidDataException($"appsettings.json 的 Retry.MaxAttempts={cfg.Retry.MaxAttempts} 必须在 1~5 之间");
+        if (cfg.Retry.DelayMs is < 0 or > 5000)
+            throw new InvalidDataException($"appsettings.json 的 Retry.DelayMs={cfg.Retry.DelayMs} 必须在 0~5000ms 之间（0 = 立即重拍）");
     }
 
     private static bool IsKnownInferenceProvider(string provider)
@@ -345,6 +362,8 @@ public static class SettingsField
     public const string PlcDebugCoordinates = "PlcDebugCoordinates";
     public const string UiTheme = "UiTheme";
     public const string FileLoggingEnabled = "FileLoggingEnabled";
+    public const string RetryMaxAttempts = "RetryMaxAttempts";
+    public const string RetryDelayMs = "RetryDelayMs";
 
     /// <summary>全部字段标识（测试用：断言每个字段都能映射到页面上的一组控件）。</summary>
     public static IReadOnlyList<string> All { get; } =
@@ -354,6 +373,7 @@ public static class SettingsField
         CaptureSuccessRetainedDays, CaptureSuccessMaxWidth, ResultLogRetainedDays, ResultLogSink,
         InferenceProvider, InferenceMaxSessions, FileLoggingRetainedDays, ProcessHealthRetainedDays,
         TcpPort, IpAddress, IpWhitelist, PlcDebugCoordinates, UiTheme, FileLoggingEnabled,
+        RetryMaxAttempts, RetryDelayMs,
     ];
 }
 
@@ -395,4 +415,7 @@ public sealed record ServiceSettingsValues(
     double PlcDebugDefaultY = 0,
     double PlcDebugDefaultRz = 0,
     bool FailureSaveOverlay = false,
-    bool CaptureSuccessSaveOverlay = false);
+    bool CaptureSuccessSaveOverlay = false,
+    bool RetryEnabled = true,
+    int RetryMaxAttempts = 3,
+    int RetryDelayMs = 200);

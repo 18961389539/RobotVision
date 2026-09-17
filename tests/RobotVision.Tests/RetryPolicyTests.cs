@@ -159,6 +159,19 @@ public class RetryPolicyTests : IDisposable
         Assert.False(p.IsRetryable(VisionErrorCode.RefineFailed));
     }
 
+    [Fact]
+    public void RetryPolicy_ApplyConfig_HotSwaps()
+    {
+        var p = new RetryPolicy(new RetryConfig { Enabled = true, MaxAttempts = 3, DelayMs = 200 });
+        Assert.True(p.IsRetryable(VisionErrorCode.NoTargetFound));
+        Assert.Equal(3, p.MaxAttempts);
+
+        p.ApplyConfig(new RetryConfig { Enabled = false, MaxAttempts = 2, DelayMs = 0 });
+        Assert.False(p.IsRetryable(VisionErrorCode.NoTargetFound));
+        Assert.Equal(2, p.MaxAttempts);
+        Assert.Equal(0, p.DelayMs);
+    }
+
     // ---- 管线集成：重拍循环 ----
 
     [Fact]
@@ -237,6 +250,24 @@ public class RetryPolicyTests : IDisposable
 
         Assert.Equal(VisionErrorCode.NoTargetFound, result.ErrorCode);
         Assert.Equal(1, counter.Calls);
+    }
+
+    [Fact]
+    public async Task ApplyRetry_HotSwapsPolicy_WithoutRestart()
+    {
+        var (service, counter) = CreateService(
+            retry: new RetryConfig { MaxAttempts = 3, DelayMs = 0 });
+
+        var before = await service.RunAsync("HIT_RETRY", CancellationToken.None);
+        Assert.Equal(VisionErrorCode.NoTargetFound, before.ErrorCode);
+        Assert.Equal(3, counter.Calls); // 初始策略重拍 3 次
+
+        // 设置页保存后热切换：关闭重拍立即生效，无需重启
+        service.ApplyRetry(new RetryConfig { Enabled = false, MaxAttempts = 3, DelayMs = 0 });
+        counter.Calls = 0;
+        var after = await service.RunAsync("HIT_RETRY", CancellationToken.None);
+        Assert.Equal(VisionErrorCode.NoTargetFound, after.ErrorCode);
+        Assert.Equal(1, counter.Calls); // 热切换后不再重拍
     }
 
     [Fact]

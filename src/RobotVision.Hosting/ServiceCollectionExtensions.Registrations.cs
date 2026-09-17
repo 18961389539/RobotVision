@@ -471,6 +471,9 @@ public static partial class ServiceCollectionExtensions
 
                 sp.GetRequiredService<SuccessCaptureStore>().ApplyConfig(updated.CaptureSuccess);
 
+                // 失败重拍配置热应用（重试循环每次读取当前策略）
+                vision.ApplyRetry(updated.Retry);
+
                 // MaxConcurrent/TcpBacklog 首次固化或启动时读取，运行时修改不生效（UI 已提示重启）
                 if (updated.MaxConcurrent != vision.MaxConcurrent || updated.TcpBacklog != tcp.Backlog)
                     ServiceCollectionExtensionsLog.RuntimeSyncRestartRequired(

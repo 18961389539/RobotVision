@@ -257,6 +257,15 @@ public sealed class VisionService(
         }
     }
 
+    /// <summary>热应用失败重拍配置（设置页保存后立即生效；重试循环每次读取当前策略）。</summary>
+    public void ApplyRetry(RetryConfig cfg)
+    {
+        if (retry is null)
+            retry = new RetryPolicy(cfg);
+        else
+            retry.ApplyConfig(cfg);
+    }
+
     private sealed record ProcessCoreOutcome(VisionResult Result, PreviewRunOutcome? PreviewFrame);
 
     private static ProcessCoreOutcome Core(VisionResult result, PreviewRunOutcome? preview = null) =>

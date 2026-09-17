@@ -63,6 +63,8 @@ public partial class SettingsViewModel
 
     [ObservableProperty] private bool _isSuccessExpanded;
 
+    [ObservableProperty] private bool _isRetryExpanded;
+
     [ObservableProperty] private bool _isResultLogExpanded = true;
 
     [ObservableProperty] private bool _isFileLogExpanded;
@@ -160,6 +162,8 @@ public partial class SettingsViewModel
             [SettingsField.FailureRetainedDays] = SettingsGroup.Retention,
             [SettingsField.CaptureSuccessRetainedDays] = SettingsGroup.Retention,
             [SettingsField.CaptureSuccessMaxWidth] = SettingsGroup.Retention,
+            [SettingsField.RetryMaxAttempts] = SettingsGroup.Retention,
+            [SettingsField.RetryDelayMs] = SettingsGroup.Retention,
             [SettingsField.ResultLogRetainedDays] = SettingsGroup.ResultLog,
             [SettingsField.ResultLogSink] = SettingsGroup.ResultLog,
             [SettingsField.FileLoggingRetainedDays] = SettingsGroup.FileLog,
@@ -381,6 +385,7 @@ public partial class SettingsViewModel
             case SettingsGroup.Retention:
                 IsRetentionExpanded = true;
                 IsSuccessExpanded = true;
+                IsRetryExpanded = true;
                 break;
             case SettingsGroup.ResultLog:
                 IsResultLogExpanded = true;

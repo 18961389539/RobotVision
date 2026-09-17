@@ -305,6 +305,44 @@ public class AppSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Save_RetryNode_WritesAndSyncs()
+    {
+        var cfg = WriteBase("""{ "IpAddress": "0.0.0.0", "TcpPort": 9999, "TimeoutMs": 5000 }""");
+        var store = new AppSettingsStore(cfg, _file);
+
+        store.Save(new ServiceSettingsValues(
+            5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999, [],
+            RetryEnabled: false, RetryMaxAttempts: 4, RetryDelayMs: 500));
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(_file));
+        var retry = doc.RootElement.GetProperty("Retry");
+        Assert.False(retry.GetProperty("Enabled").GetBoolean());
+        Assert.Equal(4, retry.GetProperty("MaxAttempts").GetInt32());
+        Assert.Equal(500, retry.GetProperty("DelayMs").GetInt32());
+
+        // 内存同步
+        Assert.False(cfg.Retry.Enabled);
+        Assert.Equal(4, cfg.Retry.MaxAttempts);
+        Assert.Equal(500, cfg.Retry.DelayMs);
+        // UI 不编辑错误码：默认列表（1019/1007）保留
+        Assert.Equal(2, cfg.Retry.ErrorCodes.Count);
+    }
+
+    [Fact]
+    public void Save_RetryOutOfRange_Throws()
+    {
+        var cfg = WriteBase("""{ "IpAddress": "0.0.0.0", "TcpPort": 9999, "TimeoutMs": 5000 }""");
+        var store = new AppSettingsStore(cfg, _file);
+
+        Assert.Throws<InvalidDataException>(() => store.Save(new ServiceSettingsValues(
+            5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999, [],
+            RetryMaxAttempts: 9)));
+        Assert.Throws<InvalidDataException>(() => store.Save(new ServiceSettingsValues(
+            5000, 4, 2, 16, 0, true, 200, "0.0.0.0", 9999, [],
+            RetryDelayMs: 99_999)));
+    }
+
+    [Fact]
     public void Save_EndpointChanged_ReturnsEmpty_RestartHandledByCaller()
     {
         // 新语义：端点热重启由调用方（设置页）执行，Store 只落盘 + 同步内存

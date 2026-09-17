@@ -35,6 +35,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
     private const bool DefaultResultLogJsonl = true;
     private const bool DefaultResultLogSqlite = true;
     private const int DefaultResultLogRetainedDays = 30;
+    private const bool DefaultRetryEnabled = true;
+    private const int DefaultRetryMaxAttempts = 3;
+    private const int DefaultRetryDelayMs = 200;
     private const string DefaultInferenceProvider = "OpenVinoGpu";
     private const int DefaultInferenceMaxSessions = 8;
     private const bool DefaultFileLoggingEnabled = true;
@@ -147,6 +150,16 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
     [ObservableProperty]
     private int _resultLogRetainedDays = DefaultResultLogRetainedDays;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowRetryFields))]
+    private bool _retryEnabled = DefaultRetryEnabled;
+
+    [ObservableProperty]
+    private int _retryMaxAttempts = DefaultRetryMaxAttempts;
+
+    [ObservableProperty]
+    private int _retryDelayMs = DefaultRetryDelayMs;
+
     public IReadOnlyList<string> InferenceProviderOptions { get; } = ["OpenVinoGpu", "OpenVinoCpu"];
 
     [ObservableProperty]
@@ -170,6 +183,7 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
     public bool ShowFailureRetention => FailureEnabled || FailureSaveOverlay;
     public bool ShowCaptureSuccessFields => CaptureSuccessEnabled || CaptureSuccessSaveOverlay;
     public bool ShowResultLogFields => ResultLogEnabled;
+    public bool ShowRetryFields => RetryEnabled;
     public bool ShowFileLoggingFields => FileLoggingEnabled;
 
     public string FailureFolderPath => _cfg.ResolveDataPath(_cfg.FailureImage.Folder);
@@ -282,6 +296,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
             ResultLogJsonl = _results.JsonlEnabled;
             ResultLogSqlite = _results.SqliteEnabled;
             ResultLogRetainedDays = _results.RetainedDays;
+            RetryEnabled = _cfg.Retry.Enabled;
+            RetryMaxAttempts = _cfg.Retry.MaxAttempts;
+            RetryDelayMs = _cfg.Retry.DelayMs;
             InferenceProvider = string.IsNullOrWhiteSpace(_cfg.Inference.Provider)
                 ? DefaultInferenceProvider
                 : _cfg.Inference.Provider;
@@ -460,6 +477,13 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
             MaxWidth = values.CaptureSuccessMaxWidth,
             Folder = _cfg.CaptureSuccess.Folder,
         });
+        _vision.ApplyRetry(new RetryConfig
+        {
+            Enabled = values.RetryEnabled,
+            MaxAttempts = values.RetryMaxAttempts,
+            DelayMs = values.RetryDelayMs,
+            ErrorCodes = [.. _cfg.Retry.ErrorCodes],
+        });
     }
 
     [RelayCommand]
@@ -497,6 +521,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         ResultLogJsonl = DefaultResultLogJsonl;
         ResultLogSqlite = DefaultResultLogSqlite;
         ResultLogRetainedDays = DefaultResultLogRetainedDays;
+        RetryEnabled = DefaultRetryEnabled;
+        RetryMaxAttempts = DefaultRetryMaxAttempts;
+        RetryDelayMs = DefaultRetryDelayMs;
         InferenceProvider = DefaultInferenceProvider;
         InferenceMaxSessions = DefaultInferenceMaxSessions;
         FileLoggingEnabled = DefaultFileLoggingEnabled;
@@ -613,7 +640,8 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
             ProcessHealthRetainedDays,
             UiTheme,
             PlcDebugAlwaysOk, PlcDebugDefaultX, PlcDebugDefaultY, PlcDebugDefaultRz,
-            FailureSaveOverlay, CaptureSuccessSaveOverlay);
+            FailureSaveOverlay, CaptureSuccessSaveOverlay,
+            RetryEnabled, RetryMaxAttempts, RetryDelayMs);
     }
 
     private static bool Same(ServiceSettingsValues a, ServiceSettingsValues b) =>
@@ -633,6 +661,9 @@ public partial class SettingsViewModel : ObservableObject, ICommitPendingEdits, 
         a.ResultLogJsonl == b.ResultLogJsonl &&
         a.ResultLogSqlite == b.ResultLogSqlite &&
         a.ResultLogRetainedDays == b.ResultLogRetainedDays &&
+        a.RetryEnabled == b.RetryEnabled &&
+        a.RetryMaxAttempts == b.RetryMaxAttempts &&
+        a.RetryDelayMs == b.RetryDelayMs &&
         string.Equals(a.InferenceProvider, b.InferenceProvider, StringComparison.OrdinalIgnoreCase) &&
         a.InferenceMaxSessions == b.InferenceMaxSessions &&
         a.FileLoggingEnabled == b.FileLoggingEnabled &&
