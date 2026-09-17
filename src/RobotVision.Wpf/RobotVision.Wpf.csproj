@@ -31,8 +31,11 @@
   <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="appsettings.Development.json" CopyToOutputDirectory="PreserveNewest" />
-    <!-- 仅拷贝示例配方 JSON；大体积 ONNX 与运行时数据由 appsettings DataRoot / ModelsFolder 指向，避免每次构建复制整包。 -->
+    <!-- 仅拷贝示例配方 JSON；大体积 ONNX 已按下方 models 通配随包部署（PreserveNewest 只拷增量）。 -->
     <None Include="..\..\recipes\*.json" CopyToOutputDirectory="PreserveNewest" Link="recipes.samples\%(Filename)%(Extension)" />
+    <!-- 模型随包部署：exe 目录自包含（部署布局优先），双击/发布不依赖"工作目录回退"；
+         F5 的 workingDirectory 指向仓库根，此前仅靠 ResolveFolder 的 CWD 回退才找到 models。 -->
+    <None Include="..\..\models\**\*" CopyToOutputDirectory="PreserveNewest" Link="models\%(RecursiveDir)%(Filename)%(Extension)" Condition="Exists('..\..\models')" />
     <!-- MaskCaliperTabTimingTests 从 bin 的 recipes\ 读 OSDP.json；上面的通配只拷到 recipes.samples\，这里显式补拷一份。 -->
     <None Include="..\..\recipes\OSDP.json" CopyToOutputDirectory="PreserveNewest" Link="recipes\OSDP.json" />
     <None Include="..\..\data\calibration\**\*" CopyToOutputDirectory="PreserveNewest" Link="data\calibration\%(RecursiveDir)%(Filename)%(Extension)" />
