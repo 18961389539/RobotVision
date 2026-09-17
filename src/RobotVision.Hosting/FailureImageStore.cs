@@ -24,12 +24,18 @@ public sealed record FailureContext(
 /// - 1007 未检出：限流（同配方窗口内只存 1 张）+ 降采样缩图（默认宽 640）；
 /// - 其余错误（1003/1005/1099 等）：全量留存、原分辨率；
 /// - 滚动清理优先保留非 1007（先删 1007 最旧，再删非 1007 最旧），支持数量与天数双配额。
-/// 文件名 {时间戳}_{配方}_{错误码}.png；绘制图为同名 _ov.png。孤儿 JSON（无对应 PNG）一并清理。
+/// 目录结构按配方分文件夹，原图与绘制图再分子目录：
+/// {留存根}\{配方}\original\{时间戳}_{配方}_{错误码}.png   （去畸变原图）
+/// {留存根}\{配方}\overlay\{时间戳}_{配方}_{错误码}.png   （绘制图，十字/框/ROI）
+/// 孤儿 JSON（无对应 PNG）一并清理。
 /// 留存是尽力而为：任何 I/O 异常只记日志，绝不影响产线管线；克隆留调用线程完成，
 /// PNG 编码/元数据/清理移到后台线程池（_sync 串行），管线不阻塞。
 /// </summary>
 public sealed class FailureImageStore
 {
+    private const string OriginalSubDir = "original";
+    private const string OverlaySubDir = "overlay";
+
     private sealed record FailureMeta(
         string Recipe, int ErrorCode, string Message, double ElapsedMs,
         DateTime SavedAt, int Width, int Height,
@@ -176,7 +182,8 @@ public sealed class FailureImageStore
         }
     }
 
-    /// <summary>后台线程实际落盘：PNG + JSON 元数据 + 统计 + 滚动清理（_sync 串行）。</summary>
+    /// <summary>后台线程实际落盘：PNG + JSON 元数据 + 统计 + 滚动清理（_sync 串行）。
+    /// 按配方分文件夹，原图与绘制图分入 original/overlay 子目录。</summary>
     private void WriteCore(Mat? original, Mat? overlay, FailureMeta meta)
     {
         try
@@ -184,11 +191,14 @@ public sealed class FailureImageStore
             lock (_sync)
             {
                 Directory.CreateDirectory(_folder);
+                var recipeFolder = Path.Combine(_folder, meta.Recipe);
                 var baseName = $"{meta.SavedAt:yyyyMMdd_HHmmssfff}_{meta.Recipe}_{meta.ErrorCode}";
                 if (original is not null)
-                    WritePair(original, baseName, meta with { Overlay = false, Width = original.Width, Height = original.Height });
+                    WritePair(recipeFolder, OriginalSubDir, original, baseName,
+                        meta with { Overlay = false, Width = original.Width, Height = original.Height });
                 if (overlay is not null)
-                    WritePair(overlay, baseName + "_ov", meta with { Overlay = true, Width = overlay.Width, Height = overlay.Height });
+                    WritePair(recipeFolder, OverlaySubDir, overlay, baseName,
+                        meta with { Overlay = true, Width = overlay.Width, Height = overlay.Height });
 
                 if (RetainedCount > 0 || RetainedDays > 0)
                     Cleanup();
@@ -207,11 +217,13 @@ public sealed class FailureImageStore
         }
     }
 
-    private void WritePair(Mat image, string baseName, FailureMeta meta)
+    private void WritePair(string recipeFolder, string subDir, Mat image, string baseName, FailureMeta meta)
     {
-        var png = Path.Combine(_folder, baseName + ".png");
+        var dir = Path.Combine(recipeFolder, subDir);
+        Directory.CreateDirectory(dir);
+        var png = Path.Combine(dir, baseName + ".png");
         for (var i = 1; File.Exists(png); i++)
-            png = Path.Combine(_folder, $"{baseName}_{i}.png");
+            png = Path.Combine(dir, $"{baseName}_{i}.png");
 
         Cv2.ImWrite(png, image);
         var jsonPath = Path.ChangeExtension(png, ".json");
@@ -235,15 +247,16 @@ public sealed class FailureImageStore
     }
 
     /// <summary>
-    /// 滚动清理：1) 删除孤儿 JSON（无对应 PNG）；2) 超过 RetainedDays 的删除
+    /// 滚动清理（递归覆盖 配方/original、配方/overlay 全部子目录）：
+    /// 1) 删除孤儿 JSON（无对应 PNG）；2) 超过 RetainedDays 的删除
     /// （按文件名时间戳判断，与留存时钟一致，不依赖文件系统时间）；
     /// 3) 超过 RetainedCount 时按优先级删除——1007 优先（最旧先删），非 1007 仅当 1007 删完仍超配额才删。
     /// </summary>
     private void Cleanup()
     {
         // 孤儿 JSON 清理
-        var pngs = Directory.GetFiles(_folder, "*.png").ToList();
-        var jsonFiles = Directory.GetFiles(_folder, "*.json");
+        var pngs = Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).ToList();
+        var jsonFiles = Directory.GetFiles(_folder, "*.json", SearchOption.AllDirectories);
         foreach (var json in jsonFiles)
         {
             if (!pngs.Any(p => string.Equals(Path.ChangeExtension(p, ".json"), json, StringComparison.OrdinalIgnoreCase)))
@@ -302,8 +315,7 @@ public sealed class FailureImageStore
     private static bool IsNoTargetFile(string png)
     {
         var name = Path.GetFileName(png);
-        return name.EndsWith("_1007.png", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("_1007_ov", StringComparison.OrdinalIgnoreCase);
+        return name.EndsWith("_1007.png", StringComparison.OrdinalIgnoreCase);
     }
 
     private void TryDelete(string path)

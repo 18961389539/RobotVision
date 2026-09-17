@@ -549,21 +549,22 @@ public class FailureImageStoreRuntimeTests : IDisposable
         for (var i = 0; i < 5; i++)
             store.Save("R", mat, VisionResult.Fail("R", VisionErrorCode.InternalError, "内部错误", 1));
         WaitForPngCount(_folder, 5); // Save 已异步化，等待后台落盘完成
-        Assert.Equal(5, Directory.GetFiles(_folder, "*.png").Length);
+        Assert.Equal(5, Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Length);
 
         store.RetainedCount = 2;
         store.Save("R", mat, VisionResult.Fail("R", VisionErrorCode.InternalError, "内部错误", 1));
         WaitForPngCount(_folder, 2); // 等待最后一次落盘（含滚动清理到新上限）
-        Assert.Equal(2, Directory.GetFiles(_folder, "*.png").Length);
+        Assert.Equal(2, Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Length);
     }
 
-    /// <summary>等待后台落盘完成（Save 已异步化，断言前轮询目录避免与后台线程竞态）。</summary>
+    /// <summary>等待后台落盘完成（Save 已异步化，断言前轮询目录避免与后台线程竞态）。
+    /// 留存按配方分文件夹，需递归统计。</summary>
     private static void WaitForPngCount(string folder, int expected)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         while (DateTime.UtcNow < deadline)
         {
-            if (Directory.Exists(folder) && Directory.GetFiles(folder, "*.png").Length == expected)
+            if (Directory.Exists(folder) && Directory.GetFiles(folder, "*.png", SearchOption.AllDirectories).Length == expected)
                 return;
             Thread.Sleep(25);
         }

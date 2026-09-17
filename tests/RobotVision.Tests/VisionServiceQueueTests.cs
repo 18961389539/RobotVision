@@ -197,10 +197,12 @@ public class VisionServiceQueueTests : IDisposable
 
             // 失败留存已异步化（后台落盘），等待文件出现再断言；
             // 同进程并发类测试会挤占线程池，放宽到 15s
-            // 失败留存已异步化(后台落盘),固定等待 2s 后断言(轮询曾偶发空目录误判)
+            // 失败留存已异步化(后台落盘),固定等待 2s 后断言(轮询曾偶发空目录误判);
+            // 留存按配方分文件夹（original 子目录），需递归枚举
             await Task.Delay(2000);
-            var pngs = Directory.Exists(failureFolder) ? Directory.GetFiles(failureFolder, "*.png") : [];
-            var jsons = Directory.GetFiles(failureFolder, "*.json");
+            var pngs = Directory.Exists(failureFolder)
+                ? Directory.GetFiles(failureFolder, "*.png", SearchOption.AllDirectories) : [];
+            var jsons = Directory.GetFiles(failureFolder, "*.json", SearchOption.AllDirectories);
             Assert.Single(pngs);
             Assert.Single(jsons);
             Assert.EndsWith("_SLOW_1005.png", Path.GetFileName(pngs[0]), StringComparison.Ordinal);

@@ -9,13 +9,18 @@ namespace RobotVision.Hosting;
 
 /// <summary>
 /// 成功产品现场图留存（默认关，见 <see cref="CaptureSuccessConfig"/>）：
-/// 开启后成功检测也把去畸变图落盘（data/captures/yyyy-MM-dd/ 按天分目录），
-/// 元数据 JSON 与图同名（配方/坐标/角度/置信度/耗时）。
+/// 开启后成功检测也把去畸变图落盘，元数据 JSON 与图同名（配方/坐标/角度/置信度/耗时）。
+/// 目录结构按配方分文件夹、内按天分目录，原图与绘制图再分子目录：
+/// {留存根}\{配方}\{yyyy-MM-dd}\original\{时间戳}_{配方}_OK.png   （去畸变原图）
+/// {留存根}\{配方}\{yyyy-MM-dd}\overlay\{时间戳}_{配方}_OK.png   （绘制图，十字/框/ROI）
 /// 与 <see cref="FailureImageStore"/> 同模式：克隆在调用线程完成，PNG 编码/写盘移到后台线程池，
 /// 绝不阻塞检测节拍；默认关闭避免高速节拍下磁盘暴涨，产线需要复检/工艺分析时再开。
 /// </summary>
 public sealed class SuccessCaptureStore
 {
+    private const string OriginalSubDir = "original";
+    private const string OverlaySubDir = "overlay";
+
     private sealed record CaptureMeta(
         string Recipe, string T, double? X, double? Y, double? Angle, double? Confidence,
         int Count, double ElapsedMs, string? CameraId, string? StationId, string? AngleMode,
@@ -110,21 +115,22 @@ public sealed class SuccessCaptureStore
         }
     }
 
-    /// <summary>后台线程实际落盘：PNG + JSON 元数据（_sync 串行）+ 超期清理。</summary>
+    /// <summary>后台线程实际落盘：PNG + JSON 元数据（_sync 串行）+ 超期清理。
+    /// 按配方分文件夹、内按天分目录，原图与绘制图分入 original/overlay 子目录。</summary>
     private void WriteCore(Mat? original, Mat? overlay, string recipe, DateTime savedAt, CaptureMeta meta)
     {
         try
         {
             lock (_sync)
             {
-                var dayDir = Path.Combine(_folder, savedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-                Directory.CreateDirectory(dayDir);
+                var dayDir = Path.Combine(
+                    _folder, recipe, savedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
 
                 var baseName = $"{savedAt:yyyyMMdd_HHmmssfff}_{recipe}_OK";
                 if (original is not null)
-                    WritePair(dayDir, original, baseName, meta with { Overlay = false });
+                    WritePair(dayDir, OriginalSubDir, original, baseName, meta with { Overlay = false });
                 if (overlay is not null)
-                    WritePair(dayDir, overlay, baseName + "_ov", meta with { Overlay = true });
+                    WritePair(dayDir, OverlaySubDir, overlay, baseName, meta with { Overlay = true });
 
                 if (RetainedDays > 0)
                     Cleanup(DateTime.Now);
@@ -141,11 +147,13 @@ public sealed class SuccessCaptureStore
         }
     }
 
-    private static void WritePair(string dayDir, Mat image, string baseName, CaptureMeta meta)
+    private static void WritePair(string dayDir, string subDir, Mat image, string baseName, CaptureMeta meta)
     {
-        var png = Path.Combine(dayDir, baseName + ".png");
+        var dir = Path.Combine(dayDir, subDir);
+        Directory.CreateDirectory(dir);
+        var png = Path.Combine(dir, baseName + ".png");
         for (var i = 1; File.Exists(png); i++)
-            png = Path.Combine(dayDir, $"{baseName}_{i}.png");
+            png = Path.Combine(dir, $"{baseName}_{i}.png");
 
         Cv2.ImWrite(png, image);
         File.WriteAllText(Path.ChangeExtension(png, ".json"),
@@ -155,19 +163,22 @@ public sealed class SuccessCaptureStore
     private Mat CloneOrDownscale(Mat mat) =>
         MaxWidth > 0 && mat.Width > MaxWidth ? Downscale(mat, MaxWidth) : mat.Clone();
 
-    /// <summary>删除超过保留天数的按天目录（目录名 yyyy-MM-dd）。</summary>
+    /// <summary>删除超过保留天数的按天目录（位于 {配方}\{yyyy-MM-dd} 二级目录，递归删除原图/绘制图）。</summary>
     private void Cleanup(DateTime now)
     {
         var cutoff = now.Date.AddDays(-RetainedDays);
-        foreach (var dir in Directory.EnumerateDirectories(_folder))
+        foreach (var recipeDir in Directory.EnumerateDirectories(_folder))
         {
-            var name = Path.GetFileName(dir);
-            if (DateTime.TryParseExact(name, "yyyy-MM-dd",
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.None, out var day) && day < cutoff)
+            foreach (var dir in Directory.EnumerateDirectories(recipeDir))
             {
-                try { Directory.Delete(dir, recursive: true); }
-                catch (Exception ex) { SuccessCaptureStoreLog.CleanupDirFailed(_log, ex, dir); }
+                var name = Path.GetFileName(dir);
+                if (DateTime.TryParseExact(name, "yyyy-MM-dd",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out var day) && day < cutoff)
+                {
+                    try { Directory.Delete(dir, recursive: true); }
+                    catch (Exception ex) { SuccessCaptureStoreLog.CleanupDirFailed(_log, ex, dir); }
+                }
             }
         }
     }

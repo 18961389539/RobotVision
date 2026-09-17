@@ -212,13 +212,15 @@ public class RetryPolicyTests : IDisposable
             Assert.Equal(1, total);
             Assert.Equal(1, failed);
 
-            // 失败留存只在最终尝试落盘（中间失败不刷留存）
+            // 失败留存只在最终尝试落盘（中间失败不刷留存）；
+            // 留存按配方分文件夹（original 子目录），需递归枚举
             TestWait.Until(
                 () => Directory.Exists(failureFolder) &&
-                      Directory.GetFiles(failureFolder, "*.png").Length == 1 &&
-                      Directory.GetFiles(failureFolder, "*.json").Length == 1,
+                      Directory.GetFiles(failureFolder, "*.png", SearchOption.AllDirectories).Length == 1 &&
+                      Directory.GetFiles(failureFolder, "*.json", SearchOption.AllDirectories).Length == 1,
                 TimeSpan.FromSeconds(5), description: "等待最终失败留存落盘");
-            var text = File.ReadAllText(Directory.GetFiles(failureFolder, "*.json").Single());
+            var text = File.ReadAllText(
+                Directory.GetFiles(failureFolder, "*.json", SearchOption.AllDirectories).Single());
             Assert.Contains("\"PixelPoseCount\": 0", text, StringComparison.Ordinal);
         }
         finally

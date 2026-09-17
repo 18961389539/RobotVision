@@ -98,9 +98,11 @@ public partial class FailuresViewModel : ObservableObject, IDisposable
         }
 
         // 目录枚举是同步 IO，放在 UI 线程会随失败图数量线性卡顿，挪到后台一次完成。
+        // 留存按配方分文件夹（配方/original、配方/overlay），必须递归扫描全部子目录；
+        // 排序按文件名（时间戳前缀）而非完整路径，避免配方目录名干扰时间倒序。
         var files = await Task.Run(
-            () => Directory.GetFiles(_store.Folder, "*.png")
-                .OrderByDescending(p => p, StringComparer.OrdinalIgnoreCase)
+            () => Directory.EnumerateFiles(_store.Folder, "*.png", SearchOption.AllDirectories)
+                .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
                 .Select(p => (Png: p, Json: Path.ChangeExtension(p, ".json")))
                 .ToList(),
             token);
@@ -114,19 +116,16 @@ public partial class FailuresViewModel : ObservableObject, IDisposable
 
             // 元数据读取（同步文件 IO）与缩略图解码（CPU 密集）合并为一次后台调用：
             // 原先 ReadMeta 留在 UI 线程，每张图一次同步读盘，大量失败图时明显卡顿。
-            var (recipe, code, meta, thumb) = await Task.Run(
+            var (recipe, code, isOverlay, meta, thumb) = await Task.Run(
                 () =>
                 {
-                    var (r, c, t) = ReadMeta(json);
-                    return (r, c, t, LoadBitmap(png, 220) ?? PlaceholderThumb);
+                    var (r, c, o, t) = ReadMeta(json);
+                    return (r, c, o, t, LoadBitmap(png, 220) ?? PlaceholderThumb);
                 },
                 token);
             if (token.IsCancellationRequested)
                 return;
-            var display = Path.GetFileName(png);
-            if (display.Contains("_ov.", StringComparison.OrdinalIgnoreCase) ||
-                display.Contains("_ov_", StringComparison.OrdinalIgnoreCase))
-                display = "[绘制] " + display;
+            var display = (isOverlay ? "[绘制] " : "") + Path.GetFileName(png);
             loaded.Add(new FailureItem(
                 png, json, display, recipe, code, meta, thumb));
         }
@@ -306,28 +305,30 @@ public partial class FailuresViewModel : ObservableObject, IDisposable
         return img;
     }
 
-    /// <summary>解析留存元数据：返回 (配方, 错误码, 摘要文本)。缺文件/解析失败返回占位值。</summary>
-    private static (string Recipe, string ErrorCode, string MetaText) ReadMeta(string jsonPath)
+    /// <summary>解析留存元数据：返回 (配方, 错误码, 是否绘制图, 摘要文本)。缺文件/解析失败返回占位值。
+    /// 绘制图通过 JSON 的 Overlay 字段识别（原图/绘制图已分目录，不再依赖文件名 _ov）。</summary>
+    private static (string Recipe, string ErrorCode, bool IsOverlay, string MetaText) ReadMeta(string jsonPath)
     {
         if (!File.Exists(jsonPath))
-            return ("", "", "（元数据缺失）");
+            return ("", "", false, "（元数据缺失）");
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllText(jsonPath));
             var root = doc.RootElement;
             var recipe = GetString(root, "Recipe");
             var code = GetString(root, "ErrorCode");
+            var isOverlay = root.TryGetProperty("Overlay", out var ov) && ov.ValueKind == JsonValueKind.True;
             var meta = string.Join("  ",
                 $"配方 {recipe}",
                 $"错误码 {code}",
                 $"{GetString(root, "Message")}",
                 $"耗时 {GetString(root, "ElapsedMs")}ms");
-            return (recipe, code, meta);
+            return (recipe, code, isOverlay, meta);
         }
         catch (Exception ex)
         {
             Trace.TraceWarning("[Failures] 留存元数据解析失败: {0} ({1})", jsonPath, ex.Message);
-            return ("", "", "（元数据解析失败）");
+            return ("", "", false, "（元数据解析失败）");
         }
     }
 

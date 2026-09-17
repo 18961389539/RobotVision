@@ -370,7 +370,7 @@
                         <StackPanel Margin="0,10,0,0">
                             <StackPanel Margin="0,0,0,8">
                                 <ui:ToggleSwitch Content="保存原图（去畸变现场图）" IsChecked="{Binding FailureEnabled}" />
-                                <ui:ToggleSwitch Content="保存绘制图（十字/框/ROI，文件名带 _ov）"
+                                <ui:ToggleSwitch Content="保存绘制图（十字/框/ROI，存入 overlay 子目录）"
                                                  IsChecked="{Binding FailureSaveOverlay}" Margin="0,8,0,0" />
                             </StackPanel>
                             <StackPanel MaxWidth="480" HorizontalAlignment="Left"
@@ -415,7 +415,7 @@
                         <StackPanel Margin="0,10,0,0">
                             <ui:ToggleSwitch Content="保存原图（去畸变现场图，默认关，高速产线慎用）"
                                              IsChecked="{Binding CaptureSuccessEnabled}" />
-                            <ui:ToggleSwitch Content="保存绘制图（十字/框/ROI，文件名带 _ov）"
+                            <ui:ToggleSwitch Content="保存绘制图（十字/框/ROI，存入 overlay 子目录）"
                                              IsChecked="{Binding CaptureSuccessSaveOverlay}" Margin="0,8,0,0" />
                             <StackPanel Margin="0,8,0,0" MaxWidth="480" HorizontalAlignment="Left"
                                         Visibility="{Binding ShowCaptureSuccessFields,

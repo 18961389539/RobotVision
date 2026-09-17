@@ -137,10 +137,13 @@ public class SmokePipelineIntegrationTests : IClassFixture<SmokePipelineIntegrat
         var failDir = _fixture.Server.Cfg.FailureImage.Folder;
         Directory.Exists(failDir).Should().BeTrue("失败现场目录应创建");
         // 落盘为 fire-and-forget（PNG 编码在后台线程）：轮询等待文件出现，最多 5 秒
+        // 留存按配方分文件夹（PLAIN/original），需递归枚举
         var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (Directory.Exists(failDir) && Directory.GetFiles(failDir).Length == 0 && DateTime.UtcNow < deadline)
+        while (Directory.Exists(failDir) &&
+               Directory.GetFiles(failDir, "*.png", SearchOption.AllDirectories).Length == 0 &&
+               DateTime.UtcNow < deadline)
             await Task.Delay(50);
-        Directory.GetFiles(failDir).Should().NotBeEmpty("未检出目标时失败现场图应落盘");
+        Directory.GetFiles(failDir, "*.png", SearchOption.AllDirectories).Should().NotBeEmpty("未检出目标时失败现场图应落盘");
     }
 
     [Fact]
@@ -214,7 +217,11 @@ public class SmokePipelineIntegrationTests : IClassFixture<SmokePipelineIntegrat
         result.Ok.Should().BeTrue();
 
         var captureDir = server.Cfg.CaptureSuccess.Folder;
-        var png = WaitForFile(Path.Combine(captureDir, DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), "*_OK.png");
+        // 留存按配方分文件夹、内按天分目录、原图进 original 子目录：
+        // {captures}\CAP\{yyyy-MM-dd}\original\*_OK.png
+        var dayDir = Path.Combine(
+            captureDir, "CAP", DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), "original");
+        var png = WaitForFile(dayDir, "*_OK.png");
         png.Should().NotBeEmpty("开启成功存图后应有 OK 现场图");
         // 元数据 JSON 与图同名;同后台线程 PNG 先写、JSON 后写,轮询等待
         var metaPath = Path.ChangeExtension(png, ".json");

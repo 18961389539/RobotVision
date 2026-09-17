@@ -131,8 +131,10 @@ public class FailuresViewModelTests
         using var dir = new TestInfra.TempDir("rv_fail_nojson");
         var failFolder = dir.CreateSub("failures");
         // 只有 PNG 没有 JSON：ReadMeta 返回占位值，条目仍应列出
+        var origDir = System.IO.Path.Combine(failFolder, "A01", "original");
+        Directory.CreateDirectory(origDir);
         using (var img = new Mat(32, 32, MatType.CV_8UC3, Scalar.All(50)))
-            Cv2.ImWrite(System.IO.Path.Combine(failFolder, "20260825120000000_A01_1005.png"), img);
+            Cv2.ImWrite(System.IO.Path.Combine(origDir, "20260825120000000_A01_1005.png"), img);
 
         var store = new FailureImageStore(
             new FailureImageConfig { Folder = failFolder },
@@ -146,11 +148,38 @@ public class FailuresViewModelTests
         vm.RecipeFilters.Should().Equal("全部");
     }
 
+    [Fact]
+    public async Task Refresh_OverlayJson_MarkedAsDrawn()
+    {
+        using var dir = new TestInfra.TempDir("rv_fail_overlay");
+        var failFolder = dir.CreateSub("failures");
+        WriteRetention(failFolder, "20260825120000000_A01_1005", "A01", "1005");
+        // 绘制图写入 overlay 子目录，JSON 标记 Overlay=true → 画廊显示 [绘制] 前缀
+        var ovDir = System.IO.Path.Combine(failFolder, "A01", "overlay");
+        Directory.CreateDirectory(ovDir);
+        using (var img = new Mat(32, 32, MatType.CV_8UC3, Scalar.All(120)))
+            Cv2.ImWrite(System.IO.Path.Combine(ovDir, "20260825120000000_A01_1005.png"), img);
+        File.WriteAllText(System.IO.Path.Combine(ovDir, "20260825120000000_A01_1005.json"),
+            """{"Recipe": "A01", "ErrorCode": "1005", "Message": "test", "ElapsedMs": 12, "Overlay": true}""");
+
+        var store = new FailureImageStore(
+            new FailureImageConfig { Folder = failFolder },
+            NullLogger<FailureImageStore>.Instance);
+        var vm = new FailuresViewModel(store, new TestDialogService(), TestLog.Null<FailuresViewModel>());
+        await vm.RefreshAsync();
+
+        vm.Items.Should().HaveCount(2);
+        vm.Items.Should().Contain(i => i.DisplayName.StartsWith("[绘制] "));
+        vm.Items.Should().Contain(i => !i.DisplayName.StartsWith("[绘制] "));
+    }
+
     private static void WriteRetention(string folder, string namePrefix, string recipe, string code)
     {
         using var img = new Mat(32, 32, MatType.CV_8UC3, Scalar.All(120));
-        Cv2.ImWrite(System.IO.Path.Combine(folder, $"{namePrefix}.png"), img);
-        File.WriteAllText(System.IO.Path.Combine(folder, $"{namePrefix}.json"),
+        var origDir = System.IO.Path.Combine(folder, recipe, "original");
+        Directory.CreateDirectory(origDir);
+        Cv2.ImWrite(System.IO.Path.Combine(origDir, $"{namePrefix}.png"), img);
+        File.WriteAllText(System.IO.Path.Combine(origDir, $"{namePrefix}.json"),
             $$"""{"Recipe": "{{recipe}}", "ErrorCode": "{{code}}", "Message": "test", "ElapsedMs": 12}""");
     }
 }

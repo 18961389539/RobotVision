@@ -7,8 +7,9 @@ using Xunit;
 namespace RobotVision.Tests;
 
 /// <summary>
-/// 失败现场图像留存测试：PNG+JSON 成对落盘、元数据内容、同毫秒冲突、
-/// 数量滚动清理（含孤儿元数据）、开关与空图守卫。时钟注入保证确定性。
+/// 失败现场图像留存测试：PNG+JSON 成对落盘、按配方分文件夹（原图/绘制图分
+/// original/overlay 子目录）、元数据内容、同毫秒冲突、数量滚动清理（含孤儿元数据）、
+/// 开关与空图守卫。时钟注入保证确定性。
 /// </summary>
 [Collection("Serial")]
 public class FailureImageStoreTests : IDisposable
@@ -42,19 +43,28 @@ public class FailureImageStoreTests : IDisposable
 
     private static void WaitForPngs(string folder, int expected) =>
         WaitForCondition(
-            () => Directory.Exists(folder) && Directory.GetFiles(folder, "*.png").Length == expected,
+            () => Directory.Exists(folder) &&
+                  Directory.GetFiles(folder, "*.png", SearchOption.AllDirectories).Length == expected,
             $"目录中应有 {expected} 张 PNG");
 
+    private static string OriginalDir(string folder, string recipe) =>
+        Path.Combine(folder, recipe, "original");
+
+    private static string OverlayDir(string folder, string recipe) =>
+        Path.Combine(folder, recipe, "overlay");
+
     [Fact]
-    public void Save_WritesPngAndJsonSidecar()
+    public void Save_WritesPngAndJsonSidecar_UnderRecipeOriginalFolder()
     {
         var store = CreateStore(clock: () => _base);
         using var image = MakeImage();
         store.Save("A01", image, MakeFailure());
         WaitForPngs(_folder, 1); // Save 已异步化，等待后台落盘完成
 
-        var pngs = Directory.GetFiles(_folder, "*.png");
-        var jsons = Directory.GetFiles(_folder, "*.json");
+        // 按配方分文件夹，原图进 {根}\A01\original\
+        var origDir = OriginalDir(_folder, "A01");
+        var pngs = Directory.GetFiles(origDir, "*.png");
+        var jsons = Directory.GetFiles(origDir, "*.json");
         Assert.Single(pngs);
         Assert.Single(jsons);
         Assert.Equal("20260822_100000000_A01_1007.png", Path.GetFileName(pngs[0]));
@@ -68,6 +78,25 @@ public class FailureImageStoreTests : IDisposable
         Assert.Contains("\"ErrorCode\": 1007", json, StringComparison.Ordinal);
         Assert.Contains("未检出目标", json, StringComparison.Ordinal); // 中文不转义，现场工程师可直接读
         Assert.Contains("\"ElapsedMs\": 123.4", json, StringComparison.Ordinal);
+        Assert.Contains("\"Overlay\": false", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Save_DifferentRecipes_GoToDifferentFolders()
+    {
+        var store = CreateStore(clock: () => _base);
+        using var image = MakeImage();
+
+        store.Save("A01", image, MakeFailure());
+        store.Save("B02", image, MakeFailure(VisionErrorCode.InternalError, "内部错误"));
+        WaitForPngs(_folder, 2);
+
+        var a01 = Directory.GetFiles(OriginalDir(_folder, "A01"), "*.png");
+        var b02 = Directory.GetFiles(OriginalDir(_folder, "B02"), "*.png");
+        Assert.Single(a01);
+        Assert.Single(b02);
+        Assert.Contains("A01_1007.png", Path.GetFileName(a01[0]), StringComparison.Ordinal);
+        Assert.Contains("B02_1099.png", Path.GetFileName(b02[0]), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -82,11 +111,12 @@ public class FailureImageStoreTests : IDisposable
         // WriteCore 先落 PNG 再写 JSON：等待 JSON 就绪（全量并行时落盘可能滞后于 PNG）
         WaitForCondition(
             () => Directory.Exists(_folder) &&
-                  Directory.GetFiles(_folder, "*.json") is [var json] &&
+                  Directory.GetFiles(_folder, "*.json", SearchOption.AllDirectories) is [var json] &&
                   File.ReadAllText(json).Contains("\"RefineQualityNote\"", StringComparison.Ordinal),
             "JSON 应已落盘且含 RefineQualityNote");
 
-        var jsonText = File.ReadAllText(Directory.GetFiles(_folder, "*.json")[0]);
+        var jsonText = File.ReadAllText(
+            Directory.GetFiles(_folder, "*.json", SearchOption.AllDirectories)[0]);
         Assert.Contains("\"RefineQualityNote\": \"JLVision ncc 0.12 < 门 0.40\"", jsonText, StringComparison.Ordinal);
     }
 
@@ -100,11 +130,12 @@ public class FailureImageStoreTests : IDisposable
         store.Save("A01", image, failure, null, null, "ncc 0.12 < 门 0.40", 3);
         WaitForCondition(
             () => Directory.Exists(_folder) &&
-                  Directory.GetFiles(_folder, "*.json") is [var json] &&
+                  Directory.GetFiles(_folder, "*.json", SearchOption.AllDirectories) is [var json] &&
                   File.ReadAllText(json).Contains("\"PixelPoseCount\"", StringComparison.Ordinal),
             "JSON 应已落盘且含 PixelPoseCount");
 
-        var jsonText = File.ReadAllText(Directory.GetFiles(_folder, "*.json")[0]);
+        var jsonText = File.ReadAllText(
+            Directory.GetFiles(_folder, "*.json", SearchOption.AllDirectories)[0]);
         Assert.Contains("\"PixelPoseCount\": 3", jsonText, StringComparison.Ordinal);
     }
 
@@ -122,11 +153,12 @@ public class FailureImageStoreTests : IDisposable
         store2.Save("A01", image, MakeFailure(VisionErrorCode.InternalError, "内部错误"));
         WaitForPngs(_folder, 3); // 等待 3 次后台落盘全部完成
 
-        Assert.Equal(3, Directory.GetFiles(_folder, "*.png").Length);
+        var origDir = OriginalDir(_folder, "A01");
+        Assert.Equal(3, Directory.GetFiles(origDir, "*.png").Length);
         Assert.Contains("20260822_100000000_A01_1099_1.png",
-            Directory.GetFiles(_folder, "*.png").Select(Path.GetFileName));
+            Directory.GetFiles(origDir, "*.png").Select(Path.GetFileName));
         Assert.Contains("20260822_100000000_A01_1099_2.png",
-            Directory.GetFiles(_folder, "*.png").Select(Path.GetFileName));
+            Directory.GetFiles(origDir, "*.png").Select(Path.GetFileName));
     }
 
     [Fact]
@@ -149,12 +181,12 @@ public class FailureImageStoreTests : IDisposable
         WaitForCondition(
             () => store.TotalSaved == 5 &&
                   Directory.Exists(_folder) &&
-                  Directory.GetFiles(_folder, "*.png").Length == 3 &&
-                  Directory.GetFiles(_folder, "*.png").Any(p => p.Contains("100004000", StringComparison.Ordinal)),
+                  Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Length == 3 &&
+                  Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Any(p => p.Contains("100004000", StringComparison.Ordinal)),
             "滚动清理后保留最新 3 张");
 
-        var pngs = Directory.GetFiles(_folder, "*.png").Select(Path.GetFileName).OrderBy(n => n).ToList();
-        var jsons = Directory.GetFiles(_folder, "*.json").Select(Path.GetFileName).OrderBy(n => n).ToList();
+        var pngs = Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Select(Path.GetFileName).OrderBy(n => n).ToList();
+        var jsons = Directory.GetFiles(_folder, "*.json", SearchOption.AllDirectories).Select(Path.GetFileName).OrderBy(n => n).ToList();
 
         Assert.Equal(3, pngs.Count);
         Assert.Equal(3, jsons.Count);
@@ -221,7 +253,7 @@ public class FailureImageStoreTests : IDisposable
         }
         WaitForPngs(_folder, 6); // 等待 6 次后台落盘全部完成
 
-        Assert.Equal(6, Directory.GetFiles(_folder, "*.png").Length);
+        Assert.Equal(6, Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Length);
     }
 
     // ---- 分级留存：1007 限流 / 缩图 / 清理优先级 ----
@@ -253,7 +285,7 @@ public class FailureImageStoreTests : IDisposable
         store.Save("A01", image, MakeFailure());
         WaitForPngs(_folder, 2);
 
-        Assert.Equal(2, Directory.GetFiles(_folder, "*.png").Length);
+        Assert.Equal(2, Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Length);
     }
 
     [Fact]
@@ -266,7 +298,7 @@ public class FailureImageStoreTests : IDisposable
         store.Save("A01", image, MakeFailure());
         WaitForPngs(_folder, 1); // 等待后台落盘完成
 
-        var png = Directory.GetFiles(_folder, "*.png").Single();
+        var png = Directory.GetFiles(OriginalDir(_folder, "A01"), "*.png").Single();
         using var saved = Cv2.ImRead(png);
         Assert.Equal(8, saved.Width); // 高度按比例 48 * 8/64 = 6
         Assert.Equal(6, saved.Height);
@@ -290,11 +322,11 @@ public class FailureImageStoreTests : IDisposable
         // 等待最后一次落盘（含滚动清理）完成：数量 2 且包含最后保存的 A02（秒 2）
         WaitForCondition(
             () => Directory.Exists(_folder) &&
-                  Directory.GetFiles(_folder, "*.png").Length == 2 &&
-                  Directory.GetFiles(_folder, "*.png").Any(p => p.Contains("100002000", StringComparison.Ordinal)),
+                  Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Length == 2 &&
+                  Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Any(p => p.Contains("100002000", StringComparison.Ordinal)),
             "清理后保留 1099 与 A02_1007");
 
-        var pngs = Directory.GetFiles(_folder, "*.png").Select(Path.GetFileName).ToList();
+        var pngs = Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories).Select(Path.GetFileName).ToList();
         Assert.Equal(2, pngs.Count);
         // 配额 2：删 1007 中最旧（A01_1007），保留 1099 与 A02_1007
         Assert.Contains(pngs, n => n!.Contains("_1099.png", StringComparison.Ordinal));
@@ -308,18 +340,19 @@ public class FailureImageStoreTests : IDisposable
         var store = CreateStore(retained: 10, clock: () => _base);
         using var image = MakeImage();
 
-        // 手工制造孤儿 JSON（无对应 PNG）
-        Directory.CreateDirectory(_folder);
-        File.WriteAllText(Path.Combine(_folder, "orphan.json"), "{}");
+        // 手工制造孤儿 JSON（无对应 PNG，放配方子目录内）
+        var origDir = OriginalDir(_folder, "A01");
+        Directory.CreateDirectory(origDir);
+        File.WriteAllText(Path.Combine(origDir, "orphan.json"), "{}");
 
         store.Save("A01", image, MakeFailure(VisionErrorCode.InternalError, "内部错误"));
 
         // 等待后台落盘完成（含孤儿 JSON 清理）
         WaitForCondition(
-            () => !File.Exists(Path.Combine(_folder, "orphan.json")),
+            () => !File.Exists(Path.Combine(origDir, "orphan.json")),
             "孤儿 JSON 被清理");
 
-        Assert.False(File.Exists(Path.Combine(_folder, "orphan.json")));
+        Assert.False(File.Exists(Path.Combine(origDir, "orphan.json")));
     }
 
     [Fact]
@@ -336,7 +369,7 @@ public class FailureImageStoreTests : IDisposable
         store.Save("A01", image, MakeFailure(VisionErrorCode.InternalError, "内部错误"));
         WaitForPngs(_folder, 1); // 等待最后一次落盘（含天数清理）完成
 
-        Assert.Single(Directory.GetFiles(_folder, "*.png"));
+        Assert.Single(Directory.GetFiles(_folder, "*.png", SearchOption.AllDirectories));
     }
 
     [Fact]
@@ -364,10 +397,10 @@ public class FailureImageStoreTests : IDisposable
             new FailureContext(CameraId: "cam1", StationId: "st1", Models: "a.onnx|b.onnx",
                 AngleMode: "KeyPointLine", Confidence: 0.5, Iou: 0.7, Source: "pipeline"));
         WaitForCondition(
-            () => Directory.Exists(_folder) && Directory.GetFiles(_folder, "*.json").Length == 1,
+            () => Directory.Exists(_folder) && Directory.GetFiles(_folder, "*.json", SearchOption.AllDirectories).Length == 1,
             "元数据 JSON 落盘完成");
 
-        var json = Directory.GetFiles(_folder, "*.json").Single();
+        var json = Directory.GetFiles(_folder, "*.json", SearchOption.AllDirectories).Single();
         var text = File.ReadAllText(json);
         Assert.Contains("\"CameraId\": \"cam1\"", text, StringComparison.Ordinal);
         Assert.Contains("\"StationId\": \"st1\"", text, StringComparison.Ordinal);
@@ -376,7 +409,7 @@ public class FailureImageStoreTests : IDisposable
     }
 
     [Fact]
-    public void Save_OriginalAndOverlay_WritesTwoPngs()
+    public void Save_OriginalAndOverlay_SplitIntoOriginalOverlayFolders()
     {
         var store = new FailureImageStore(
             new FailureImageConfig { Enabled = true, SaveOverlay = true, Folder = _folder, RetainedCount = 10 },
@@ -387,16 +420,22 @@ public class FailureImageStoreTests : IDisposable
         store.Save("A01", image, MakeFailure(VisionErrorCode.InternalError, "内部错误"), overlay: overlay);
         WaitForPngs(_folder, 2);
 
-        var names = Directory.GetFiles(_folder, "*.png").Select(Path.GetFileName).ToHashSet(StringComparer.Ordinal);
-        Assert.Contains("20260822_100000000_A01_1099.png", names);
-        Assert.Contains("20260822_100000000_A01_1099_ov.png", names);
-        Assert.Equal(2, names.Count);
-        var ovJson = File.ReadAllText(Path.Combine(_folder, "20260822_100000000_A01_1099_ov.json"));
+        // 原图与绘制图必须分目录：同名文件，各居 original/overlay
+        var origNames = Directory.GetFiles(OriginalDir(_folder, "A01"), "*.png")
+            .Select(Path.GetFileName).ToHashSet(StringComparer.Ordinal);
+        var ovNames = Directory.GetFiles(OverlayDir(_folder, "A01"), "*.png")
+            .Select(Path.GetFileName).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(["20260822_100000000_A01_1099.png"], origNames);
+        Assert.Equal(["20260822_100000000_A01_1099.png"], ovNames);
+
+        var origJson = File.ReadAllText(Path.Combine(OriginalDir(_folder, "A01"), "20260822_100000000_A01_1099.json"));
+        var ovJson = File.ReadAllText(Path.Combine(OverlayDir(_folder, "A01"), "20260822_100000000_A01_1099.json"));
+        Assert.Contains("\"Overlay\": false", origJson, StringComparison.Ordinal);
         Assert.Contains("\"Overlay\": true", ovJson, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Save_OverlayOnly_WritesOvFile()
+    public void Save_OverlayOnly_WritesIntoOverlayFolder()
     {
         var store = new FailureImageStore(
             new FailureImageConfig { Enabled = false, SaveOverlay = true, Folder = _folder, RetainedCount = 10 },
@@ -407,8 +446,8 @@ public class FailureImageStoreTests : IDisposable
         store.Save("A01", image, MakeFailure(VisionErrorCode.InternalError, "内部错误"), overlay: overlay);
         WaitForPngs(_folder, 1);
 
-        Assert.Equal("20260822_100000000_A01_1099_ov.png",
-            Path.GetFileName(Directory.GetFiles(_folder, "*.png").Single()));
+        Assert.Equal("20260822_100000000_A01_1099.png",
+            Path.GetFileName(Directory.GetFiles(OverlayDir(_folder, "A01"), "*.png").Single()));
     }
 
     [Fact]
@@ -424,5 +463,3 @@ public class FailureImageStoreTests : IDisposable
         Assert.False(Directory.Exists(_folder));
     }
 }
-
-

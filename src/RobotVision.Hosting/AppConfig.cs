@@ -130,10 +130,11 @@ public sealed class FailureImageConfig
     /// <summary>保存去畸变原图（无十字/框）。false 且 <see cref="SaveOverlay"/> 也为 false 时不留存。</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>另存绘制图（十字/框/ROI，与配方试触发结果图一致）；文件名带 _ov。</summary>
+    /// <summary>另存绘制图（十字/框/ROI，与配方试触发结果图一致）；存入 {配方}\overlay 子目录。</summary>
     public bool SaveOverlay { get; set; }
 
-    /// <summary>留存目录（相对路径按目录解析规则锚定：exe 目录优先，工作目录回退）。</summary>
+    /// <summary>留存目录（按配方分文件夹，原图/绘制图分 original/overlay 子目录；
+    /// 相对路径按目录解析规则锚定：exe 目录优先，工作目录回退）。</summary>
     public string Folder { get; set; } = "data/failures";
 
     /// <summary>滚动保留最近 N 张（含元数据）；≤0 表示不自动清理。</summary>
@@ -262,9 +263,10 @@ public sealed class CaptureSuccessConfig
     /// <summary>保存去畸变原图。默认关，避免高速节拍下磁盘暴涨。</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>另存绘制图（十字/框/ROI）；文件名带 _ov。默认关。</summary>
+    /// <summary>另存绘制图（十字/框/ROI）；存入 {配方}\{日期}\overlay 子目录。默认关。</summary>
     public bool SaveOverlay { get; set; }
 
+    /// <summary>留存目录（按配方分文件夹，内按天分目录，原图/绘制图分 original/overlay 子目录）。</summary>
     public string Folder { get; set; } = "data/captures";
 
     /// <summary>缩图最大宽度（0 = 原图；产线量大利建议开缩图，如 1280）。</summary>
