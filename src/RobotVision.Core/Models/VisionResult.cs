@@ -81,6 +81,12 @@ public sealed record VisionResult
 
     public VisionErrorCode ErrorCode { get; init; }
 
+    /// <summary>宽容模式：文件夹/虚拟相机（回放、调试模拟）且工位无标定档案时，
+    /// <see cref="Poses"/> 为像素坐标（未做像素→机器人映射）。
+    /// UI 应明示「未标定」，不得把像素坐标当机器人坐标使用（如记示教输出）。
+    /// 仅试触发（preview）可能出现；TRIGGER 任何相机类型都保持 1004 严格。</summary>
+    public bool Uncalibrated { get; init; }
+
     public string Message { get; init; } = "";
 
     public double ElapsedMs { get; init; }

@@ -9,6 +9,7 @@ internal static class RecipeTestTriggerMessages
     {
         if (result.Ok)
             return $"测试通过：{result.RecipeName} · {result.Poses.Count} 个目标 · {result.ElapsedMs:0}ms"
+                   + (result.Uncalibrated ? " · 未标定（像素坐标，仅调试）" : "")
                    + (hasUnsavedChanges ? "（编辑器，未保存不上产线）" : "");
         if (result.ErrorCode == VisionErrorCode.RefineFailed)
             return $"测试失败：ERR 1019 精修未过门 · {result.Message}";

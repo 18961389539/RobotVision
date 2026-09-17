@@ -338,6 +338,7 @@ public static partial class ServiceCollectionExtensions
 
     private static void RegisterVisionService(IServiceCollection services, AppConfig cfg)
     {
+        services.AddSingleton(sp => new RetryPolicy(cfg.Retry));
         services.AddSingleton(sp => new VisionService(
             sp.GetRequiredService<RecipeLoader>(),
             sp.GetRequiredService<CameraManager>(),
@@ -350,7 +351,8 @@ public static partial class ServiceCollectionExtensions
             sp.GetRequiredService<ProcessHealthStore>(),
             sp.GetRequiredService<ResultLogStore>(),
             sp.GetRequiredService<SuccessCaptureStore>(),
-            sp.GetService<ICaptureOverlayPainter>())
+            sp.GetService<ICaptureOverlayPainter>(),
+            sp.GetRequiredService<RetryPolicy>())
         {
             MaxQueueDepth = Math.Max(1, cfg.MaxQueueDepth),
             MaxConcurrent = Math.Clamp(cfg.MaxConcurrent, 1, Math.Max(1, cfg.MaxQueueDepth)),

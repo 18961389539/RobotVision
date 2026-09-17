@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using RobotVision.Core;
+using RobotVision.Core.Abstractions;
 using RobotVision.Core.Models;
 using RobotVision.Core.Recipe;
 using RobotVision.Infrastructure.Calibration;
@@ -52,7 +53,8 @@ public sealed class VisionService(
     ProcessHealthStore? health = null,
     ResultLogStore? resultLog = null,
     SuccessCaptureStore? captures = null,
-    ICaptureOverlayPainter? overlayPainter = null)
+    ICaptureOverlayPainter? overlayPainter = null,
+    RetryPolicy? retry = null)
 {
     private PipelineScheduler? _scheduler;
 
@@ -166,7 +168,7 @@ public sealed class VisionService(
                 "PROCESS_UNHEALTHY", 0));
 
         return Scheduler.RunAsync(recipeName,
-            async (name, token) => (await ProcessCoreInnerAsync(name, pose, token)).Result,
+            async (name, token) => (await ProcessCoreWithRetryAsync(name, pose, token)).Result,
             result =>
             {
                 // 结果日志：每次触发的原始留档（含联锁拒绝，分析时按 Code 过滤）。
@@ -221,6 +223,40 @@ public sealed class VisionService(
         }
     }
 
+    /// <summary>
+    /// 带失败重拍的管线执行（仅 TRIGGER）：抖动型失败（默认 1019/1007）按 Retry 配置重拍，
+    /// 固定间隔，最多 MaxAttempts 次。中间尝试不写失败留存，只在最终尝试落盘；
+    /// 试触发（preview）不走本方法。确定性失败码（标定/配置/联锁等）不重试。
+    /// 中间重试结果不经过 Scheduler 回调，不记结果日志/指标/联锁——一次 TRIGGER 只算一次结果。
+    /// </summary>
+    private async Task<ProcessCoreOutcome> ProcessCoreWithRetryAsync(
+        string recipeName, TcpClientPose? pose, CancellationToken ct)
+    {
+        var max = retry?.MaxAttempts ?? 1;
+        for (var attempt = 1; ; attempt++)
+        {
+            var outcome = await ProcessCoreInnerAsync(recipeName, pose, ct, retainFailureCapture: attempt >= max);
+            if (retry is null || outcome.Result.Ok || !retry.IsRetryable(outcome.Result.ErrorCode) || attempt >= max)
+                return outcome;
+
+            VisionServiceLog.RetryAttempt(
+                log, recipeName, attempt, max, (int)outcome.Result.ErrorCode, retry.DelayMs);
+            if (retry.DelayMs > 0)
+            {
+                try
+                {
+                    await Task.Delay(retry.DelayMs, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // 重拍间隔期间超时取消：按处理超时返回（与管线内取消口径一致），不再重试
+                    return new ProcessCoreOutcome(
+                        VisionResult.Fail(recipeName, VisionErrorCode.Timeout, "处理超时", 0), null);
+                }
+            }
+        }
+    }
+
     private sealed record ProcessCoreOutcome(VisionResult Result, PreviewRunOutcome? PreviewFrame);
 
     private static ProcessCoreOutcome Core(VisionResult result, PreviewRunOutcome? preview = null) =>
@@ -242,7 +278,8 @@ public sealed class VisionService(
         Justification = "PreviewRunOutcome in ProcessCoreOutcome is disposed by caller.")]
     private async Task<ProcessCoreOutcome> ProcessCoreInnerAsync(
         string recipeName, TcpClientPose? pose, CancellationToken ct,
-        RecipeConfig? overlay = null, bool preview = false)
+        RecipeConfig? overlay = null, bool preview = false,
+        bool retainFailureCapture = true)
     {
         var stopwatch = Stopwatch.StartNew();
         using var processing = Scheduler.BeginExecution();
@@ -389,7 +426,7 @@ public sealed class VisionService(
                     ? "分割已检出但精修未通过（头尾不可判或匹配失败）"
                     : "未检出目标";
                 var miss = VisionResult.Fail(recipeName, missCode, missMessage, missElapsed);
-                if (!preview)
+                if (!preview && retainFailureCapture)
                     SaveFailureCapture(recipe, undistorted, pixelPoses, miss, failureCtx);
                 VisionServiceLog.ProcessMessage(log, recipeName, missMessage, missElapsed, Stages(missElapsed));
                 return Core(miss, TryHandoffPreview(preview, recipe, ref undistorted, pixelPoses));
@@ -397,17 +434,25 @@ public sealed class VisionService(
 
             var usablePoses = PixelPoseOutput.UsableOnly(pixelPoses);
 
+            // 文件夹/虚拟相机（回放、调试模拟）且工位无任何标定档案时：跳过像素→机器人映射，
+            // 直接输出像素位姿并标记 Uncalibrated（UI 明示「未标定」，禁止当机器人坐标用）。
+            // 仅试触发（preview）生效；TRIGGER 无论相机类型都保持 1004 严格，杜绝像素坐标上产线。
+            var debugCamera = cameras.Get(recipe.CameraId).Kind is CameraKind.File or CameraKind.Virtual;
+            var uncalibrated = debugCamera && preview && mappingMode == StationMappingMode.None;
+
             var robotPoses = usablePoses
-                .Select(p => mappingMode switch
-                {
-                    StationMappingMode.Polynomial =>
-                        calibration.PixelToRobotPolynomial(recipe.StationId!, p, recipe.CameraId, pose),
-                    StationMappingMode.Scale =>
-                        calibration.PixelToRobotScale(recipe.StationId!, p, recipe.CameraId),
-                    _ => calibration.PixelToRobot(recipe.StationId, p, recipe.CameraId, pose),
-                })
-                .Select(r => calibration.CompensateRotation(recipe.StationId, recipe.RotationCompensation, r))
-                .Select(r => recipe.OutputOffset.Apply(r))
+                .Select(p => uncalibrated
+                    ? new RobotPose(p.Cx, p.Cy, p.AngleDeg)
+                    : mappingMode switch
+                    {
+                        StationMappingMode.Polynomial =>
+                            calibration.PixelToRobotPolynomial(recipe.StationId!, p, recipe.CameraId, pose),
+                        StationMappingMode.Scale =>
+                            calibration.PixelToRobotScale(recipe.StationId!, p, recipe.CameraId),
+                        _ => calibration.PixelToRobot(recipe.StationId, p, recipe.CameraId, pose),
+                    })
+                .Select(r => uncalibrated ? r : calibration.CompensateRotation(recipe.StationId, recipe.RotationCompensation, r))
+                .Select(r => uncalibrated ? r : recipe.OutputOffset.Apply(r))
                 .ToList();
 
             // 与 Poses 一一对应的置信度透传（UI/留存可用，TCP 应答格式不含）
@@ -418,6 +463,8 @@ public sealed class VisionService(
 
             var success = VisionResult.Success(recipeName, robotPoses,
                 stopwatch.Elapsed.TotalMilliseconds, confidences);
+            if (uncalibrated)
+                success = success with { Uncalibrated = true };
 
             // 成功产品现场图留存（开关 CaptureSuccess.Enabled，默认关）：
             // 克隆在调用线程完成，PNG 编码/写盘在后台线程池，不阻塞管线
@@ -446,7 +493,7 @@ public sealed class VisionService(
         {
             var fail = VisionResult.Fail(recipeName, vex.ErrorCode, vex.Message,
                 stopwatch.Elapsed.TotalMilliseconds);
-            if (undistorted is not null && !preview && captureRecipe is not null)
+            if (undistorted is not null && !preview && retainFailureCapture && captureRecipe is not null)
                 SaveFailureCapture(captureRecipe, undistorted, pixelPoses, fail, failureCtx);
             return Core(fail);
         }
@@ -455,7 +502,7 @@ public sealed class VisionService(
             VisionServiceLog.ProcessFailed(log, ex, recipeName);
             var fail = VisionResult.Fail(recipeName, VisionErrorCode.InternalError, ex.Message,
                 stopwatch.Elapsed.TotalMilliseconds);
-            if (undistorted is not null && !preview && captureRecipe is not null)
+            if (undistorted is not null && !preview && retainFailureCapture && captureRecipe is not null)
                 SaveFailureCapture(captureRecipe, undistorted, pixelPoses, fail, failureCtx);
             return Core(fail);
         }
@@ -541,7 +588,12 @@ public sealed class VisionService(
             ? CaptureOverlayPaint.TryClone(
                 overlayPainter, undistorted, poses, RecipeDisplayHints.ForRecipeTest(recipe), log)
             : null;
-        failureImages.Save(recipe.Name, undistorted, failure, context, overlay);
+        // 精修质量摘要（如 "JLVision ncc 0.12 < 门 0.40"）：1019 定位的关键，
+        // PixelPose 才有 Overlay；RobotPose（VisionResult.Poses）不承载，故在管线内提取。
+        var refineNote = poses
+            .Select(p => p.Overlay?.RefineQualityNote)
+            .FirstOrDefault(n => !string.IsNullOrEmpty(n));
+        failureImages.Save(recipe.Name, undistorted, failure, context, overlay, refineNote, poses.Count);
     }
 
     private void SaveSuccessCapture(

@@ -48,6 +48,14 @@ public class VisionServiceQueueTests : IDisposable
               "keypointIndexB": 1
             }
             """);
+        WriteRecipe("HIT", """
+            {
+              "cameraId": "cam1",
+              "angleMode": "MaskMinAreaRect",
+              "models": [ "hit_seg.onnx" ],
+              "confidence": 0.25
+            }
+            """);
     }
 
     public void Dispose()
@@ -59,7 +67,8 @@ public class VisionServiceQueueTests : IDisposable
     private void WriteRecipe(string name, string json) =>
         File.WriteAllText(Path.Combine(_recipeFolder, name + ".json"), json);
 
-    private VisionService CreateService(int maxDepth, int maxConcurrent = 1, string? failureFolder = null)
+    private VisionService CreateService(int maxDepth, int maxConcurrent = 1, string? failureFolder = null,
+        Action<FakeInferenceEngine>? configureEngine = null)
     {
         var recipes = new RecipeLoader(_recipeFolder);
         var cameras = new CameraManager();
@@ -85,11 +94,17 @@ public class VisionServiceQueueTests : IDisposable
         var modelFolder = Path.Combine(Path.GetTempPath(), "rv_vsq_models_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(modelFolder);
         File.WriteAllBytes(Path.Combine(modelFolder, "fake_pose.onnx"), [1, 2, 3, 4]);
-        var engineFactory = new FakeInferenceEngineFactory(() => new FakeInferenceEngine
+        File.WriteAllBytes(Path.Combine(modelFolder, "hit_seg.onnx"), [1, 2, 3, 4]);
+        var engineFactory = new FakeInferenceEngineFactory(() =>
         {
-            OnPose = _ => { Thread.Sleep(400); return []; },
-            OnObjectDetection = _ => { Thread.Sleep(400); return []; },
-            OnSegmentation = _ => { Thread.Sleep(400); return []; },
+            var engine = new FakeInferenceEngine
+            {
+                OnPose = _ => { Thread.Sleep(400); return []; },
+                OnObjectDetection = _ => { Thread.Sleep(400); return []; },
+                OnSegmentation = _ => { Thread.Sleep(400); return []; },
+            };
+            configureEngine?.Invoke(engine);
+            return engine;
         });
         var models = new RobotVision.Infrastructure.Inference.ModelManager(modelFolder, engineFactory);
 
@@ -282,6 +297,60 @@ public class VisionServiceQueueTests : IDisposable
         Assert.Equal(5, total);
         Assert.Equal(5, failed);
         Assert.Equal(0, timedOut);
+    }
+
+    private static RecipeConfig HitRecipe() => new()
+    {
+        Name = "HIT",
+        CameraId = "cam1",
+        Models = ["hit_seg.onnx"],
+        Confidence = 0.25,
+        Iou = 0.45,
+        AngleMode = AngleMode.MaskMinAreaRect,
+        Segmentation = new SegmentationOptions { PixelConfidence = 0.5 },
+    };
+
+    [Fact]
+    public async Task FileCamera_NoCalibration_Preview_ReturnsOkUncalibrated()
+    {
+        // 文件夹相机（回放/调试）且工位无标定档案时，试触发应宽容：跳过像素→机器人映射，
+        // 输出像素位姿并标记 Uncalibrated（UI 显示「未标定」，不判 1004）。
+        var service = CreateService(maxDepth: 4, configureEngine: e =>
+            e.OnSegmentation = _ =>
+            [
+                new InstanceSegmentation(new PixelBox(0, 0, 40, 10), 0.9, "part",
+                    [new ImagePoint(0, 0), new ImagePoint(40, 0), new ImagePoint(40, 10), new ImagePoint(0, 10)],
+                    []),
+            ]);
+
+        var result = await service.RunPreviewAsync(HitRecipe(), null, CancellationToken.None).ConfigureAwait(false);
+
+        Assert.True(result.Result.Ok);
+        Assert.True(result.Result.Uncalibrated);
+        var p = Assert.Single(result.Result.Poses);
+        Assert.Equal(20, p.X, 1);
+        Assert.Equal(5, p.Y, 1);
+        Assert.Equal(0, p.AngleDeg, 1);
+    }
+
+    [Fact]
+    public async Task FileCamera_NoCalibration_Trigger_StillReturns1004()
+    {
+        // 同样的场景走 TRIGGER（非 preview）必须保持严格 1004：
+        // 像素坐标绝不能作为机器人坐标上产线（TCP 应答口径不变）。
+        var service = CreateService(maxDepth: 4, configureEngine: e =>
+            e.OnSegmentation = _ =>
+            [
+                new InstanceSegmentation(new PixelBox(0, 0, 40, 10), 0.9, "part",
+                    [new ImagePoint(0, 0), new ImagePoint(40, 0), new ImagePoint(40, 10), new ImagePoint(0, 10)],
+                    []),
+            ]);
+
+        var result = await service.RunAsync("HIT", CancellationToken.None).ConfigureAwait(false);
+
+        Assert.False(result.Ok);
+        Assert.Equal(VisionErrorCode.NotCalibrated, result.ErrorCode);
+        Assert.False(result.Uncalibrated);
     }
 }
 

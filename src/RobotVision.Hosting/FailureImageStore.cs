@@ -35,6 +35,8 @@ public sealed class FailureImageStore
         DateTime SavedAt, int Width, int Height,
         string? CameraId, string? StationId, string? Models, string? AngleMode,
         double? Confidence, double? Iou, string? Source,
+        string? RefineQualityNote = null,
+        int PixelPoseCount = 0,
         bool Overlay = false);
 
     private static readonly JsonSerializerOptions MetaJsonOptions = new()
@@ -102,13 +104,15 @@ public sealed class FailureImageStore
         VisionImage image,
         VisionResult failure,
         FailureContext? context = null,
-        VisionImage? overlay = null)
+        VisionImage? overlay = null,
+        string? refineQualityNote = null,
+        int pixelPoseCount = 0)
     {
         if (image.IsEmpty)
             return;
         using var mat = VisionImageCv.AsMat(image);
         using var overlayMat = OverlayMatOrNull(overlay);
-        Save(recipeName, mat, failure, context, overlayMat);
+        Save(recipeName, mat, failure, context, overlayMat, refineQualityNote, pixelPoseCount);
     }
 
     /// <summary>
@@ -120,7 +124,9 @@ public sealed class FailureImageStore
         Mat image,
         VisionResult failure,
         FailureContext? context = null,
-        Mat? overlay = null)
+        Mat? overlay = null,
+        string? refineQualityNote = null,
+        int pixelPoseCount = 0)
     {
         if (failure.Ok || image.Empty())
             return;
@@ -159,7 +165,8 @@ public sealed class FailureImageStore
                 recipeName, (int)failure.ErrorCode, failure.Message, failure.ElapsedMs,
                 _now(), sample.Width, sample.Height,
                 context?.CameraId, context?.StationId, context?.Models, context?.AngleMode,
-                context?.Confidence, context?.Iou, context?.Source);
+                context?.Confidence, context?.Iou, context?.Source, refineQualityNote,
+                pixelPoseCount);
 
             _ = Task.Run(() => WriteCore(originalClone, overlayClone, meta));
         }

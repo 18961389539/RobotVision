@@ -13,6 +13,9 @@ internal static partial class VisionServiceLog
     [LoggerMessage(Level = LogLevel.Information, Message = "配方 {Recipe}: 检出 {Count} 个目标，总耗时 {Elapsed:0}ms（{Stages}）")]
     public static partial void ProcessDetections(ILogger logger, string recipe, int count, double elapsed, string stages);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "配方 {Recipe}: 第 {Attempt}/{MaxAttempts} 次触发失败（错误码 {ErrorCode}），{Delay}ms 后自动重拍")]
+    public static partial void RetryAttempt(ILogger logger, string recipe, int attempt, int maxAttempts, int errorCode, int delay);
+
     [LoggerMessage(Level = LogLevel.Error, Message = "配方 {Recipe} 处理异常")]
     public static partial void ProcessFailed(ILogger logger, Exception ex, string recipe);
 

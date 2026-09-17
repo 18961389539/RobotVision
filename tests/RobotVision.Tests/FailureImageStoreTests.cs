@@ -71,6 +71,44 @@ public class FailureImageStoreTests : IDisposable
     }
 
     [Fact]
+    public void Save_RefineQualityNote_WrittenToJsonSidecar()
+    {
+        // 1019 精修失败的关键定位信息：QualityNote 必须随失败留存写进 JSON，
+        // 现场只翻留存的 JSON 就能确认精修失败分支（如分数不过门/无匹配）。
+        var store = CreateStore(clock: () => _base);
+        using var image = MakeImage();
+        var failure = VisionResult.Fail("A01", VisionErrorCode.RefineFailed, "分割已检出但精修未通过", 123.4);
+        store.Save("A01", image, failure, null, null, "JLVision ncc 0.12 < 门 0.40");
+        // WriteCore 先落 PNG 再写 JSON：等待 JSON 就绪（全量并行时落盘可能滞后于 PNG）
+        WaitForCondition(
+            () => Directory.Exists(_folder) &&
+                  Directory.GetFiles(_folder, "*.json") is [var json] &&
+                  File.ReadAllText(json).Contains("\"RefineQualityNote\"", StringComparison.Ordinal),
+            "JSON 应已落盘且含 RefineQualityNote");
+
+        var jsonText = File.ReadAllText(Directory.GetFiles(_folder, "*.json")[0]);
+        Assert.Contains("\"RefineQualityNote\": \"JLVision ncc 0.12 < 门 0.40\"", jsonText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Save_PixelPoseCount_WrittenToJsonSidecar()
+    {
+        // 失败前检出的像素位姿数：区分 1007（0 个）与精修失败（≥1 个但质量不过门）。
+        var store = CreateStore(clock: () => _base);
+        using var image = MakeImage();
+        var failure = VisionResult.Fail("A01", VisionErrorCode.RefineFailed, "分割已检出但精修未通过", 123.4);
+        store.Save("A01", image, failure, null, null, "ncc 0.12 < 门 0.40", 3);
+        WaitForCondition(
+            () => Directory.Exists(_folder) &&
+                  Directory.GetFiles(_folder, "*.json") is [var json] &&
+                  File.ReadAllText(json).Contains("\"PixelPoseCount\"", StringComparison.Ordinal),
+            "JSON 应已落盘且含 PixelPoseCount");
+
+        var jsonText = File.ReadAllText(Directory.GetFiles(_folder, "*.json")[0]);
+        Assert.Contains("\"PixelPoseCount\": 3", jsonText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Save_SameTimestamp_AppendsSuffixWithoutOverwrite()
     {
         using var image = MakeImage();

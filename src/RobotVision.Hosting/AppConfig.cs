@@ -1,5 +1,7 @@
 namespace RobotVision.Hosting;
 
+using RobotVision.Core.Models;
+
 public sealed class AppConfig
 {
     /// <summary>硬件相机单帧采集超时（ms）；相机管理页可编辑，须小于总超时 TimeoutMs。</summary>
@@ -60,6 +62,11 @@ public sealed class AppConfig
 
     /// <summary>拍照位姿校验（TRIGGER,配方名,X,Y,RZ 带位姿时与 OnArm 外参档案比对）。</summary>
     public PoseCheckConfig PoseCheck { get; set; } = new();
+
+    /// <summary>TRIGGER 失败自动重拍：抖动型失败（默认 1019 精修未过/1007 未检出）按固定间隔重拍，
+    /// 最多 <see cref="RetryConfig.MaxAttempts"/> 次。仅 TRIGGER 生效，试触发不重试；
+    /// 重拍成功按成功记良率，中间失败不记失败留存。标定/配置/联锁等确定性失败码不重试。</summary>
+    public RetryConfig Retry { get; set; } = new();
 
     /// <summary>模型/标定资产完整性（配方钉扎哈希 + 可选全局清单）。</summary>
     public AssetIntegrityConfig AssetIntegrity { get; set; } = new();
@@ -173,6 +180,23 @@ public sealed class PoseCheckConfig
 
     /// <summary>拍照点第 4 轴角度容差（deg，归一化差，超过返回 1012）。</summary>
     public double RzToleranceDeg { get; set; } = 0.5;
+}
+
+/// <summary>TRIGGER 失败自动重拍配置（appsettings "Retry" 段）。</summary>
+public sealed class RetryConfig
+{
+    /// <summary>总开关。默认开（产线要求）；现场调试/排查时可关闭。</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>最大尝试次数（含首次），钳制 [1,5]。</summary>
+    public int MaxAttempts { get; set; } = 3;
+
+    /// <summary>可重试错误码（默认 1019 精修未过质量门、1007 未检出）。</summary>
+    public List<int> ErrorCodes { get; set; } =
+        [(int)VisionErrorCode.RefineFailed, (int)VisionErrorCode.NoTargetFound];
+
+    /// <summary>重拍间隔（ms），给光源/来料抖动恢复时间；钳制 [0,5000]。0 = 立即重拍。</summary>
+    public int DelayMs { get; set; } = 200;
 }
 
 /// <summary>模型/标定 SHA-256 钉扎。Enabled=false 时 TRIGGER 不校验哈希（仅调试）。</summary>

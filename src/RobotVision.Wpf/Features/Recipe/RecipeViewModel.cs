@@ -770,6 +770,11 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     {
         if (Test.LastPreview is not { Ok: true, Poses.Count: > 0 } preview)
             return;
+        if (preview.Uncalibrated)
+        {
+            Message = "未标定（像素坐标）不能作为示教输出，请先完成该工位标定";
+            return;
+        }
         if (!ConfirmGrabOriginIfNeeded("记下示教输出"))
             return;
         if (!ConfirmFlatFeatureRoiIfNeeded("记下示教输出"))
@@ -783,7 +788,7 @@ public partial class RecipeViewModel : ObservableObject, ICommitPendingEdits, IR
     }
 
     private bool CanRecordTeachOutput =>
-        !IsBusy && Test.LastPreview is { Ok: true, Poses.Count: > 0 };
+        !IsBusy && Test.LastPreview is { Ok: true, Poses.Count: > 0, Uncalibrated: false };
 
     private bool CanSuggestOutputOffset =>
         !IsBusy && _sqlite is not null && Editor.OutputOffset.HasTeachOutput;

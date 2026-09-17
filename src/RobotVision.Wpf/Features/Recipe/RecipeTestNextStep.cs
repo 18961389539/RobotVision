@@ -11,7 +11,11 @@ internal static class RecipeTestNextStep
             return "";
 
         if (result.Ok)
+        {
+            if (result.Uncalibrated)
+                return "工位未标定：坐标为像素值，仅供调试，保存前请先完成标定";
             return unsaved ? "测试已用当前编辑器。保存后才上产线。" : "";
+        }
 
         var quality = string.IsNullOrWhiteSpace(qualityNote) ? "" : qualityNote.Trim();
         var action = result.ErrorCode switch
@@ -38,7 +42,7 @@ internal static class RecipeTestNextStep
             return "";
         if (result.Ok)
             return result.Poses.Count > 0
-                ? $"OK · {result.Poses.Count} 件"
+                ? $"OK · {result.Poses.Count} 件{(result.Uncalibrated ? " · 未标定" : "")}"
                 : "OK";
         var code = (int)result.ErrorCode;
         return code > 0 ? $"ERR {code}" : "失败";
