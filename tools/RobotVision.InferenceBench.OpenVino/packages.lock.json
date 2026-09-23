@@ -4,15 +4,15 @@
     "net10.0": {
       "OpenCvSharp4": {
         "type": "Direct",
-        "requested": "[4.10.0.20240615, )",
-        "resolved": "4.10.0.20240615",
-        "contentHash": "cX3cwyKaDFknbreKInp2nB91AqEci9OwippbXOKehrUoETTeiIYY3j1EwVwshb5k+o/EkJyoYUvq9vh3nbZupw=="
+        "requested": "[4.13.0.20260627, )",
+        "resolved": "4.13.0.20260627",
+        "contentHash": "nYk95jkyYY9f0sF5KqZ3OB1SWkmqsfV7eN0ROiQds/rxpSn0v1G0QIedMbwuqbdPhvQnOIG2DDmpkLnHEJMh8Q=="
       },
       "OpenCvSharp4.runtime.win": {
         "type": "Direct",
-        "requested": "[4.10.0.20240615, )",
-        "resolved": "4.10.0.20240615",
-        "contentHash": "+BmRAXnKdwJxJ8qzjrXXK/bbQ/KpEwe9RM+X+/wf9hQ+ULPY1BP7k31LQTQRiEpPLGZGWfJUF2bchkW9cqT8cw=="
+        "requested": "[4.13.0.20260627, )",
+        "resolved": "4.13.0.20260627",
+        "contentHash": "POIxR+CTpwHJIdam6wd8U2fprWv5QnIUw50jw79WEGb37He3T1h11SdtwSj9p2PLSfrzonMjO2t71wqi5uFsoQ=="
       },
       "YoloDotNet": {
         "type": "Direct",
@@ -71,8 +71,8 @@
       "robotvision.inferencebench.shared": {
         "type": "Project",
         "dependencies": {
-          "OpenCvSharp4": "[4.10.0.20240615, )",
-          "OpenCvSharp4.runtime.win": "[4.10.0.20240615, )",
+          "OpenCvSharp4": "[4.13.0.20260627, )",
+          "OpenCvSharp4.runtime.win": "[4.13.0.20260627, )",
           "RobotVision.Core": "[1.0.0, )"
         }
       },
