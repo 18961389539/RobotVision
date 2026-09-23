@@ -54,13 +54,13 @@
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.11" />
 
     <!-- 测试 -->
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <PackageVersion Include="xunit" Version="2.9.2" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
-    <PackageVersion Include="FluentAssertions" Version="6.12.2" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <PackageVersion Include="FluentAssertions" Version="8.11.0" />
     <PackageVersion Include="NSubstitute" Version="5.1.0" />
-    <PackageVersion Include="FsCheck" Version="3.0.0" />
-    <PackageVersion Include="FsCheck.Xunit" Version="3.0.0" />
+    <PackageVersion Include="FsCheck" Version="3.4.0" />
+    <PackageVersion Include="FsCheck.Xunit" Version="3.4.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.2" />
 
     <!-- 基准测试 -->
@@ -69,7 +69,7 @@
     <!-- UI 自动化 -->
     <PackageVersion Include="FlaUI.Core" Version="4.0.0" />
     <PackageVersion Include="FlaUI.UIA3" Version="4.0.0" />
-    <PackageVersion Include="Xunit.SkippableFact" Version="1.4.13" />
+    <PackageVersion Include="Xunit.SkippableFact" Version="1.5.85" />
 
     <!-- JLVisionLib 发布混淆（仅 Release 目标使用） -->
     <PackageVersion Include="Obfuscar" Version="2.2.49" />
